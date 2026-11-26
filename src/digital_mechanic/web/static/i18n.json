@@ -328,7 +328,8 @@
   "responsible": "Ответственный",
   "ins_repeat": "Повтор: узел ремонтировали",
   "ins_similar": "Похожий случай на",
-  "recheck_ok": "после ремонта норма"
+  "recheck_ok": "после ремонта норма",
+  "need_pin": "Введите логин и PIN"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -659,7 +660,8 @@
   "responsible": "Mas'ul",
   "ins_repeat": "Takror: uzil remont qilingan",
   "ins_similar": "O'xshash holat",
-  "recheck_ok": "remontdan keyin normal"
+  "recheck_ok": "remontdan keyin normal",
+  "need_pin": "Login va PIN kiriting"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -990,7 +992,8 @@
   "responsible": "Масъул",
   "ins_repeat": "Такрор: гиреҳ таъмир шуда буд",
   "ins_similar": "Ҳолати монанд дар",
-  "recheck_ok": "пас аз таъмир хуб аст"
+  "recheck_ok": "пас аз таъмир хуб аст",
+  "need_pin": "Логин ва PIN-ро ворид кунед"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -1321,7 +1324,8 @@
   "responsible": "Жауапты",
   "ins_repeat": "Қайталау: торап жөнделген",
   "ins_similar": "Ұқсас жағдай",
-  "recheck_ok": "жөндеуден кейін қалыпты"
+  "recheck_ok": "жөндеуден кейін қалыпты",
+  "need_pin": "Логин мен PIN енгізіңіз"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -1652,7 +1656,8 @@
   "responsible": "जिम्मेदार",
   "ins_repeat": "दोहराव: यूनिट की मरम्मत हो चुकी है",
   "ins_similar": "समान मामला",
-  "recheck_ok": "मरम्मत के बाद सामान्य"
+  "recheck_ok": "मरम्मत के बाद सामान्य",
+  "need_pin": "लॉगिन और PIN दर्ज करें"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -1983,7 +1988,8 @@
   "responsible": "Người phụ trách",
   "ins_repeat": "Lặp lại: cụm đã được sửa",
   "ins_similar": "Trường hợp tương tự tại",
-  "recheck_ok": "bình thường sau sửa chữa"
+  "recheck_ok": "bình thường sau sửa chữa",
+  "need_pin": "Nhập tên đăng nhập và mã PIN"
  },
  "bn": {
   "app_title": "ডিজিটাল মেকানিক",
@@ -2314,7 +2320,8 @@
   "responsible": "দায়িত্বপ্রাপ্ত",
   "ins_repeat": "পুনরাবৃত্তি: ইউনিট মেরামত করা হয়েছে",
   "ins_similar": "অনুরূপ ঘটনা",
-  "recheck_ok": "মেরামতের পরে স্বাভাবিক"
+  "recheck_ok": "মেরামতের পরে স্বাভাবিক",
+  "need_pin": "লগইন ও PIN দিন"
  },
  "ky": {
   "app_title": "Санарип механик",
@@ -2645,7 +2652,8 @@
   "responsible": "Жооптуу",
   "ins_repeat": "Кайталоо: түйүндү оңдогон",
   "ins_similar": "Окшош учур",
-  "recheck_ok": "оңдогондон кийин жакшы"
+  "recheck_ok": "оңдогондон кийин жакшы",
+  "need_pin": "Логин жана PIN киргизиңиз"
  },
  "be": {
   "app_title": "Лічбавы механік",
@@ -2976,6 +2984,7 @@
   "responsible": "Адказны",
   "ins_repeat": "Паўтор: вузел рамантавалі",
   "ins_similar": "Падобны выпадак на",
-  "recheck_ok": "пасля рамонту норма"
+  "recheck_ok": "пасля рамонту норма",
+  "need_pin": "Увядзіце лагін і PIN"
  }
 }

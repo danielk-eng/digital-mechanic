@@ -16,13 +16,12 @@ def client(tmp_path_factory):
 
 
 def test_consent_required(client):
-    assert client.post("/api/login", json={"name": "A", "consent": False}).status_code == 400
+    assert client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": False}).status_code == 400
 
 
 def test_mechanic_cannot_read_audit(client):
-    assert client.post("/api/login", json={"name": "Петров П.П.", "role": "mechanic", "consent": True}).status_code == 200
-    me = client.get("/api/me").json()["user"]
-    assert "Петров" not in me["name"]  # PII masked
+    assert client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True}).status_code == 200
+    assert client.get("/api/me").json()["user"]["role"] == "mechanic"
     assert client.get("/api/audit").status_code == 403
     vs = client.get("/api/vehicles").json()["vehicles"]
     assert len(vs) == 50
@@ -36,7 +35,7 @@ def test_ml_down_is_reported_not_crash(client):
 
 
 def test_manager_sees_fleet_and_audit(client):
-    client.post("/api/login", json={"name": "Главный", "role": "manager", "consent": True})
+    client.post("/api/login/demo", json={"account": "chief", "pin": "1001", "consent": True})
     f = client.get("/api/fleet").json()
     assert f["counts"]["total"] == 50
     assert client.get("/api/audit").status_code == 200
@@ -44,7 +43,7 @@ def test_manager_sees_fleet_and_audit(client):
 
 
 def test_delete_my_data(client):
-    client.post("/api/login", json={"name": "X", "consent": True})
+    client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True})
     assert client.delete("/api/me").json()["deleted"]
     assert client.get("/api/me").status_code == 401
 
@@ -52,7 +51,7 @@ def test_delete_my_data(client):
 def test_answer_language_separate_from_ui(client):
     import digital_mechanic.web.app as m
     from digital_mechanic.i18n import answer_lang
-    client.post("/api/login", json={"name": "L", "consent": True, "lang": "ru"})
+    client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True, "lang": "ru"})
     u = client.post("/api/me", json={"answer_lang": "uz"}).json()["user"]
     assert u["lang"] == "ru" and answer_lang(u) == "uz"
     assert "узбекском" in m.AGENT._system(None, u, manager=True)
@@ -61,7 +60,7 @@ def test_answer_language_separate_from_ui(client):
 
 
 def test_fleet_ops_tiles(client):
-    client.post("/api/login", json={"name": "Главный", "role": "manager", "consent": True})
+    client.post("/api/login/demo", json={"account": "chief", "pin": "1001", "consent": True})
     f = client.get("/api/fleet").json()
     o = f["ops"]
     assert o["in_repair"] + o["on_line"] + o["idle"] == f["counts"]["total"]
@@ -109,7 +108,7 @@ def test_text_gzip_but_not_pdf(client):
 
 
 def test_progress_has_live_draft(client):
-    client.post("/api/login", json={"name": "T", "role": "mechanic", "lang": "ru", "consent": True})
+    client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True, "lang": "ru"})
     r = client.get("/api/progress?vehicle_id=M333YK47")
     assert r.status_code == 200 and "draft" in r.json() and "steps" in r.json()
 
@@ -142,9 +141,9 @@ def test_country_consent_and_privacy_page(client):
     cs = client.get("/api/countries?lang=uz").json()
     assert cs["default"] == "RU" and {c["code"] for c in cs["countries"]} == {"RU", "UZ", "KZ", "KG", "BY", "TJ", "IN", "VN"}
     assert next(c for c in cs["countries"] if c["code"] == "UZ")["name"] == "Oʻzbekiston"
-    r = client.post("/api/login", json={"name": "A", "consent": False, "country": "KZ"})
+    r = client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": False, "country": "KZ"})
     assert r.status_code == 400 and "94-V" in r.json()["detail"]
-    u = client.post("/api/login", json={"name": "Алишер", "consent": True, "country": "UZ", "lang": "uz"}).json()["user"]
+    u = client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True, "country": "UZ", "lang": "uz"}).json()["user"]
     assert u["country"] == "UZ"
     page = client.get("/privacy").text
     assert "ЗРУ-547" in page and "{{" not in page and "локально" in page

@@ -50,7 +50,7 @@ def client(tmp_path):
     importlib.reload(m)
     m.AGENT.llm.vision = lambda name, prompt, b64, mime: "Подтёк масла под крышкой головки цилиндров, следы на блоке."
     c = TestClient(m.app)
-    assert c.post("/api/login", json={"name": "Иванов", "role": "mechanic", "consent": True}).status_code == 200
+    assert c.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True}).status_code == 200
     return c, m
 
 

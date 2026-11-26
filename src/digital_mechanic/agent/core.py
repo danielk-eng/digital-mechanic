@@ -151,6 +151,11 @@ class Agent:
 
         self.expand_prefetch = os.getenv("EXPAND_PREFETCH", "0" if os.getenv("VERCEL") else "1") == "1"
         self._prefetch: dict[str, dict] = {}
+        # manual questions: facts once (persona-independent, cached), then a style-only pass (agent/grounded.py)
+        from .grounded import FactPipeline
+
+        self.facts_pass = os.getenv("FACTS_PASS", "1") == "1"
+        self.fp = FactPipeline(self)
 
     @property
     def normalizer(self):
@@ -662,6 +667,7 @@ class Agent:
         turn = Turn()
         self.progress[c.cid] = []
         self.drafts[c.cid] = ""
+        orig_event = event
         manager = user.get("role") in ("manager", "engineer") and c.vehicle is None
         raw = (text or "").strip()
         if manager and getattr(self, "briefing", None) and not event:
@@ -740,6 +746,11 @@ class Agent:
         if not self.llm.available:
             return self._fallback(c, masked, turn)
         ticket_ask = bool(c.vehicle and c.check and c.check.status == CheckStatus.anomaly and TICKET_RE.search(raw or "") and not c.draft)
+        if (self.facts_pass and c.vehicle and not manager and not orig_event and raw and not ticket_ask and not image_note
+                and not c.draft and not PREFETCH_SKIP.search(raw)):
+            t = self._two_pass(c, user, raw, turn)
+            if t is not None:
+                return t
         if c.vehicle and not event and raw and (ticket_ask or not PREFETCH_SKIP.search(raw)):
             # Retrieval before the first LLM call: the model usually answers in ONE round instead of
             # "decide to search" + "answer" (≈ half the latency). It may still search again if fragments do not fit.
@@ -809,6 +820,31 @@ class Agent:
             card = self.repair_card(c.vehicle.vehicle_id)
             if card:
                 turn.cards.append(card)
+        return turn
+
+    def _two_pass(self, c: Conv, user: dict, raw: str, turn: Turn) -> Turn | None:
+        """Facts once, style per person (agent/grounded.py). None -> the usual agent loop (no answer in the manual, small talk)."""
+        from . import style as ustyle
+
+        q = self.normalizer.normalize(pii.mask(raw) if self.pii_masking else raw)[0]
+        codes = [(m.upper(), self.fleet.fault_types.get(m.upper())) for m in re.findall(r"(?i)\b(f\d{2})\b", raw)]
+        codes = [(k, t) for k, t in codes if t]
+        if codes:  # "что значит F08?": search by the fault group name, not by the code
+            q = " ".join(t for _, t in codes) + " неисправности причины проверка " + re.sub(r"(?i)\bf\d{2}\b", "", q)
+        detail = user.get("detail") or "brief"
+        self.progress.setdefault(c.cid, []).append(PROGRESS["search_manual"] + f": {q[:80]}")
+        facts = self.fp.facts(c, q, detail, turn)
+        if not facts:
+            return None
+        facts = self.fp.labelled(c, facts)
+        persona = ustyle.persona_of(user)
+        try:
+            ans = self.fp.render(c, user, raw, facts, persona, detail, LANGS[answer_lang(user)]["llm"], turn)
+        except LlmUnavailable as e:
+            turn.tools.append({"tool": "llm", "error": str(e)})
+            ans = self.fp.plain(facts, persona)
+        turn.text = ans
+        turn.sources = [self._source_view(l, c) for l in cited_labels(ans) if l in c.frags]
         return turn
 
     def _run_tool(self, c: Conv, user: dict, name: str, arguments: str, turn: Turn) -> dict:

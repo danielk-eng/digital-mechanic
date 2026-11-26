@@ -1025,16 +1025,14 @@ $("#mic").onclick = voiceOpen;
 $("#vClose").onclick = voiceClose; $("#vExit").onclick = voiceClose; $("#vOrb").onclick = orbTap;
 window.addEventListener("resize", layout);
 
-let ROLE = "mechanic";
-$$("#l_role button").forEach(b => b.onclick = () => { ROLE = b.dataset.v; $$("#l_role button").forEach(x => x.classList.toggle("on", x === b)); });
 const ROLE_HOME = {manager: "/manager", engineer: "/engineer"};
 $("#l_go").onclick = async () => {
   const consent = $("#l_consent").checked, lang = $("#l_lang").value, country = $("#l_country").value || "RU";
   if (!consent) return toast(t("consent_needed"));
   const code = $("#l_code").value.trim(), pin = $("#l_pin").value.trim();
   try {
-    if (code && pin) ME = (await api("/api/login/demo", {json: {account: code, pin, lang, consent, country}})).user;
-    else ME = (await api("/api/login", {json: {name: $("#l_name").value.trim() || "—", role: ROLE, lang, experience: "experienced", consent, country}})).user;
+    if (!code || !pin) return toast(t("need_pin"));
+    ME = (await api("/api/login/demo", {json: {account: code, pin, lang, consent, country}})).user;
   } catch (e) { return toast(String(e.message || e).includes("PIN") ? t("wrong_pin") : String(e.message || e).includes("deactivated") ? t("deactivated") : friendlyError(e)); }
   if (ROLE_HOME[ME.role]) location.href = ROLE_HOME[ME.role]; else start();
 };

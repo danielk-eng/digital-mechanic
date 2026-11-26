@@ -44,8 +44,10 @@ def test_rbac_matrix(app_mod):
     assert mech.post("/api/admin/users", json={"name": "X"}).status_code == 403
     # free login cannot become an engineer
     free = TestClient(app_mod.app)
-    free.post("/api/login", json={"name": "Хакер", "role": "engineer", "consent": True})
-    assert free.get("/api/eng/logs").status_code == 403
+    for role in ("engineer", "manager", "mechanic"):  # name-only login is gone for every role
+        assert free.post("/api/login", json={"name": "Хакер", "role": role, "consent": True}).status_code == 410
+    assert free.get("/api/eng/logs").status_code == 401 and free.get("/api/fleet").status_code == 401
+    assert "model" not in free.get("/api/health").json()  # the model name is only in the engineer menu
 
 
 def test_engineer_knobs_and_mcp_validation(app_mod):

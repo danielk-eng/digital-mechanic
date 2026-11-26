@@ -187,19 +187,10 @@ class LoginIn(BaseModel):
 
 @app.post("/api/login")
 def login(body: LoginIn, response: Response) -> dict:
-    if S.require_consent and not body.consent:
-        raise HTTPException(400, f"consent required ({privacy_laws.COUNTRIES[privacy_laws.country(body.country)]['short']})")
-    if time.time() - _LAST_PURGE[0] > 3600:
-        _purge()
-    uid = uuid.uuid4().hex
-    role = "manager" if body.role == "manager" else "mechanic"
-    u = STORE.upsert_user(uid, name=pii.mask(body.name.strip()[:60]) or "—", role=role, lang=lang_or_default(body.lang),
-                          experience=body.experience if body.experience in EXPERIENCE_LEVELS else "experienced", consent_at=time.time(),
-                          country=privacy_laws.country(body.country))
-    response.set_cookie("uid", uid, httponly=True, samesite="lax", max_age=30 * 86400)
-    set_profile_cookie(response, u)
-    STORE.audit(user_id=uid, role=role, action="login", ok=1)
-    return {"user": u}
+    """Name-only login is removed: every role signs in with a login code and a PIN (/api/login/demo).
+    Accounts are the demo ones (PIN on the login screen) or employees the chief created."""
+    STORE.audit(user_id=None, role=None, action="login_name_refused", ok=0)
+    raise HTTPException(410, "login by name is disabled: use login code + PIN (/api/login/demo)")
 
 
 class DemoLoginIn(BaseModel):
@@ -981,7 +972,8 @@ def audit_csv(uid: str | None = Cookie(None)):
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"ml": AGENT.ml.health(), "toir": AGENT.toir.health(), "llm_configured": AGENT.llm.available, "model": S.llm_model,
+    # public: no model name or other configuration details (they are in the engineer menu, behind the engineer PIN)
+    return {"ml": AGENT.ml.health(), "toir": AGENT.toir.health(), "llm_configured": AGENT.llm.available,
             "pages": len(AGENT.index.pages), "extra_pages": len(AGENT.extra.pages) if AGENT.extra else 0,
             "stt": "+".join(x for x in ("whisper-local" if S.speech_url else "", "deepgram" if S.deepgram_api_key else "") if x) or "browser",
             "tts": "silero" if (S.speech_url or S.silero_enabled) else "browser", "tracing": "opik" if AGENT.llm._opik else None}
