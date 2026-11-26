@@ -110,7 +110,7 @@ def test_expertise_and_detail_change_prompt_not_grounding(make_agent):
     c = a.conv("u1", "M333YK47")
     novice = a._system(c, {"lang": "ru", "experience": "novice"})
     expert = a._system(c, {"lang": "ru", "experience": "expert", "detail": "detailed"})
-    assert "новичок" in novice and "эксперт" in expert and "до 25 строк" in expert and "3–8 строк" in novice
+    assert "новичок" in novice and "эксперт" in expert and "до 25 строк" in expert and "не больше 6 строк" in novice
     for s in (novice, expert):
         assert "ТОЛЬКО из фрагментов" in s  # same grounding rule in every variant
 
