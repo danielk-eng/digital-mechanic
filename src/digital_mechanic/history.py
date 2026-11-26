@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -108,15 +109,24 @@ def timeline(vehicle, sessions: list, store, demo: dict[str, list[dict]], today:
     last = entries[-1]["date"] if entries else None
     today = today or date.today()
     trend = [{"session_id": e["session_id"], "date": e["date"], "status": e["status"], "anomaly_score": e["anomaly_score"]} for e in entries]
-    return {"vehicle_id": vid, "engine_model": vehicle.engine_model, "entries": list(reversed(entries)), "trend": trend,
+    media = [{"id": m["id"], "date": time.strftime("%Y-%m-%d", time.localtime(m["ts"])), "ts": m["ts"], "kind": m["kind"],
+              "kind_ru": MEDIA_RU.get(m["kind"], m["kind"]), "files": m["files"], "description": (m["description"] or "")[:600],
+              "features": m["features"], "note": m["note"]}
+             for m in (store.media(vid) if hasattr(store, "media") else [])]
+    return {"vehicle_id": vid, "engine_model": vehicle.engine_model, "entries": list(reversed(entries)), "trend": trend, "media": media,
             "recurring": recurring, "last_check": last,
             "days_since_last_check": (today - date.fromisoformat(last)).days if last else None,
             "mileage_note": "пробег — демо (в заглушках его нет)"}
 
 
+MEDIA_RU = {"photo": "фото", "video": "видео", "sound": "запись звука"}
+
+
 def summary_for_agent(tl: dict, limit: int = 6) -> str:
     """Compact Russian text for the agent context (B1 memory) and chips."""
     lines = []
+    for m in tl.get("media", [])[:3]:
+        lines.append(f"МЕДИА ОТ МЕХАНИКА {m['date']} ({m['kind_ru']}): {m['description'][:300]}")
     if tl.get("recurring"):
         lines.append("ПОВТОРЯЮЩИЕСЯ ПРОБЛЕМЫ: " + "; ".join(f"{r['anomaly_type']} {r['component']} — {r['count']} раза" for r in tl["recurring"]))
     for e in tl["entries"][:limit]:

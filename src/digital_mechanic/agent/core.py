@@ -92,6 +92,12 @@ class Conv:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
+def _media_query(note: str) -> str:
+    """Search words from a photo/video/sound description: the visible signs, not the boilerplate."""
+    t = re.sub(r"(?i)ГОСНОМЕР:.*|Это не результат ML-диагностики.*|Запись приложена.*|\d+([.,]\d+)?", " ", note or "")
+    return " ".join(t.split()[:60])
+
+
 @dataclass
 class Turn:
     text: str = ""
@@ -654,16 +660,16 @@ class Agent:
                       "(допуски, порядок со страницами); в конце предложи создать заявку. Ниже — уже найденные фрагменты руководства этого двигателя; "
                       "если в них нет нужного — сделай не более одного дополнительного поиска.\n\n" + frag_txt)
         if image_note:
-            masked = (masked + "\n" if masked else "") + f"[Фото от механика, описание: {image_note}]"
+            masked = (masked + "\n" if masked else "") + ("[Материал от механика (не ML-диагноз), описание: " + image_note + "]")
         if not self.llm.available:
             return self._fallback(c, masked, turn)
         ticket_ask = bool(c.vehicle and c.check and c.check.status == CheckStatus.anomaly and TICKET_RE.search(raw or "") and not c.draft)
-        if c.vehicle and not event and raw and not image_note and (ticket_ask or not PREFETCH_SKIP.search(raw)):
+        if c.vehicle and not event and raw and (ticket_ask or not PREFETCH_SKIP.search(raw)):
             # Retrieval before the first LLM call: the model usually answers in ONE round instead of
             # "decide to search" + "answer" (≈ half the latency). It may still search again if fragments do not fit.
             # For a ticket request the procedures for the current fault are prefetched, so prepare_ticket gets quotes at once.
             q = (f"{c.check.anomaly_title} {c.check.description} проверка регулировка замена" if ticket_ask
-                 else self.normalizer.normalize(pii.mask(raw) if self.pii_masking else raw)[0])
+                 else self.normalizer.normalize((pii.mask(raw) if self.pii_masking else raw) + (" " + _media_query(image_note) if image_note else ""))[0])
             codes = [(m.upper(), self.fleet.fault_types.get(m.upper())) for m in re.findall(r"(?i)\b(f\d{2})\b", raw)]
             codes = [(k, t) for k, t in codes if t]
             if codes and not ticket_ask:  # "что значит F08?": search by the fault group name, not by the code

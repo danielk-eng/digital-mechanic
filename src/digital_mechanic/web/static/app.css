@@ -342,3 +342,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .terms{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
 .term{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:8px;background:var(--surface-2);color:var(--text);border:0;font-size:.85rem;cursor:pointer}
 .term:hover{background:var(--surface-3)}
+.thumbs{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;max-width:240px}
+.thumbs img,.msg-img{width:100%;border-radius:8px;display:block}
+.msg-img{max-width:240px;border-radius:12px}
+.rec{display:flex;align-items:center;gap:16px;margin:16px 0}
+.rec canvas{flex:1;min-width:0;height:48px;background:var(--surface-2);border-radius:8px}
+.seen summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;color:var(--text-3);font-size:.85rem}
+.seen summary::-webkit-details-marker{display:none}
+.seen[open] summary svg{transform:rotate(90deg)}
+.seen p{margin-top:8px}
+.tl-media{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--border)}
+.tl-media img{width:64px;height:48px;object-fit:cover;border-radius:6px;flex:none}

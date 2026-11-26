@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS audit(
 CREATE TABLE IF NOT EXISTS handoffs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user_id TEXT, vehicle_id TEXT, kind TEXT, note TEXT, summary TEXT,
   payload TEXT, status TEXT DEFAULT 'open', resolved_by TEXT, resolved_at REAL, comment TEXT);
+CREATE TABLE IF NOT EXISTS media(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user_id TEXT, vehicle_id TEXT, kind TEXT, files TEXT,
+  description TEXT, features TEXT, note TEXT);
+CREATE INDEX IF NOT EXISTS media_v ON media(vehicle_id, ts);
 CREATE INDEX IF NOT EXISTS diag_v ON diagnoses(vehicle_id, ts);
 CREATE INDEX IF NOT EXISTS tick_v ON tickets(vehicle_id, ts);
 CREATE INDEX IF NOT EXISTS rep_v ON repairs(vehicle_id, status);
@@ -96,7 +100,7 @@ class Store:
         return self.one("SELECT * FROM users WHERE id=?", (uid,))
 
     def delete_user_data(self, uid: str) -> None:
-        for t in ("messages", "audit", "handoffs"):
+        for t in ("messages", "audit", "handoffs", "media"):
             self.x(f"DELETE FROM {t} WHERE user_id=?", (uid,))
         for t in ("diagnoses", "tickets", "repairs"):
             self.x(f"UPDATE {t} SET user_id=NULL WHERE user_id=?", (uid,))  # keep fleet records, unlink person
@@ -170,6 +174,20 @@ class Store:
 
     def resolve_handoff(self, hid: int, uid: str, status: str, comment: str = "") -> None:
         self.x("UPDATE handoffs SET status=?, resolved_by=?, resolved_at=?, comment=? WHERE id=?", (status, uid, time.time(), comment, hid))
+
+    def add_media(self, uid: str, vehicle_id: str, kind: str, files: list[str], description: str, features: dict | None, note: str = "") -> int:
+        cur = self.x("INSERT INTO media(ts,user_id,vehicle_id,kind,files,description,features,note) VALUES (?,?,?,?,?,?,?,?)",
+                     (time.time(), uid, vehicle_id, kind, json.dumps(files), description, json.dumps(features or {}, ensure_ascii=False), note))
+        return int(cur.lastrowid)
+
+    def media(self, vehicle_id: str, limit: int = 20) -> list[dict]:
+        rows = self.q("SELECT * FROM media WHERE vehicle_id=? ORDER BY id DESC LIMIT ?", (vehicle_id, limit))
+        for r in rows:
+            r["files"] = json.loads(r["files"] or "[]"); r["features"] = json.loads(r["features"] or "{}")
+        return rows
+
+    def media_files_of(self, uid: str) -> list[str]:
+        return [f for r in self.q("SELECT files FROM media WHERE user_id=?", (uid,)) for f in json.loads(r["files"] or "[]")]
 
     def add_message(self, conv: str, uid: str, vehicle_id: str | None, role: str, content: str, meta: dict | None = None) -> None:
         self.x("INSERT INTO messages(ts,conv,user_id,vehicle_id,role,content,meta) VALUES (?,?,?,?,?,?,?)",

@@ -22,7 +22,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import pii, privacy_laws, voice
+from .. import media as umedia, pii, privacy_laws, voice
 from ..agent import profile as uprofile
 from ..agent.llm import LlmUnavailable
 from ..agent.prompts import VISION_PROMPT
@@ -49,7 +49,7 @@ class TextGZip:
 
     async def __call__(self, scope, receive, send):
         p = scope.get("path", "") if scope["type"] == "http" else ""
-        if scope["type"] != "http" or p.endswith(self.SKIP) or p.startswith(("/api/tts", "/api/stt", "/api/photo", "/page/", "/manuals/")):
+        if scope["type"] != "http" or p.endswith(self.SKIP) or p.startswith(("/api/tts", "/api/stt", "/api/photo", "/api/media", "/page/", "/manuals/")):
             return await self.app(scope, receive, send)
         return await self.gz(scope, receive, send)
 
@@ -253,6 +253,8 @@ def update_me(body: ProfileIn, response: Response, uid: str | None = Cookie(None
 @app.delete("/api/me")
 def delete_me(response: Response, uid: str | None = Cookie(None)) -> dict:
     user_of(uid)
+    for f in STORE.media_files_of(uid):  # photos, frames and recordings are personal data too
+        (Path(S.uploads_dir) / Path(f).name).unlink(missing_ok=True)
     STORE.delete_user_data(uid)
     response.delete_cookie("uid")
     response.delete_cookie("up")
@@ -446,8 +448,10 @@ def resolve_handoff(hid: int, body: ResolveIn, uid: str | None = Cookie(None)) -
 
 @app.get("/api/photo/{name}")
 def photo_file(name: str, uid: str | None = Cookie(None)):
-    user_of(uid, manager=True)
+    u = user_of(uid)
     if not re.fullmatch(r"[\w.-]{3,80}", name) or not (Path(S.uploads_dir) / name).is_file():
+        raise HTTPException(404)
+    if u["role"] != "manager" and not STORE.one("SELECT 1 FROM media WHERE user_id=? AND files LIKE ?", (u["id"], f'%"{name}"%')):
         raise HTTPException(404)
     return FileResponse(Path(S.uploads_dir) / name)
 
@@ -567,8 +571,97 @@ async def photo(file: UploadFile = File(...), vehicle_id: str = Form(""), text: 
         c = AGENT.conv(u["id"], vehicle_id)
         turn = AGENT.handle(c, u, text or "Посмотри фото и подскажи, что проверить по руководству.", image_note=pii.mask(desc))
         _record(u, c, "photo", (text or "") + " [фото]", turn, t0, {"photo": name, "photo_desc": pii.mask(desc)[:1000]})
+        STORE.add_media(u["id"], vehicle_id, "photo", [name], pii.mask(desc)[:1500], None, pii.mask(text)[:500])
         res["turn"] = turn.as_dict()
     return res
+
+
+MEDIA_ASK = {"photo": "Посмотри фото и подскажи, что проверить по руководству.",
+             "video": "Посмотри кадры видео (и звук, если он есть) и подскажи, что проверить по руководству.",
+             "sound": "Я записал звук двигателя на телефон. Что по нему проверить по руководству?"}
+
+
+def _vision(u: dict, data: bytes, mime: str) -> str:
+    try:
+        return AGENT.llm.vision("vision", VISION_PROMPT, base64.b64encode(data).decode(), mime)
+    except LlmUnavailable as e:
+        STORE.audit(user_id=u["id"], role=u["role"], action="vision", output=f"vision unavailable: {e}", ok=0)
+        return ""
+
+
+@app.post("/api/media")
+async def media_upload(kind: str = Form(...), vehicle_id: str = Form(...), text: str = Form(""), times: str = Form(""),
+                       frames: list[UploadFile] | None = File(None), audio: UploadFile | None = File(None),
+                       uid: str | None = Cookie(None)) -> dict:
+    """Photo / short video / engine sound from the phone, tied to the vehicle and its history.
+
+    Video is cut on the phone: up to 4 keyframes (JPEG) plus the audio track as 16 kHz mono WAV, so a 50 MB clip
+    never has to travel over a weak shop Wi-Fi. Sound = WAV of the recording. The raw clip is not stored."""
+    from concurrent.futures import ThreadPoolExecutor
+    u = user_of(uid)
+    t0 = time.time()
+    if kind not in MEDIA_ASK:
+        raise HTTPException(400, "kind must be photo, video or sound")
+    c = _conv_for(u, vehicle_id)
+    frames = (frames or [])[:4]
+    if kind in ("photo", "video") and not frames:
+        raise HTTPException(400, "no frames")
+    if kind == "sound" and not audio:
+        raise HTTPException(400, "no audio")
+    up = Path(S.uploads_dir); up.mkdir(parents=True, exist_ok=True)
+    stem = f"{int(time.time())}_{uuid.uuid4().hex[:6]}"
+    imgs, files = [], []
+    for i, f in enumerate(frames):
+        data = await f.read()
+        if len(data) > 12 * 1024 * 1024:
+            raise HTTPException(413, "frame too large")
+        name = f"{stem}_{i}{Path(f.filename or 'f.jpg').suffix[:5] or '.jpg'}"
+        (up / name).write_bytes(data)  # stored on the stand only
+        imgs.append((data, f.content_type or "image/jpeg")); files.append(name)
+    tl = [x for x in times.split(",") if x][:len(imgs)]
+    with ThreadPoolExecutor(4) as ex:
+        descs = list(ex.map(lambda im: _vision(u, *im), imgs))
+    parts = []
+    if kind == "video":
+        parts += [f"Кадр {i + 1}" + (f" ({tl[i]} с)" if i < len(tl) else "") + f": {d}" for i, d in enumerate(descs) if d]
+    elif descs and descs[0]:
+        parts.append(descs[0])
+    feats, speech = None, ""
+    if audio:
+        adata = await audio.read()
+        if len(adata) > 20 * 1024 * 1024:
+            raise HTTPException(413, "audio too large")
+        try:
+            feats = umedia.features(adata, c.vehicle.engine_model)
+        except (ValueError, EOFError, Exception) as e:  # noqa: BLE001 - a broken track must not kill the photo part
+            feats = {"quality": "bad", "quality_ru": "не удалось прочитать", "notes": [f"Звук не прочитан: {type(e).__name__}"]}
+        if kind == "sound":
+            name = f"{stem}.wav"; (up / name).write_bytes(adata); files.append(name)
+        if kind == "video" and feats.get("duration_s"):
+            try:  # speech in the clip ("вот тут стучит") goes to the agent; engine noise alone gives nothing
+                txt, _eng = voice.transcribe(adata, "audio/wav", LANGS[lang_or_default(u.get("lang"))]["stt"], S,
+                                             local_first=privacy_laws.requires_localization(u.get("country")))
+                speech = umedia.meaningful_speech(txt)
+            except voice.SttUnavailable:
+                speech = ""
+        if feats.get("duration_s") or kind == "sound":
+            parts.append(umedia.describe_sound(feats).replace("Запись звука двигателя с телефона", "Звук ролика" if kind == "video" else "Запись звука двигателя с телефона"))
+        if speech:
+            parts.append(f"Механик говорит в ролике: «{pii.mask(speech)}»")
+    note = pii.mask("\n".join(parts)) if parts else ""
+    if kind != "sound" and not any(descs):
+        note = (note + "\n" if note else "") + "Распознать изображение не удалось (сервис зрения недоступен)."
+    mid = STORE.add_media(u["id"], vehicle_id, kind, files, note[:3000], feats, pii.mask(text)[:500])
+    prof = uprofile.load(u); level = u.get("experience") or "experienced"
+    turn = AGENT.handle(c, {**u, "_vocab_hint": uprofile.prompt_hint(prof, level)}, text or MEDIA_ASK[kind],
+                        image_note=f"{ {'photo': 'фото', 'video': 'видео', 'sound': 'звук'}[kind] }: {note}")
+    turn.text, _ = uprofile.gloss(turn.text, prof, level)
+    label = {"photo": "[фото]", "video": "[видео]", "sound": "[звук двигателя]"}[kind]
+    _record(u, c, f"media_{kind}", ((text + " ") if text else "") + label, turn, t0,
+            {"photo": files[0] if kind != "sound" else None, "photo_desc": note[:1000], "media_id": mid, "media_kind": kind})
+    plate = find_plate(" ".join(descs)) if any(descs) else None
+    return {"media_id": mid, "kind": kind, "files": files, "description": note, "features": feats, "speech": speech,
+            "plate": plate, "turn": turn.as_dict()}
 
 
 @app.post("/api/stt")

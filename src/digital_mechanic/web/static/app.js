@@ -170,8 +170,8 @@ function addMsg(role, html, {cls = "", speak = null, actions = []} = {}) {
   requestAnimationFrame(() => d.scrollIntoView({behavior: "smooth", block: "start"}));
   return d;
 }
-function skeleton() {
-  const d = addMsg("bot", `<div class="progress">${icon("loader-circle", 16, "spin")}<span class="ptext">${esc(t("thinking"))}</span></div><div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div>`, {cls: "skeleton"});
+function skeleton(text) {
+  const d = addMsg("bot", `<div class="progress">${icon("loader-circle", 16, "spin")}<span class="ptext">${esc(text || t("thinking"))}</span></div><div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div>`, {cls: "skeleton"});
   d.dataset.busy = 1;
   return d;
 }
@@ -507,24 +507,134 @@ function autosize() {
 }
 function layout() { const c = $("#composer"); if (c) document.documentElement.style.setProperty("--composer-h", (c.classList.contains("hidden") ? 0 : c.offsetHeight) + "px"); }
 
-// ---------------------------------------------------------------- photo
-async function onPhoto(e) {
-  const f = e.target.files[0]; if (!f) return;
-  const url = URL.createObjectURL(f), note = $("#txt").value.trim();
-  addMsg("user", `<img src="${url}" alt="" style="max-width:240px;width:100%;border-radius:12px;display:block">${note ? `<div style="margin-top:8px">${esc(note)}</div>` : ""}`);
-  const fd = new FormData(); fd.append("file", f); fd.append("vehicle_id", VID); fd.append("text", note); $("#txt").value = ""; autosize();
+// ---------------------------------------------------------------- media: photo, video (keyframes + audio track), engine sound
+// Everything heavy happens on the phone: a photo is downscaled, a video becomes 4 JPEG keyframes and a 16 kHz mono WAV,
+// so a 50 MB clip never travels over the shop Wi-Fi. Results are tied to the vehicle and its history on the server.
+function mediaSheet() {
+  const item = (id, ic, title, hint) => `<button class="item" id="${id}">${icon(ic)}<span class="t"><b>${t(title)}</b>${hint ? `<span>${t(hint)}</span>` : ""}</span></button>`;
+  sheet(t("media_title"), `<div class="list">` + item("m_photo", "camera", "take_photo", "take_photo_hint") + item("m_video", "video", "take_video", "take_video_hint") +
+    item("m_sound", "activity", "rec_sound", "rec_sound_hint") + item("m_gal", "image", "from_gallery", "") + `</div>`, sh => {
+    sh.querySelector("#m_photo").onclick = () => { closeSheet(); $("#photo").click(); };
+    sh.querySelector("#m_video").onclick = () => { closeSheet(); $("#video").click(); };
+    sh.querySelector("#m_gal").onclick = () => { closeSheet(); $("#gallery").click(); };
+    sh.querySelector("#m_sound").onclick = soundSheet;
+  });
+}
+const toBlob = (cv, q = 0.82) => new Promise(r => cv.toBlob(r, "image/jpeg", q));
+function drawScaled(src, w, h, max = 1280) {
+  const k = Math.min(1, max / Math.max(w, h)), cv = document.createElement("canvas");
+  cv.width = Math.round(w * k); cv.height = Math.round(h * k); cv.getContext("2d").drawImage(src, 0, 0, cv.width, cv.height); return cv;
+}
+async function shrinkPhoto(f) {
+  try { const bm = await createImageBitmap(f); return await toBlob(drawScaled(bm, bm.width, bm.height, 1600)); } catch (_) { return f; }
+}
+async function videoFrames(f, n = 4) {
+  const v = document.createElement("video"); v.muted = true; v.playsInline = true; v.preload = "auto"; v.src = URL.createObjectURL(f);
+  await new Promise((ok, bad) => { v.onloadeddata = ok; v.onerror = () => bad(new Error("video")); });
+  let d = v.duration;
+  if (!isFinite(d)) { v.currentTime = 1e6; await new Promise(r => v.onseeked = r); d = v.currentTime || 1; }
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const tt = Math.min(d - 0.05, d * (0.1 + 0.8 * i / (n - 1)));
+    v.currentTime = Math.max(0, tt); await new Promise(r => v.onseeked = r);
+    out.push({t: +tt.toFixed(1), blob: await toBlob(drawScaled(v, v.videoWidth, v.videoHeight))});
+  }
+  URL.revokeObjectURL(v.src); return {frames: out, duration: d};
+}
+// any audio or video blob -> 16 kHz mono PCM16 WAV, first 30 s
+async function toWav(blob, maxS = 30) {
+  const AC = window.AudioContext || window.webkitAudioContext, ac = new AC();
+  const buf = await new Promise((ok, bad) => { blob.arrayBuffer().then(ab => { const p = ac.decodeAudioData(ab, ok, bad); if (p && p.then) p.then(ok, bad); }, bad); });
+  ac.close && ac.close();
+  const sr = 16000, len = Math.max(1, Math.floor(Math.min(buf.duration, maxS) * sr));
+  const off = new OfflineAudioContext(1, len, sr), src = off.createBufferSource(); src.buffer = buf; src.connect(off.destination); src.start();
+  const pcm = (await off.startRendering()).getChannelData(0), dv = new DataView(new ArrayBuffer(44 + pcm.length * 2));
+  const w = (o, s) => [...s].forEach((c, i) => dv.setUint8(o + i, c.charCodeAt(0)));
+  w(0, "RIFF"); dv.setUint32(4, 36 + pcm.length * 2, true); w(8, "WAVE"); w(12, "fmt "); dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, sr, true); dv.setUint32(28, sr * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, "data"); dv.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 32767, true);
+  return new Blob([dv], {type: "audio/wav"});
+}
+async function sendMedia(kind, {frames = [], times = [], audio = null, bubble}) {
+  const note = $("#txt").value.trim(); $("#txt").value = ""; autosize();
+  addMsg("user", bubble + (note ? `<div style="margin-top:8px">${esc(note)}</div>` : ""));
+  const fd = new FormData(); fd.append("kind", kind); fd.append("vehicle_id", VID); fd.append("text", note); fd.append("times", times.join(","));
+  frames.forEach((b, i) => fd.append("frames", b, `f${i}.jpg`)); if (audio) fd.append("audio", audio, "a.wav");
   const th = skeleton();
   try {
-    const r = await api("/api/photo", {method: "POST", body: fd}); th.remove();
-    if (r.description) addMsg("bot", `<p class="muted">${esc(r.description)}</p>`);
+    const r = await api("/api/media", {method: "POST", body: fd}); th.remove();
+    if (r.description) addMsg("bot", `<details class="seen"><summary>${icon("chevron-right", 16)}<span>${t("media_seen")}</span></summary><p class="small muted">${esc(r.description).replace(/\n/g, "<br>")}</p></details>`);
     if (r.plate && r.plate !== VID) {
       const d = addMsg("bot", `<p>${t("vehicle")}: <b class="mono">${esc(r.plate)}</b>?</p><div class="card-actions"><button class="btn primary">${t("open_vehicle")}</button></div>`);
       d.querySelector("button").onclick = () => selectVehicle(r.plate);
     }
     if (r.turn) renderTurn(r.turn);
   } catch (err) { th.remove(); errorMsg(err); }
-  e.target.value = "";
 }
+const thumbs = urls => `<div class="thumbs">${urls.map(u => `<img src="${u}" alt="">`).join("")}</div>`;
+async function onVideo(f) {
+  const th = skeleton(t("media_prep"));
+  try {
+    const {frames, duration} = await videoFrames(f);
+    let audio = null; try { audio = await toWav(f); } catch (_) { toast(t("media_no_audio")); }
+    th.remove();
+    await sendMedia("video", {frames: frames.map(x => x.blob), times: frames.map(x => x.t), audio,
+      bubble: thumbs(frames.map(x => URL.createObjectURL(x.blob))) + `<div class="small muted" style="margin-top:4px">${icon("video", 14)} ${duration.toFixed(0)} ${t("sec")}</div>`});
+  } catch (err) { th.remove(); errorMsg(err); }
+}
+async function onMediaFile(e) {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  if (f.type.startsWith("video/")) return onVideo(f);
+  if (!VID) return onPlatePhoto(f);  // no vehicle yet: the photo is used to find it by the plate
+  const b = await shrinkPhoto(f);
+  return sendMedia("photo", {frames: [b], bubble: `<img src="${URL.createObjectURL(b)}" alt="" class="msg-img">`});
+}
+async function onPlatePhoto(f) {
+  const fd = new FormData(); fd.append("file", await shrinkPhoto(f), "p.jpg"); fd.append("vehicle_id", ""); fd.append("text", "");
+  const th = skeleton();
+  try {
+    const r = await api("/api/photo", {method: "POST", body: fd}); th.remove();
+    if (r.plate) selectVehicle(r.plate); else toast(r.description || t("error"));
+  } catch (err) { th.remove(); errorMsg(err); }
+}
+let REC = null;
+function soundSheet() {
+  sheet(t("rec_sound"), `<p class="small muted">${t("rec_tip")}</p><div class="rec"><canvas id="recLvl" width="320" height="48"></canvas><div class="mono" id="recT">0:00</div></div>` +
+    `<div class="card-actions"><button class="btn primary" id="recBtn">${icon("mic", 18)}<span>${t("rec_start")}</span></button></div>`, sh => {
+    sh.querySelector("#recBtn").onclick = () => REC ? stopRec() : startRec(sh);
+  });
+}
+async function startRec(sh) {
+  let stream;
+  // engine sound: no echo cancellation / noise suppression / AGC, they eat exactly the knocks we need
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false}}); }
+  catch (_) { toast(t("mic_denied")); return; }
+  const mr = new MediaRecorder(stream), chunks = [], ac = new (window.AudioContext || window.webkitAudioContext)(), an = ac.createAnalyser();
+  ac.createMediaStreamSource(stream).connect(an); an.fftSize = 512;
+  const data = new Uint8Array(an.fftSize), cv = sh.querySelector("#recLvl"), g = cv.getContext("2d"), t0 = Date.now(), lv = [];
+  REC = {mr, stream, ac, timer: null, auto: setTimeout(() => stopRec(), 30000)};
+  mr.ondataavailable = e => e.data.size && chunks.push(e.data);
+  mr.onstop = async () => {
+    stream.getTracks().forEach(x => x.stop()); ac.close(); cancelAnimationFrame(REC.timer); clearTimeout(REC.auto); REC = null; closeSheet();
+    const blob = new Blob(chunks, {type: mr.mimeType || "audio/webm"});
+    try {
+      const wav = await toWav(blob), dur = ((Date.now() - t0) / 1000).toFixed(0);
+      await sendMedia("sound", {audio: wav, bubble: `<div class="small">${icon("activity", 14)} ${t("rec_sound")}, ${dur} ${t("sec")}</div><audio controls src="${URL.createObjectURL(wav)}" style="width:100%;margin-top:8px"></audio>`});
+    } catch (err) { errorMsg(err); }
+  };
+  mr.start(250);
+  const b = sh.querySelector("#recBtn"); b.classList.replace("primary", "danger"); b.innerHTML = `${icon("square", 18)}<span>${t("rec_stop")}</span>`;
+  const draw = () => {
+    an.getByteTimeDomainData(data); let m = 0; for (const x of data) m = Math.max(m, Math.abs(x - 128) / 128);
+    lv.push(m); if (lv.length > 80) lv.shift();
+    g.clearRect(0, 0, cv.width, cv.height); g.fillStyle = getComputedStyle(document.body).getPropertyValue("--accent") || "#5b8cff";
+    lv.forEach((v, i) => { const h = Math.max(2, v * cv.height); g.fillRect(i * 4, (cv.height - h) / 2, 3, h); });
+    const s = Math.floor((Date.now() - t0) / 1000); sh.querySelector("#recT").textContent = `0:${String(s).padStart(2, "0")}`;
+    REC && (REC.timer = requestAnimationFrame(draw));
+  };
+  draw();
+}
+function stopRec() { if (REC && REC.mr.state !== "inactive") REC.mr.stop(); }
 
 // ---------------------------------------------------------------- citation viewer: extract → full section (collapsed) → page links and image
 function hl(txt, q) {
@@ -782,7 +892,8 @@ $("#vehBtn").onclick = pickVehicleSheet;
 $("#send").onclick = () => send();
 $("#txt").addEventListener("input", autosize);
 $("#txt").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
-$("#photo").onchange = onPhoto;
+$("#photo").onchange = onMediaFile; $("#video").onchange = onMediaFile; $("#gallery").onchange = onMediaFile;
+$("#attach").onclick = () => VID ? mediaSheet() : $("#photo").click();
 document.querySelectorAll("label[role=button]").forEach(l => l.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); l.querySelector("input")?.click(); } }));
 $("#mic").onclick = voiceOpen;
 $("#vClose").onclick = voiceClose; $("#vExit").onclick = voiceClose; $("#vOrb").onclick = orbTap;

@@ -27,12 +27,15 @@ def test_novice_gloss_first_times_only_and_not_inside_labels():
     assert "(распылитель" not in P.gloss(text, own, "novice")[0]  # he already uses the term
 
 
-def test_profile_api_edit_and_delete(tmp_path, monkeypatch):
-    import json
-    from digital_mechanic.web import app as web
-    u = web.STORE.upsert_user("u-prof", name="A", role="mechanic", consent_at=1.0,
-                              profile=json.dumps({"terms": {"тнвд": 2, "щуп": 1}, "glossed": {}, "messages": 4, "expands": 0}))
+def test_profile_api_edit_and_delete(tmp_path):
+    import importlib, json, os
     from fastapi.testclient import TestClient
+    os.environ.update(DB_PATH=str(tmp_path / "a.db"), LOG_PATH=str(tmp_path / "l.jsonl"), UPLOADS_DIR=str(tmp_path / "up"), LLM_API_KEY="", LLM_API_KEY_FILE="",
+                      ML_SERVICE_URL="http://127.0.0.1:9", TOIR_SERVICE_URL="http://127.0.0.1:9")
+    import digital_mechanic.web.app as web
+    importlib.reload(web)
+    web.STORE.upsert_user("u-prof", name="A", role="mechanic", consent_at=1.0,
+                          profile=json.dumps({"terms": {"тнвд": 2, "щуп": 1}, "glossed": {}, "messages": 4, "expands": 0}))
     c = TestClient(web.app); c.cookies.set("uid", "u-prof")
     assert c.get("/api/me").json()["profile"]["terms"] == ["тнвд", "щуп"]
     assert c.post("/api/me/profile", json={"remove_term": "щуп"}).json()["profile"]["terms"] == ["тнвд"]

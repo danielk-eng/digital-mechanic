@@ -33,7 +33,17 @@ function renderTimeline(tl) {
     if (e.sources && e.sources.length) body += `<div style="margin-top:8px">${e.sources.map(s => `<button class="cite" data-doc="${_esc(s.doc_id)}" data-page="${s.page}">с. ${s.page}</button>`).join("")}</div>`;
     h += `<details class="tl-e"><summary><span class="tl-top">${top}</span>${sub ? `<span class="tl-sub">${sub}</span>` : ""}</summary>${body}</details>`;
   }
-  return h + "</div>";
+  h += "</div>";
+  if (tl.media && tl.media.length) {  // photos, videos, engine sound recordings from mechanics, tied to this vehicle
+    const ki = {photo: "camera", video: "video", sound: "activity"};
+    h += `<div class="section-label" style="margin-top:16px">Фото, видео и записи</div>` + tl.media.map(m => {
+      const img = m.kind !== "sound" && m.files[0] ? `<img src="/api/photo/${encodeURIComponent(m.files[0])}" alt="" loading="lazy" onerror="this.remove()">` : `<span class="muted">${_ic(ki[m.kind] || "file-text")}</span>`;
+      const au = m.kind === "sound" && m.files[0] ? `<audio controls preload="none" src="/api/photo/${encodeURIComponent(m.files[0])}" style="width:100%;margin-top:4px"></audio>` : "";
+      return `<div class="tl-media">${img}<div class="small" style="min-width:0"><span class="mono">${_esc(m.date)}</span> <span class="muted">${_esc(m.kind_ru)}</span>` +
+        `${m.note ? `<div>${_esc(m.note)}</div>` : ""}<div class="muted">${_esc(m.description.slice(0, 220))}</div>${au}</div></div>`;
+    }).join("");
+  }
+  return h;
 }
 
 // "Before arrival": what is already known about the vehicle before the first question.

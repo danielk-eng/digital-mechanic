@@ -40,7 +40,8 @@
   <footer class="composer hidden" id="composer"><div class="inner">
     <div class="suggest" id="quick"></div>
     <div class="inputbox">
-      <label class="icon-btn" role="button" tabindex="0" data-t-aria="photo" data-icon="camera"><input id="photo" type="file" accept="image/*" capture="environment" hidden></label>
+      <button class="icon-btn" id="attach" data-t-aria="attach" data-icon="plus"></button>
+      <input id="photo" type="file" accept="image/*" capture="environment" hidden><input id="video" type="file" accept="video/*" capture="environment" hidden><input id="gallery" type="file" accept="image/*,video/*" hidden>
       <textarea id="txt" rows="1" data-tp="ask_placeholder" enterkeyhint="send"></textarea>
       <button class="icon-btn send-btn hidden" id="send" data-t-aria="send" data-icon="arrow-up"></button>
       <button class="icon-btn mic-btn" id="mic" data-t-aria="voice_mode" data-icon="audio-lines"></button>
