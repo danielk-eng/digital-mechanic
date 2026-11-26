@@ -19,6 +19,21 @@ from digital_mechanic.store import Store  # noqa: E402
 from digital_mechanic import adapters  # noqa: E402
 
 
+# The manual indexes are not in the public repo (OEM texts, no redistribution right). Without them only the tests
+# that do not need manual pages run; build the index from the task PDFs (docs/ПУБЛИКАЦИЯ.md) to run everything.
+INDEX_OK = (ROOT / "data/index/pages.jsonl.gz").is_file()
+NO_INDEX_OK = {"test_answer_post", "test_grounding", "test_policy", "test_expand_maint", "test_import_translations"}
+
+
+def pytest_collection_modifyitems(config, items):
+    if INDEX_OK:
+        return
+    skip = pytest.mark.skip(reason="no data/index/pages.jsonl.gz: build it from the task PDFs (docs/ПУБЛИКАЦИЯ.md)")
+    for it in items:
+        if it.module.__name__.rsplit(".", 1)[-1] not in NO_INDEX_OK:
+            it.add_marker(skip)
+
+
 @pytest.fixture(scope="session")
 def pages():
     return load_pages(ROOT / "data/index/pages.jsonl.gz", ROOT / "data/engine_docs.yaml")

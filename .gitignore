@@ -34,3 +34,8 @@ data/extra/images/
 # KAMAZ manual from an unofficial mirror: excluded by owner decision 26.11
 *kamaz*
 *KAMAZ*
+# OEM manual texts (engine manuals of the task, Ural / MAZ / UAZ manuals from the makers' sites): no redistribution
+# right, so not in the public repo. They live on the stand only; deploy bundles take them from disk
+# (scripts/stand_bundle.sh, scripts/vercel_bundle.sh). A fresh clone rebuilds the engine index from the PDFs: docs/ПУБЛИКАЦИЯ.md
+data/index/*.jsonl.gz
+data/i18n/pages_*.jsonl.gz
