@@ -107,6 +107,14 @@ def histories():
                 yield rec(f"hist:{tid}:{k}", "history", "demo_history", e[k], vehicle_id=e["vehicle_id"])
 
 
+RX = re.compile(r"\(\?[:=!]|\\[sbwdSWD]|\\\.|\[[^\]]*\][*+?]|\|\w+\|")
+
+
+def is_regex(s: str) -> bool:
+    """Patterns for matching user input are not text for people: keep them out of the export."""
+    return bool(RX.search(s)) or s.startswith("^")
+
+
 def app_strings():
     """Russian literals shown to people: Python (templates, chips, statuses) and JS outside i18n.json."""
     seen = set()
@@ -118,7 +126,7 @@ def app_strings():
             if isinstance(n, ast.Constant) and ru(n.value) and id(n) not in docs:
                 s = n.value.strip()
                 typ = "llm_prompt" if len(s) > 400 or "JSON" in s or "Верни" in s else "app_string"
-                if typ == "llm_prompt" or s in seen:
+                if typ == "llm_prompt" or s in seen or is_regex(s):
                     continue  # prompts to the model are not shown to people
                 seen.add(s)
                 yield rec(f"py:{f.relative_to(ROOT / 'src')}:{n.lineno}", typ, str(f.relative_to(ROOT)), s)
@@ -126,7 +134,7 @@ def app_strings():
         for i, line in enumerate(f.read_text(encoding="utf-8").split("\n"), 1):
             for m in re.finditer(r'"([^"\\]*[а-яё]{3,}[^"\\]*)"|`([^`]*[а-яё]{3,}[^`]*)`', line):
                 s = (m.group(1) or m.group(2)).strip()
-                if s in seen or s.startswith("//"):
+                if s in seen or s.startswith("//") or is_regex(s):
                     continue
                 seen.add(s)
                 yield rec(f"js:{f.name}:{i}", "app_string", f"web/static/{f.name}", s)
