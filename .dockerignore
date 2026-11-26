@@ -6,3 +6,7 @@ var
 runs
 **/__pycache__
 data/manuals
+.env
+.env.*
+!.env.example
+*.key
