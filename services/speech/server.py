@@ -14,7 +14,8 @@ from pydantic import BaseModel
 MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 DEVICE = os.getenv("WHISPER_DEVICE", "auto")  # auto -> cuda if available, else cpu
 COMPUTE = os.getenv("WHISPER_COMPUTE", "int8")
-THREADS = int(os.getenv("WHISPER_THREADS", "0"))
+THREADS = int(os.getenv("WHISPER_THREADS", str(os.cpu_count() or 4)))
+BEAM = int(os.getenv("WHISPER_BEAM", "1"))  # greedy: ~2x faster on CPU, near-equal quality on short commands
 ROOT = os.getenv("MODELS_DIR", "/models")
 TTS_ON = os.getenv("SILERO_ENABLED", "1") == "1"
 
@@ -63,7 +64,7 @@ async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), prompt: str
     with _wl, tempfile.NamedTemporaryFile(suffix=".audio") as f:  # temp file deleted on close
         f.write(data); f.flush()
         segs, info = whisper().transcribe(f.name, language=lang or None, initial_prompt=prompt or None,
-                                          vad_filter=True, beam_size=5, condition_on_previous_text=False)
+                                          vad_filter=True, beam_size=BEAM, condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segs).strip()
     return {"text": text, "ms": int((time.time() - t0) * 1000), "model": MODEL, "duration": round(info.duration, 2)}
 
