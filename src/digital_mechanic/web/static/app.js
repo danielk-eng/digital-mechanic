@@ -17,11 +17,24 @@ function applyI18n() {
   document.querySelectorAll("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
   document.querySelectorAll("[data-tp]").forEach(el => el.placeholder = t(el.dataset.tp));
   document.documentElement.lang = (ME && ME.lang) || "ru";
-  const q = $("#quick"); if (!q) return;
-  q.innerHTML = "";
-  [["q_danger"], ["q_drive"], ["q_check"], ["q_torque"], ["create_ticket"], ["start_repair"], ["history"]].forEach(([k]) => {
-    const b = document.createElement("button"); b.textContent = t(k); b.onclick = () => send(t(k)); q.appendChild(b);
-  });
+  loadChips();
+}
+
+// Adaptive chips: built on the server from this vehicle, its current check, history and repair step.
+let CHIP_SEQ = 0;
+async function loadChips() {
+  const q = $("#quick"); if (!q || !ME || !VID) { if (q) q.innerHTML = ""; return; }
+  const seq = ++CHIP_SEQ;
+  try {
+    const r = await api(`/api/suggest?vehicle_id=${encodeURIComponent(VID)}`);
+    if (seq !== CHIP_SEQ) return;
+    q.innerHTML = "";
+    (r.chips || []).forEach(ch => {
+      const b = document.createElement("button"); b.textContent = ch.text; b.className = `qc ${ch.kind}`;
+      if (ch.page) b.title = `${ch.doc} · ${t("page")} ${ch.page}`;
+      b.onclick = () => send(ch.text); q.appendChild(b);
+    });
+  } catch (_) { /* chips are optional */ }
 }
 
 function langOptions(sel, cur) {
@@ -54,12 +67,22 @@ function sourcesHtml(sources) {
     `<span class="chip ${s.extra ? "x" : ""}" data-doc="${s.doc_id}" data-page="${s.page}">${esc(s.document.slice(0, 40))}, ${t("page")} ${s.page}${s.extra ? " *" : ""}</span>`).join("") + "</div>";
 }
 
-function renderTurn(turn) {
+function renderTurn(turn, expanded = false) {
   (turn.cards || []).forEach(renderCard);
   if (turn.text) {
-    addMsg("bot", md(turn.text, turn.sources) + sourcesHtml(turn.sources));
+    const canExpand = !expanded && (turn.sources || []).length && (ME.detail || "brief") === "brief";
+    const d = addMsg("bot", md(turn.text, turn.sources) + sourcesHtml(turn.sources) +
+      (canExpand ? `<button class="expand">${t("expand")} ▾</button>` : ""));
+    if (canExpand) d.querySelector(".expand").onclick = ev => { ev.stopPropagation(); ev.target.remove(); expandAnswer(turn.text); };
     speak(turn.text);
   }
+  loadChips();
+}
+async function expandAnswer(text) {
+  stopSpeak();
+  const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
+  try { const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event: "expand"}}); th.remove(); renderTurn(r, true); }
+  catch (e) { th.innerHTML = `<div class="b" style="color:var(--stop)">${esc(e.message)}</div>`; }
 }
 
 // ---------------------------------------------------------------- cards
@@ -132,7 +155,7 @@ async function confirmTicket(draftId, ok, row) {
 
 async function repairAction(a) {
   const r = await api("/api/repair/action", {json: {vehicle_id: VID, action: a}});
-  if (r.card) { renderCard(r.card); const s = r.card.steps[r.card.current]; if (s && r.card.status !== "done") speak(`${t("step")} ${r.card.current + 1}. ${s.text}`); else speak(t("repair_done")); }
+  if (r.card) { renderCard(r.card); loadChips(); const s = r.card.steps[r.card.current]; if (s && r.card.status !== "done") speak(`${t("step")} ${r.card.current + 1}. ${s.text}`); else speak(t("repair_done")); }
 }
 
 // ---------------------------------------------------------------- page viewer
@@ -166,7 +189,7 @@ async function loadVehicles() {
 }
 
 async function selectVehicle(vid) {
-  VID = vid; localStorage.setItem("vid", vid); $("#chat").innerHTML = "";
+  VID = vid; localStorage.setItem("vid", vid); $("#chat").innerHTML = ""; loadChips();
   if (!vid) { $("#vehInfo").classList.add("hidden"); return; }
   const r = await api(`/api/vehicle/${encodeURIComponent(vid)}`);
   VEH = r;
@@ -184,11 +207,12 @@ async function selectVehicle(vid) {
 }
 
 async function diagnose() {
+  stopSpeak();
   if (!VID) return alert(t("choose_vehicle"));
   if (BUSY) return; BUSY = true; $("#btnDiag").disabled = true;
   try {
     const r = await api("/api/diagnose", {json: {vehicle_id: VID, session_id: $("#sess").value || null}});
-    renderCard(r.card);
+    renderCard(r.card); loadChips();
     const head = r.card.status === "anomaly" ? `${t("status_anomaly")}: ${r.card.check.anomaly_title}. ${r.card.light_text || ""}` : r.card.status === "normal" ? t("verdict_normal") : t("verdict_failed");
     speak(head);
     BUSY = false;
@@ -215,6 +239,7 @@ async function ask(text, event = null) {
 }
 
 function send(text) {
+  stopSpeak();
   text = (text ?? $("#txt").value).trim();
   if (!text) return;
   if (!VID) return alert(t("choose_vehicle"));
@@ -244,8 +269,9 @@ $("#photo").onchange = async e => {
 };
 
 // ---------------------------------------------------------------- voice in (Deepgram/whisper via server, browser fallback)
-let rec = null, chunks = [], stream = null, vadTimer = null, SERVER_TTS = true;
+let rec = null, chunks = [], stream = null, vadTimer = null, SERVER_TTS = true, SPEAK_SEQ = 0;
 async function startRec() {
+  stopSpeak();
   if (rec) return stopRec();
   try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); }
   catch (e) { return browserStt(); }
@@ -282,31 +308,34 @@ $("#mic").onclick = startRec;
 // ---------------------------------------------------------------- voice out
 function plain(text) { return String(text).replace(/\[[^\]]*\b(S|X)\d+\b[^\]]*\]/g, "").replace(/[*#•]/g, "").replace(/\s+/g, " ").slice(0, 900); }
 async function speak(text) {
-  if (!ME || !ME.voice_out || !text) return;
-  const p = plain(text);
-  const after = () => { if ($("#s_hands").checked) setTimeout(startRec, 300); };
-  if (ME.lang === "ru" && SERVER_TTS) {
+  if (!ME || !A11Y.ttsOn() || !text) return;
+  A11Y.stop();
+  const p = plain(text), token = ++SPEAK_SEQ;
+  const after = () => { if (token === SPEAK_SEQ && $("#s_hands").checked) setTimeout(startRec, 300); };
+  if (ME.lang === "ru" && SERVER_TTS) {  // local Silero on the stand; 404 -> browser speech from now on
     try { const r = await fetch("/api/tts", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: p})});
-      if (r.ok) { const a = new Audio(URL.createObjectURL(await r.blob())); a.onended = after; a.play(); return; } SERVER_TTS = false; } catch (_) { SERVER_TTS = false; }
+      if (token !== SPEAK_SEQ) return;  // a newer message or a tap arrived while synthesizing
+      if (r.ok) { const a = new Audio(URL.createObjectURL(await r.blob())); A11Y.audio = a; a.onended = after; a.play(); return; } SERVER_TTS = false; } catch (_) { SERVER_TTS = false; }
   }
   if (!window.speechSynthesis) return;
-  speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[ME.lang] || "ru-RU"; u.onend = after; speechSynthesis.speak(u);
+  const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[ME.lang] || "ru-RU"; u.onend = after; speechSynthesis.speak(u);
 }
+function stopSpeak() { SPEAK_SEQ++; A11Y.stop(); }
+$("#chat").addEventListener("click", stopSpeak);  // tap on the chat stops reading
 
 // ---------------------------------------------------------------- settings / login
 function applyProfile() {
-  document.body.classList.toggle("big", !!ME.big_font);
   langOptions($("#s_lang"), ME.lang);
   document.querySelectorAll("input[name=s_exp]").forEach(r => r.checked = r.value === ME.experience);
-  $("#s_big").checked = !!ME.big_font; $("#s_voice").checked = !!ME.voice_out;
+  document.querySelectorAll("input[name=s_detail]").forEach(r => r.checked = r.value === (ME.detail || "brief"));
+  if (localStorage.getItem("tts") === null) A11Y.setTts(!!ME.voice_out);  // first run: take the old profile flag
   applyI18n();
 }
 async function saveProfile(patch) { ME = (await api("/api/me", {json: patch})).user; applyProfile(); }
 $("#btnSettings").onclick = () => $("#settings").classList.toggle("hidden");
 $("#s_lang").onchange = e => saveProfile({lang: e.target.value}).then(loadVehicles);
 document.querySelectorAll("input[name=s_exp]").forEach(r => r.onchange = () => saveProfile({experience: r.value}));
-$("#s_big").onchange = e => saveProfile({big_font: e.target.checked});
-$("#s_voice").onchange = e => saveProfile({voice_out: e.target.checked});
+document.querySelectorAll("input[name=s_detail]").forEach(r => r.onchange = () => saveProfile({detail: r.value}));
 $("#s_logout").onclick = async () => { await api("/api/logout", {method: "POST"}); location.reload(); };
 $("#s_delete").onclick = async () => { if (confirm("Удалить ваши данные и историю запросов?")) { await api("/api/me", {method: "DELETE"}); location.reload(); } };
 $("#btnDiag").onclick = diagnose;

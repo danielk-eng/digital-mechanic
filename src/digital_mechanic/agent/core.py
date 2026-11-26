@@ -25,7 +25,7 @@ from ..schemas import CheckResult, CheckStatus, PolicyDecision, Reference, Ticke
 from ..store import Store
 from .grounding import cited_labels, quote_in_text, unverified_numbers
 from .llm import Llm, LlmUnavailable
-from .prompts import EXPERIENCE, MANAGER_SYSTEM, MECHANIC_SYSTEM
+from .prompts import DETAIL, EXPAND_PROMPT, EXPERIENCE, MANAGER_SYSTEM, MECHANIC_SYSTEM
 
 CONFIRM_RE = re.compile(r"^\s*(да[,.!\s]*)?(подтвержда\w*|отправля\w*|отправь\w*|tasdiqla\w*|тасдиқ\w*|растаймын|xác nhận|पुष्टि)", re.I)
 CANCEL_RE = re.compile(r"^\s*(отмен\w*|не надо|не отправля\w*|отбой|bekor|бекор|болдырма\w*|hủy|रद्द)", re.I)
@@ -119,6 +119,44 @@ class Agent:
                 self.convs[cid] = c
         return c
 
+    def suggestions(self, c: Conv, user: dict) -> list[dict]:
+        """Adaptive chips for the selected vehicle / check / repair step (see agent/suggest.py)."""
+        from . import suggest
+
+        if not c.vehicle:
+            return []
+        hist = self.fleet.sessions(c.vehicle.vehicle_id)
+        if c.check:
+            hist = [h for h in hist if (h.checked_at or "") <= (c.check.checked_at or "~")]
+        chips = [ch.as_dict() for ch in suggest.build(
+            self.index, c.vehicle, c.check, hist, self.repair_card(c.vehicle.vehicle_id), c.draft,
+            bool(self.store.tickets(c.vehicle.vehicle_id)), user.get("experience") or "experienced")]
+        lang = lang_or_default(user.get("lang"))
+        if lang != "ru" and chips and self.llm.available:
+            chips = self._translate_chips(chips, lang)
+        return chips
+
+    _chip_cache: dict = {}
+
+    def _translate_chips(self, chips: list[dict], lang: str) -> list[dict]:
+        """Optional phrasing in the user's language; cached; Russian if the LLM fails."""
+        todo = [ch["text"] for ch in chips if (lang, ch["text"]) not in self._chip_cache]
+        if todo:
+            try:
+                from .llm import parse_json
+
+                msg, _ = self.llm.chat("chips_i18n", [{"role": "user", "content":
+                    f"Переведи короткие вопросы механика на язык «{LANGS[lang]['llm']}». Термины и цифры сохрани. "
+                    "Ответ — только JSON {\"items\": [...]} в том же порядке.\n" + json.dumps(todo, ensure_ascii=False)}],
+                    max_tokens=800, temperature=0)
+                items = parse_json(msg.content or "").get("items") or []
+                if len(items) == len(todo):
+                    for ru, tr in zip(todo, items):
+                        self._chip_cache[(lang, ru)] = str(tr)[:120]
+            except Exception:
+                pass
+        return [{**ch, "text": self._chip_cache.get((lang, ch["text"]), ch["text"])} for ch in chips]
+
     def manuals_for(self, engine: str) -> list[dict]:
         return [{"doc_id": k, "title": v["title"], "full_title": v.get("full_title", v["title"]), "kind": v.get("kind")}
                 for k, v in self.docs.items() if engine in v["engines"]]
@@ -196,11 +234,38 @@ class Agent:
             lines.append("Уже найденные фрагменты: " + ", ".join(f"{k}={f['document']} стр.{f['page']}" for k, f in list(c.frags.items())[-12:]))
         return "\n".join(lines)
 
-    def _system(self, c: Conv, user: dict, manager: bool = False) -> str:
+    def _system(self, c: Conv, user: dict, manager: bool = False, detail: str | None = None) -> str:
         lang = LANGS[lang_or_default(user.get("lang"))]["llm"]
         if manager:
             return MANAGER_SYSTEM.format(lang_name=lang, context=f"Сейчас {time.strftime('%d.%m.%Y %H:%M')}.")
-        return MECHANIC_SYSTEM.format(lang_name=lang, experience_rule=EXPERIENCE.get(user.get("experience") or "experienced", ""), context=self._context(c))
+        return MECHANIC_SYSTEM.format(lang_name=lang, experience_rule=EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"]),
+                                      length_rule=DETAIL.get(detail or user.get("detail") or "brief", DETAIL["brief"]), context=self._context(c))
+
+    def _expand(self, c: Conv, user: dict, answer: str, turn: "Turn") -> "Turn":
+        """Re-render an existing grounded answer in detail: same fragments, same labels, same verification."""
+        labels = [l for l in cited_labels(answer) if l in c.frags]
+        if not labels:
+            turn.text = "Нечего развернуть: в ответе нет ссылок на руководство."
+            return turn
+        if not self.llm.available:
+            turn.text = answer
+            turn.sources = [self._source_view(l, c) for l in labels]
+            return turn
+        frags = "\n\n".join(f"[{l}] {c.frags[l]['document']}, стр. PDF {c.frags[l]['page']}\n{snippet(c.frags[l]['text'], answer, 2500)}" for l in labels[:8])
+        messages = [{"role": "system", "content": self._system(c, user, detail="detailed")},
+                    {"role": "user", "content": EXPAND_PROMPT.format(answer=answer[:3000], frags=frags)}]
+        try:
+            msg, tok = self.llm.chat("expand", messages, max_tokens=4500)
+            turn.tokens += tok
+            out = self._verify_answer(c, messages, (msg.content or "").strip(), turn)
+        except LlmUnavailable as e:
+            turn.ok = False
+            turn.tools.append({"tool": "llm", "error": str(e)})
+            out = answer
+        turn.tools.append({"tool": "expand", "labels": labels})
+        turn.text = out or answer
+        turn.sources = [self._source_view(l, c) for l in cited_labels(turn.text) if l in c.frags]
+        return turn
 
     # ------------------------------------------------------------------ tools
     def _add_frag(self, c: Conv, prefix: str, **f: Any) -> str:
@@ -353,6 +418,8 @@ class Agent:
         manager = user.get("role") == "manager" and c.vehicle is None
         raw = (text or "").strip()
         masked = pii.mask(raw) if self.pii_masking else raw
+        if event == "expand":
+            return self._expand(c, user, raw, turn)
         # deterministic fast paths (voice-friendly, no LLM)
         if c.vehicle and not event:
             if c.draft and CONFIRM_RE.match(raw):

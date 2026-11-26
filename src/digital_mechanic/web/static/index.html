@@ -2,7 +2,7 @@
 <html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0b1013"><link rel="manifest" href="/static/manifest.json">
-<title>Цифровой механик</title><link rel="stylesheet" href="/static/app.css">
+<title>Цифровой механик</title><link rel="stylesheet" href="/static/app.css"><script src="/static/a11y.js"></script>
 </head><body>
 <!-- login -->
 <section id="login" class="login card hidden">
@@ -14,8 +14,9 @@
     <label><input type="radio" name="role" value="manager"> <span data-t="role_manager">Главный механик</span></label>
   </div>
   <div style="margin-top:.4em">
-    <label><input type="radio" name="exp" value="experienced" checked> <span data-t="exp_expert">Опытный</span></label>
     <label><input type="radio" name="exp" value="novice"> <span data-t="exp_novice">Новичок</span></label>
+    <label><input type="radio" name="exp" value="experienced" checked> <span data-t="exp_expert">Опытный</span></label>
+    <label><input type="radio" name="exp" value="expert"> <span data-t="exp_pro">Эксперт</span></label>
   </div>
   <label style="margin-top:.8em"><input id="l_consent" type="checkbox"> <span data-t="consent">Согласие 152-ФЗ</span> — <a href="/privacy" target="_blank" style="color:var(--accent)">?</a></label>
   <button class="primary" id="l_go" style="width:100%;margin-top:1em" data-t="enter">Войти</button>
@@ -33,11 +34,15 @@
     <div class="row"><b data-t="settings">Настройки</b></div>
     <label data-t="language">Язык</label><select id="s_lang"></select>
     <div style="margin:.5em 0">
+      <label><input type="radio" name="s_exp" value="novice"> <span data-t="exp_novice"></span></label><br>
       <label><input type="radio" name="s_exp" value="experienced"> <span data-t="exp_expert"></span></label><br>
-      <label><input type="radio" name="s_exp" value="novice"> <span data-t="exp_novice"></span></label>
+      <label><input type="radio" name="s_exp" value="expert"> <span data-t="exp_pro"></span></label>
     </div>
-    <label><input type="checkbox" id="s_big"> <span data-t="big_font">Крупный шрифт</span></label><br>
-    <label><input type="checkbox" id="s_voice"> <span data-t="voice_out">Читать ответы вслух</span></label><br>
+    <div style="margin:.5em 0"><b data-t="detail">Ответы</b>:
+      <label><input type="radio" name="s_detail" value="brief"> <span data-t="detail_brief">Кратко</span></label>
+      <label><input type="radio" name="s_detail" value="detailed"> <span data-t="detail_detailed">Подробно</span></label>
+    </div>
+    <div style="margin:.5em 0"><span data-t="font_size">Размер текста</span>: A / A+ / A++ · 🔊</div>
     <label><input type="checkbox" id="s_hands"> 🖐 Без рук: после ответа слушать снова</label>
     <div class="row" style="margin-top:.7em"><button id="s_logout" data-t="logout">Выйти</button><button id="s_delete">Удалить мои данные (152-ФЗ)</button><a class="muted" href="/privacy" target="_blank">Политика ПДн</a></div>
   </div>

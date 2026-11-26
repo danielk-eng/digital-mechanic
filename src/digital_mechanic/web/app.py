@@ -94,7 +94,7 @@ def login(body: LoginIn, response: Response) -> dict:
     uid = uuid.uuid4().hex
     role = "manager" if body.role == "manager" else "mechanic"
     u = STORE.upsert_user(uid, name=pii.mask(body.name.strip()[:60]) or "—", role=role, lang=lang_or_default(body.lang),
-                          experience=body.experience if body.experience in ("novice", "experienced") else "experienced", consent_at=time.time())
+                          experience=body.experience if body.experience in EXPERIENCE_LEVELS else "experienced", consent_at=time.time())
     response.set_cookie("uid", uid, httponly=True, samesite="lax", max_age=30 * 86400)
     STORE.audit(user_id=uid, role=role, action="login", ok=1)
     return {"user": u}
@@ -105,9 +105,14 @@ def me(uid: str | None = Cookie(None)) -> dict:
     return {"user": user_of(uid), "langs": {k: v["name"] for k, v in LANGS.items()}}
 
 
+EXPERIENCE_LEVELS = ("novice", "experienced", "expert")
+DETAIL_LEVELS = ("brief", "detailed")
+
+
 class ProfileIn(BaseModel):
     lang: str | None = None
     experience: str | None = None
+    detail: str | None = None
     big_font: bool | None = None
     voice_out: bool | None = None
 
@@ -118,6 +123,10 @@ def update_me(body: ProfileIn, uid: str | None = Cookie(None)) -> dict:
     kw = {k: v for k, v in body.model_dump().items() if v is not None}
     if "lang" in kw:
         kw["lang"] = lang_or_default(kw["lang"])
+    if kw.get("experience") not in (None, *EXPERIENCE_LEVELS):
+        raise HTTPException(422, "experience: novice | experienced | expert")
+    if kw.get("detail") not in (None, *DETAIL_LEVELS):
+        raise HTTPException(422, "detail: brief | detailed")
     for k in ("big_font", "voice_out"):
         if k in kw:
             kw[k] = int(kw[k])
@@ -233,7 +242,8 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
     if c.vehicle is None and u["role"] != "manager":
         raise HTTPException(400, "choose a vehicle")
     turn = AGENT.handle(c, u, body.text[:4000], event=body.event)
-    _record(u, c, "chat" if not body.event else body.event, body.text, turn, t0)
+    # "expand" re-renders the previous answer: do not store it again as a user message
+    _record(u, c, "chat" if not body.event else body.event, "" if body.event == "expand" else body.text, turn, t0)
     return {**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000)}
 
 
@@ -241,6 +251,13 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
 def progress(vehicle_id: str | None = None, uid: str | None = Cookie(None)) -> dict:
     u = user_of(uid)
     return {"steps": AGENT.progress.get(f"{u['id']}:{vehicle_id or '-'}", [])}
+
+
+@app.get("/api/suggest")
+def suggest_chips(vehicle_id: str | None = None, uid: str | None = Cookie(None)) -> dict:
+    u = user_of(uid)
+    c = AGENT.conv(u["id"], vehicle_id)
+    return {"chips": AGENT.suggestions(c, u)}
 
 
 PLATE_MAP = str.maketrans("АВЕКМНОРСТУХ", "ABEKMHOPCTYX")

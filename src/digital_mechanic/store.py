@@ -16,7 +16,7 @@ SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS users(
   id TEXT PRIMARY KEY, name TEXT, role TEXT, lang TEXT DEFAULT 'ru', experience TEXT DEFAULT 'experienced',
-  big_font INTEGER DEFAULT 0, voice_out INTEGER DEFAULT 0, consent_at REAL, created_at REAL);
+  big_font INTEGER DEFAULT 0, voice_out INTEGER DEFAULT 0, consent_at REAL, created_at REAL, detail TEXT DEFAULT 'brief');
 CREATE TABLE IF NOT EXISTS diagnoses(
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user_id TEXT, vehicle_id TEXT, session_id TEXT, status TEXT,
   anomaly_type TEXT, anomaly_score REAL, confidence REAL, signal_quality TEXT, decision TEXT, urgency TEXT, payload TEXT);
@@ -48,6 +48,10 @@ class Store:
         self._con = sqlite3.connect(self.path, check_same_thread=False)
         self._con.row_factory = sqlite3.Row
         self._con.executescript(SCHEMA)
+        cols = {r[1] for r in self._con.execute("PRAGMA table_info(users)")}
+        if "detail" not in cols:  # migrate DBs created before brief/detailed answers
+            self._con.execute("ALTER TABLE users ADD COLUMN detail TEXT DEFAULT 'brief'")
+            self._con.commit()
 
     def x(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -69,7 +73,7 @@ class Store:
         if not u:
             self.x("INSERT INTO users(id, created_at) VALUES (?,?)", (uid, time.time()))
         for k, v in kw.items():
-            if k in {"name", "role", "lang", "experience", "big_font", "voice_out", "consent_at"}:
+            if k in {"name", "role", "lang", "experience", "detail", "big_font", "voice_out", "consent_at"}:
                 self.x(f"UPDATE users SET {k}=? WHERE id=?", (v, uid))
         return self.one("SELECT * FROM users WHERE id=?", (uid,))
 

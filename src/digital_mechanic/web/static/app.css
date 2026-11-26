@@ -1,7 +1,11 @@
 :root{--bg:#0f1418;--panel:#182028;--panel2:#202a33;--text:#eef2f5;--muted:#9fb0bd;--accent:#ffb020;--go:#2fbf71;--warn:#f2b632;--stop:#e5484d;--blue:#3d8bfd;--r:14px;--fs:17px}
 *{box-sizing:border-box}html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--text);font:var(--fs)/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans","Noto Sans Devanagari",sans-serif}
-body.big{--fs:21px}
+html[data-fs=l] body{--fs:21px}html[data-fs=xl] body{--fs:25px}
+.a11y{display:flex;gap:.2em;align-items:center;flex-wrap:nowrap}.a11y button{padding:.35em .55em;min-width:2.4em;font-weight:700;line-height:1}
+.a11y button.on{background:var(--accent);color:#1b1300}
+html[data-fs=xl] header{flex-wrap:wrap}html[data-fs=xl] header h1{white-space:normal}
+.expand{margin-top:.5em;padding:.45em .9em;font-size:.9em;background:#243443}
 button,select,input,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:0;border-radius:var(--r);padding:.7em 1em;background:var(--panel2)}
 button.primary{background:var(--accent);color:#1b1300;font-weight:700}
