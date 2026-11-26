@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0e1013">
+  <title>Цифровой механик</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: #0e1013; color: #e8eaed; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+    img.logo { width: 96px; height: 96px; border-radius: 22px; margin-bottom: 20px; }
+    h1 { font-size: 22px; font-weight: 650; margin: 0 0 8px; letter-spacing: -0.02em; }
+    p { margin: 0; color: #9aa0a6; font-size: 15px; line-height: 1.45; max-width: 320px; }
+    .row { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; justify-content: center; }
+    button { appearance: none; border: 0; border-radius: 12px; padding: 12px 18px; font: inherit; font-weight: 600; cursor: pointer; }
+    button.primary { background: #4c8dff; color: #fff; }
+    button.ghost { background: #1a1d22; color: #e8eaed; }
+    input { width: min(360px, 100%); margin-top: 18px; padding: 12px 14px; border-radius: 12px; border: 1px solid #2a2f36; background: #15181c; color: inherit; font: inherit; display: none; }
+    input.show { display: block; }
+    .err { color: #f3b4b4; margin-top: 14px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <img class="logo" src="icon.png" alt="">
+  <h1>Цифровой механик</h1>
+  <p id="status">Подключение к стенду…</p>
+  <input id="url" type="url" inputmode="url" autocomplete="off" spellcheck="false" placeholder="https://…">
+  <div class="row" id="actions" hidden>
+    <button class="primary" id="retry" type="button">Повторить</button>
+    <button class="ghost" id="change" type="button">Адрес сервера</button>
+  </div>
+  <script>
+    const DEFAULT_URL = "https://digital-mechanic-iikuznitsa.vercel.app";
+    const statusEl = document.getElementById("status");
+    const actions = document.getElementById("actions");
+    const urlInput = document.getElementById("url");
+    const params = new URLSearchParams(location.search);
+    const offline = params.get("offline") === "1" || params.get("offline") === "true";
+
+    function normalize(raw) {
+      let u = (raw || "").trim();
+      if (!u) return DEFAULT_URL;
+      if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+      try {
+        const p = new URL(u);
+        if (p.protocol !== "http:" && p.protocol !== "https:") return DEFAULT_URL;
+        return p.toString().replace(/\/$/, "");
+      } catch (e) { return DEFAULT_URL; }
+    }
+
+    function getUrl() {
+      if (params.get("url")) return normalize(params.get("url"));
+      if (window.MechanicNative && window.MechanicNative.getServerUrl) {
+        try { return normalize(window.MechanicNative.getServerUrl()); } catch (e) {}
+      }
+      try {
+        const saved = localStorage.getItem("mechanic_server_url");
+        if (saved) return normalize(saved);
+      } catch (e) {}
+      return DEFAULT_URL;
+    }
+
+    function go(u) {
+      const url = normalize(u);
+      try { localStorage.setItem("mechanic_server_url", url); } catch (e) {}
+      statusEl.textContent = "Подключение к стенду…";
+      actions.hidden = true;
+      urlInput.classList.remove("show");
+      location.replace(url);
+    }
+
+    document.getElementById("retry").onclick = () => go(urlInput.value || getUrl());
+    document.getElementById("change").onclick = () => {
+      if (window.MechanicNative && window.MechanicNative.openSettings) {
+        window.MechanicNative.openSettings();
+        return;
+      }
+      urlInput.classList.add("show");
+      urlInput.value = getUrl();
+      urlInput.focus();
+      urlInput.select();
+      statusEl.textContent = "Введите адрес стенда и нажмите «Повторить».";
+    };
+
+    if (offline) {
+      statusEl.textContent = "Нет связи со стендом. Проверьте сеть или укажите другой адрес.";
+      actions.hidden = false;
+      urlInput.value = getUrl();
+    } else {
+      const target = getUrl();
+      urlInput.value = target;
+      setTimeout(() => go(target), 400);
+    }
+  </script>
+</body>
+</html>

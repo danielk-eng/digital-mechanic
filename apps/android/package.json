@@ -1,0 +1,19 @@
+{
+  "name": "digital-mechanic-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Android wrapper for Цифровой механик",
+  "scripts": {
+    "cap:sync": "cap sync android",
+    "apk": "bash ../scripts/build-android.sh"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.4.4",
+    "@capacitor/core": "^7.4.4",
+    "@capacitor/splash-screen": "^7.0.3"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.4.4",
+    "typescript": "^7.0.2"
+  }
+}

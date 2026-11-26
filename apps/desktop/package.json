@@ -1,0 +1,88 @@
+{
+  "name": "digital-mechanic",
+  "productName": "Цифровой механик",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Desktop wrapper for Цифровой механик",
+  "main": "main.js",
+  "author": "ИИкузница",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "pack:linux": "electron-builder --linux AppImage",
+    "pack:win": "electron-builder --win nsis portable zip",
+    "pack": "electron-builder --linux AppImage --win nsis portable zip"
+  },
+  "devDependencies": {
+    "electron": "^36.8.1",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "ru.iikuznitsa.mechanic",
+    "productName": "Цифровой механик",
+    "executableName": "DigitalMechanic",
+    "copyright": "ИИкузница 2026",
+    "artifactName": "DigitalMechanic-${os}-${version}.${ext}",
+    "directories": {
+      "output": "artifacts",
+      "buildResources": "resources"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "splash.html",
+      "offline.html",
+      "prompt.html",
+      "assets/**"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "Цифровой механик",
+      "artifactName": "DigitalMechanic-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": {
+      "artifactName": "DigitalMechanic-Portable-${version}.exe"
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "category": "Utility",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "DigitalMechanic-${version}.AppImage"
+    }
+  }
+}

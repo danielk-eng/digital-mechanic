@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Цифровой механик</string>
+    <string name="title_activity_main">Цифровой механик</string>
+    <string name="package_name">ru.iikuznitsa.mechanic</string>
+    <string name="custom_url_scheme">ru.iikuznitsa.mechanic</string>
+    <string name="shortcut_server_short">Сервер</string>
+    <string name="shortcut_server_long">Адрес сервера</string>
+</resources>
