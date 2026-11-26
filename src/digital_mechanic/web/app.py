@@ -519,8 +519,11 @@ def review_ticket(ticket_id: str, body: ReviewIn, uid: str | None = Cookie(None)
 def handoffs(status: str | None = None, uid: str | None = Cookie(None)) -> dict:
     user_of(uid, manager=True)
     rows = STORE.handoffs(status)
+    # the chief sees his own staff by name (as on the «Сотрудники» tab); the name is the account name, not free text
+    who = {u["id"]: u for u in STORE.q("SELECT id, name, title, role FROM users")}
     for r in rows:
-        r["user_name"] = mask_name(r.get("user_name") or "")
+        u = who.get(r.get("user_id")) or {}
+        r["user_name"] = (u.get("name") or r.get("user_name") or "—") + (f", {u['title']}" if u.get("title") else "")
     return {"handoffs": rows}
 
 

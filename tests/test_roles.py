@@ -95,6 +95,8 @@ def test_manager_briefing_last_scan_insights_and_assignment(app_mod):
     vet = login(app_mod, "veteran", "3001")
     a = vet.get("/api/my/assignments").json()["assignments"]
     assert a and a[0]["ticket_id"] == tk["ticket_id"] and a[0]["vehicle_id"] == "M851TA178"
+    hs = chief.get("/api/handoffs").json()["handoffs"]  # sender shown by name to the chief, not «A***p»
+    assert any(h["user_name"].startswith("Александр") and "***" not in h["user_name"] for h in hs)
 
 
 def test_persona_styles_differ_and_memory_callback(app_mod):
