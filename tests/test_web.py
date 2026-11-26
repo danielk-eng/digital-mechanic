@@ -85,3 +85,9 @@ def test_session_endpoint_no_401():
     from digital_mechanic.web.app import app
     r = TestClient(app).get("/api/session")
     assert r.status_code == 200 and r.json()["user"] is None
+
+
+def test_vehicle_title_not_overwritten_by_i18n():
+    from pathlib import Path
+    html = (Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static/index.html").read_text(encoding="utf-8")
+    assert 'id="vehTitle" data-t=' not in html  # applyI18n() used to reset the plate to «Выберите машину» after a settings change

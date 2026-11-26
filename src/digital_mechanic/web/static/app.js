@@ -29,6 +29,7 @@ function applyI18n() {
   $$("[data-tp]").forEach(el => el.placeholder = t(el.dataset.tp));
   $$("[data-t-aria]").forEach(el => { el.setAttribute("aria-label", t(el.dataset.tAria)); el.title = t(el.dataset.tAria); });
   document.documentElement.lang = (ME && ME.lang) || "ru";
+  if (typeof VID !== "undefined" && !VID && $("#vehTitle")) $("#vehTitle").textContent = t("choose_vehicle");  // vehicle title is not an i18n label
 }
 function toast(text, ms = 3500) {
   const el = document.createElement("div"); el.className = "toast"; el.textContent = text; document.body.appendChild(el);
