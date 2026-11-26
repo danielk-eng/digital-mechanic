@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Цифровой механик</title>
+<style>
+:root{--bg:#0f1720;--card:#18232f;--fg:#e8eef4;--mut:#8da2b5;--acc:#2f9bff;--ok:#2ecc71;--warn:#f1c40f;--bad:#e74c3c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,sans-serif;display:flex;flex-direction:column;height:100dvh}
+header{padding:8px 10px;background:#121c26;border-bottom:1px solid #243242}
+header h1{font-size:16px;margin:0 0 6px}
+.row{display:flex;gap:6px;margin-bottom:6px}
+select,button,input{font:inherit;border-radius:8px;border:1px solid #2c3d50;background:#1b2a3a;color:var(--fg);padding:8px}
+select{flex:1;min-width:0}button{cursor:pointer;background:var(--acc);border:0;color:#fff;font-weight:600}
+button.sec{background:#2a3b4d}button.ok{background:var(--ok)}button.danger{background:#7a3a3a}
+#log{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.m{max-width:94%;padding:8px 10px;border-radius:12px;white-space:pre-wrap}.u{align-self:flex-end;background:#25527f}.a{align-self:flex-start;background:var(--card)}
+.card{background:#1d2b39;border-radius:10px;padding:8px 10px;margin-top:6px;font-size:14px;white-space:normal}
+.card h4{margin:6px 0 3px;font-size:12px;text-transform:uppercase;color:var(--mut);letter-spacing:.04em}
+.light{display:inline-block;padding:3px 10px;border-radius:99px;font-weight:700;color:#10151b}
+.go{background:var(--ok)}.service{background:var(--warn)}.stop{background:var(--bad);color:#fff}
+.kv{color:var(--mut)}.kv b{color:var(--fg)}
+a.pg{color:#7cc1ff;text-decoration:none;border-bottom:1px dotted #7cc1ff}
+ul{margin:2px 0 2px 16px;padding:0}
+.q{color:var(--mut);font-size:12px;font-style:italic}
+form{display:flex;gap:6px;padding:8px;background:#121c26;border-top:1px solid #243242}form input{flex:1;min-width:0}
+.btns{display:flex;gap:6px;margin-top:8px}
+</style></head><body>
+<header><h1>🔧 Цифровой механик</h1>
+<div class="row"><select id="veh"><option value="">— выберите машину —</option></select></div>
+<div class="row"><select id="chk"><option value="">последняя проверка</option></select><button id="get">Получить результат</button></div></header>
+<div id="log"></div>
+<form id="f"><input id="t" placeholder="Вопрос по руководству…" autocomplete="off"><button>→</button></form>
+<script>
+let sid=null,docs={};const $=id=>document.getElementById(id),log=$('log');
+const esc=s=>String(s??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+async function api(p,b){const r=await fetch(p,b?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}:{});return r.json()}
+function msg(t,c){const d=document.createElement('div');d.className='m '+c;d.innerHTML=t;log.appendChild(d);log.scrollTop=log.scrollHeight;return d}
+function pg(document_,page){const u=docs[document_];const t=esc(document_)+', стр. '+page;return u?`<a class="pg" target="_blank" href="${u}#page=${page}">${t}</a>`:t}
+function cits(list){return '<ul>'+list.map(c=>`<li>${pg(c.document,c.page)}${c.quote?`<div class="q">«${esc(c.quote)}»</div>`:''}</li>`).join('')+'</ul>'}
+function renderCard(card,box){if(!card)return;let h='';const c=card.check;
+ if(c){h+=`<div class="kv">Проверка <b>${esc(c.session_id)}</b> · статус <b>${esc(c.status)}</b> · качество <b>${esc(c.quality)}</b>${c.confidence!=null?` · уверенность <b>${c.confidence}</b>`:''}${c.anomaly_score!=null?` · отклонение <b>${c.anomaly_score}</b>`:''}</div>`}
+ if(card.light)h+=`<div style="margin:6px 0"><span class="light ${card.light.code}">${esc(card.light.text)}</span></div>`;
+ if(card.kind=='anomaly'||card.kind=='no_basis'){h+=`<h4>Диагноз</h4>${esc(c.fault)}<div class="kv">${esc(c.symptoms||'')}</div><div>Риск: ${esc(card.risk)}</div>`;
+  h+=`<h4>Приоритет: ${esc(card.priority)} — почему</h4><ul>${card.priority_basis.map(x=>'<li>'+esc(x)+'</li>').join('')}</ul>`;
+  if(card.doubt&&card.doubt.length)h+=`<div style="color:var(--warn)">⚠ ${esc(card.doubt.join('; '))}</div>`;
+  if(card.draft){const d=card.draft;h+=`<h4>Действия (работы)</h4><ul>${d.works.map(w=>`<li>${esc(w.title)} — ${pg(w.document,w.page)}</li>`).join('')}</ul>`;
+   h+=`<h4>Запчасти</h4>`+(d.parts.length?`<ul>${d.parts.map(p=>`<li>${esc(p.title)}${p.document?' — '+pg(p.document,p.page):''}</li>`).join('')}</ul><div class="q">артикулов в руководстве нет — только названия</div>`:'в руководстве не указаны');
+   h+=`<h4>Инструкция (страницы PDF)</h4><ul>${d.references.map(r=>`<li>${pg(r.document,r.page)}</li>`).join('')}</ul>`;
+   h+=`<div class="btns"><button class="ok" data-confirm="${card.draft_id}">Подтвердить и отправить в ТОиР</button><button class="danger sec" data-cancel="1">Отмена</button></div>`}}
+ if(card.kind=='ticket')h+=`<h4>Заявка в ТОиР</h4><div class="light go">${esc(card.ticket_id)}</div>`;
+ if(card.kind=='answer'&&card.citations)h+=`<h4>Источники</h4>`+cits(card.citations);
+ if(h){const d=document.createElement('div');d.className='card';d.innerHTML=h;box.appendChild(d)}}
+function show(r){sid=r.sid||sid;const b=msg(esc(r.text),'a');renderCard(r.card,b);log.scrollTop=log.scrollHeight}
+log.addEventListener('click',async e=>{const t=e.target;
+ if(t.dataset.confirm){t.disabled=true;msg('Подтверждаю','u');show(await api('/api/confirm',{sid,draft_id:t.dataset.confirm}))}
+ if(t.dataset.cancel){msg('Отмена','u');show(await api('/api/cancel',{sid}))}});
+$('veh').onchange=async()=>{const v=$('veh').value;if(!v)return;const r=await api('/api/select',{sid,vehicle_id:v});sid=r.sid;
+ $('chk').innerHTML='<option value="">последняя проверка</option>'+r.checks.map(c=>`<option value="${c.session_id}">${c.session_id} · ${c.datetime.replace('T',' ')}</option>`).join('');
+ msg(`Машина <b>${esc(v)}</b>, двигатель <b>${esc(r.vehicle.engine_type)}</b>. Нажмите «Получить результат».`,'a')};
+$('get').onclick=async()=>{if(!sid||!$('veh').value)return msg('Сначала выберите машину.','a');msg('Получить результат диагностики'+($('chk').value?' '+$('chk').value:''),'u');
+ const w=msg('Запрашиваю ML-сервис и ищу в руководстве…','a');const r=await api('/api/check',{sid,session_id:$('chk').value||null});w.remove();show(r)};
+$('f').onsubmit=async e=>{e.preventDefault();const t=$('t').value.trim();if(!t)return;$('t').value='';msg(esc(t),'u');
+ const w=msg('…','a');const r=await api('/api/chat',{sid,text:t});w.remove();show(r)};
+(async()=>{docs=await api('/api/docs');const v=await api('/api/vehicles');$('veh').innerHTML+=v.map(x=>`<option value="${esc(x.vehicle_id)}">${esc(x.label)}</option>`).join('')})();
+</script></body></html>

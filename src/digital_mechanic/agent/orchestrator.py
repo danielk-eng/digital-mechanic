@@ -255,7 +255,7 @@ class MechanicAgent:
         return {"kind": "anomaly", "check": self._check_view(c), "light": {"code": code, "text": label}, "priority": prio.value, "priority_basis": why, "doubt": flags,
                 "risk": ex.risk or "Последствия в найденных фрагментах руководства не описаны.",
                 "coverage": ex.coverage, "decision": dec.value,
-                "sources": [{"document": w.source.document, "page": w.source.page} for w in ex.works[:1]] if ex.works else []}
+                "sources": list({(w.source.document, w.source.page): {"document": w.source.document, "page": w.source.page, "quote": w.source.quote} for w in ex.works}.values())}
 
     @staticmethod
     def _draft_view(d: TicketDraft) -> dict:
