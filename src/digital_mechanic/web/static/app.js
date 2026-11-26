@@ -709,6 +709,10 @@ let VIEW = null;
 const reflow = x => String(x || "").replace(/([а-яё])-\n(?=[а-яё])/g, "$1").replace(/([^\n.:;!?])\n(?=[a-zа-яё(«])/g, "$1 ");
 // figure captions are separate paragraphs in the page text (moved out of the text column at indexing): show them as captions
 const figcaps = h => h.replace(/(^|\n)\n((?:Рис\.|Рисунок)\s*\d[\s\S]*?)(?=\n\n|$)/g, '$1<span class="figcap">$2</span>');
+// fault tables come row by row from the index («причина — способ устранения»): one card-like row each, cause over remedy
+const TABLE_HEAD = /^(?:Вероятн\S* |Возможн\S* )?(?:Причин|Неисправн)[^\n]{0,40} — (?:Способ|Метод)/m;
+const tableRows = h => h.split("\n").map(l => { const k = l.indexOf(" — "); return k > 0 ? `<span class="trow"><span class="tc">${l.slice(0, k)}</span><span class="tr">${l.slice(k + 3)}</span></span>` : `<span class="tsub">${l}</span>`; }).join("");
+const pageBody = (raw, q) => TABLE_HEAD.test(raw || "") ? tableRows(hl(esc(raw), q)) : figcaps(hl(esc(reflow(raw)), q));
 async function openCitation(doc, page, q) {
   Player.stop(); page = +page;
   $("#viewer").classList.remove("hidden"); document.body.style.overflow = "hidden";
@@ -726,7 +730,7 @@ async function openCitation(doc, page, q) {
       `<section class="pageview" id="mPage" aria-live="polite"></section>` +
       `<div class="pnav"><button class="btn ghost sm" id="mPrev">${icon("chevron-left", 18)}<span></span></button><button class="btn ghost sm" id="mNext"><span></span>${icon("chevron-right", 18)}</button></div>` +
       (pages.length > 1 ? `<details class="sec"><summary>${icon("chevron-right", 18)}<span>${t("full_section")}, ${t("page_short")} ${esc(s.span)}</span></summary><div class="in">` +
-        s.pages.map(p => `<div class="pagehead">${t("page")} ${p.page}</div><div class="pagetext">${figcaps(hl(esc(reflow(p.text)), q))}</div>`).join("") + `</div></details>` : "") +
+        s.pages.map(p => `<div class="pagehead">${t("page")} ${p.page}</div><div class="pagetext">${pageBody(p.text, q)}</div>`).join("") + `</div></details>` : "") +
       (s.pdf ? `<p class="pdflink"><a id="mPdfLink" target="_blank" rel="noopener">${icon("external-link", 14)}${t("open_pdf")}</a></p>` : "");
     $("#mPages").querySelectorAll("[data-pg]").forEach(b => b.onclick = () => showPage(+b.dataset.pg, true));
     $("#mPrev").onclick = () => showPage(VIEW.pages[VIEW.pages.indexOf(VIEW.cur) - 1], true);
@@ -754,7 +758,7 @@ async function showPage(n, scroll) {
   const trOn = needsTr() && txt && isRu(txt);
   box.innerHTML = `<div class="pv-head">${t("page")} ${n}<span class="muted"> · ${i + 1} / ${pages.length}</span>` +
     (trOn ? `<button class="origbtn" id="mOrig" aria-pressed="false">${t("show_original")}</button>` : "") + `</div>` +
-    `<div class="pagetext" data-notr>${txt ? figcaps(hl(esc(reflow(txt)), q)) : `<span class="muted">${t("page_no_text")}</span>`}</div>` +
+    `<div class="pagetext" data-notr>${txt ? pageBody(txt, q) : `<span class="muted">${t("page_no_text")}</span>`}</div>` +
     (img ? `<img class="pageimg" id="mImg" loading="lazy" src="/page/${encodeURIComponent(doc)}/${n}.png" alt="${esc(t("page_image"))} ${n}">` : "");
   const a = $("#mPdfLink"); if (a) a.href = `/manuals/${encodeURIComponent(doc)}.pdf#page=${n}`;
   if (trOn) {

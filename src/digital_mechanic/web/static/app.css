@@ -333,6 +333,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .pageview{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px;margin-bottom:12px;scroll-margin-top:8px}
 .pageview .pv-head{font-size:.82rem;font-weight:600;color:var(--text-2);margin-bottom:12px}
 .pageview .pagetext{margin-bottom:12px}
+.trow{display:block;padding:8px 0;border-bottom:1px solid var(--border)}.trow .tc{display:block;font-weight:500}.trow .tr{display:block;color:var(--text-2);padding-left:12px;margin-top:2px}
+.tsub{display:block;font-weight:600;margin:12px 0 2px}
 .figcap{display:block;margin:4px 0 8px;padding:6px 12px;border-left:3px solid var(--border-2);color:var(--text-2);font-size:.82rem;line-height:1.45}
 .pageview .pageimg{display:block;width:100%;border-radius:var(--r);border:1px solid var(--border);background:#fff}
 .pnav{display:flex;justify-content:space-between;gap:8px;margin-bottom:16px}

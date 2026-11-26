@@ -57,7 +57,9 @@ function side(title, html) {
   $("#scrim").onclick = closeSide; $("#sClose").onclick = closeSide;
 }
 // same page text rendering as the mechanic viewer: joined hyphenation, figure captions as captions
+const TABLE_HEAD = /^(?:Вероятн\S* |Возможн\S* )?(?:Причин|Неисправн)[^\n]{0,40} — (?:Способ|Метод)/m;
 function pageHtml(x) {
+  if (TABLE_HEAD.test(x || "")) return esc(x).split("\n").map(l => { const k = l.indexOf(" — "); return k > 0 ? `<span class="trow"><span class="tc">${l.slice(0, k)}</span><span class="tr">${l.slice(k + 3)}</span></span>` : `<span class="tsub">${l}</span>`; }).join("");
   const r = String(x || "").replace(/([а-яё])-\n(?=[а-яё])/g, "$1").replace(/([^\n.:;!?])\n(?=[a-zа-яё(«])/g, "$1 ");
   return esc(r).replace(/(^|\n)\n((?:Рис\.|Рисунок)\s*\d[\s\S]*?)(?=\n\n|$)/g, '$1<span class="figcap">$2</span>');
 }
