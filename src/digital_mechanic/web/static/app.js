@@ -266,8 +266,34 @@ document.addEventListener("click", async e => {
 $("#mClose").onclick = () => $("#modal").classList.add("hidden");
 
 // ---------------------------------------------------------------- vehicles / diagnosis / chat
+// item 22: quick entry by plate or garage number — typed or dictated, Cyrillic/Latin look-alikes, spaces and dashes ignored
+let VLIST = [];
+const LAT = {"А":"A","В":"B","Е":"E","К":"K","М":"M","Н":"H","О":"O","Р":"P","С":"C","Т":"T","У":"Y","Х":"X"};
+const vnorm = s => (s || "").toUpperCase().replace(/[АВЕКМНОРСТУХ]/g, c => LAT[c]).replace(/[^A-ZА-ЯЁ0-9]/g, "");
+function findVehicles(q) {
+  const n = vnorm(q); if (n.length < 2) return [];
+  const dig = /^\d+$/.test(n);
+  const exact = VLIST.filter(v => vnorm(v.vehicle_id) === n || vnorm(v.garage_no) === n || (dig && vnorm(v.garage_no).replace(/\D/g, "") === n));
+  if (exact.length) return exact;
+  return VLIST.filter(v => vnorm(v.vehicle_id).includes(n) || vnorm(v.garage_no).includes(n)).slice(0, 6);
+}
+function plateInText(text) {  // "В332ВР98", "в 332 вр 98", "Г-141" inside a free sentence
+  const m = vnorm(text).match(/[ABEKMHOPCTYX]\d{3}[ABEKMHOPCTYX]{2}\d{2,3}/);
+  if (m) { const f = findVehicles(m[0]); if (f.length === 1) return f[0]; }
+  const g = (text || "").match(/г(?:ар(?:аж(?:ный)?)?)?\.?\s*(?:№|n|номер)?\s*-?\s*(\d{2,4})/i);
+  if (g) { const f = VLIST.filter(v => vnorm(v.garage_no).replace(/\D/g, "") === g[1]); if (f.length === 1) return f[0]; }
+  return null;
+}
+$("#vfind").oninput = () => {
+  const f = findVehicles($("#vfind").value);
+  if (f.length === 1) { $("#vfind").value = ""; $("#vfindRes").innerHTML = ""; $("#vehicle").value = f[0].vehicle_id; return selectVehicle(f[0].vehicle_id); }
+  $("#vfindRes").innerHTML = f.map(v => `<button class="expand" data-v="${esc(v.vehicle_id)}">${esc(v.vehicle_id)} · ${esc(v.garage_no || "")} · ${esc(v.model || "")}</button>`).join("") ||
+    (vnorm($("#vfind").value).length >= 3 ? `<span class="muted">${t("not_found")}</span>` : "");
+  $("#vfindRes").querySelectorAll("button").forEach(b => b.onclick = () => { $("#vfind").value = ""; $("#vfindRes").innerHTML = ""; $("#vehicle").value = b.dataset.v; selectVehicle(b.dataset.v); });
+};
+
 async function loadVehicles() {
-  const r = await api("/api/vehicles");
+  const r = await api("/api/vehicles"); VLIST = r.vehicles;
   const sel = $("#vehicle");
   sel.innerHTML = `<option value="">${t("choose_vehicle")}</option>` + r.vehicles.map(v =>
     `<option value="${v.vehicle_id}">${v.vehicle_id} · ${esc(v.model || "")} · ${esc(v.engine_model)}${v.in_repair ? " 🛠" : ""}</option>`).join("");
@@ -332,7 +358,8 @@ async function selectVehicle(vid) {
 
 async function diagnose() {
   stopSpeak();
-  if (!VID) return alert(t("choose_vehicle"));
+  if (!VID) { const v = plateInText(text); if (!v) return alert(t("choose_vehicle"));
+    $("#vehicle").value = v.vehicle_id; return selectVehicle(v.vehicle_id).then(() => send(text)); }
   if (BUSY) return; BUSY = true; $("#btnDiag").disabled = true;
   try {
     const r = await api("/api/diagnose", {json: {vehicle_id: VID, session_id: $("#sess").value || null}});

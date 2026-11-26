@@ -125,7 +125,9 @@
   "days": "дн.",
   "urg_high": "высокий",
   "urg_medium": "средний",
-  "urg_low": "низкий"
+  "urg_low": "низкий",
+  "find_vehicle": "🔎 Госномер или гаражный №",
+  "not_found": "Не найдено"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -253,7 +255,9 @@
   "days": "kun",
   "urg_high": "yuqori",
   "urg_medium": "oʻrta",
-  "urg_low": "past"
+  "urg_low": "past",
+  "find_vehicle": "🔎 Davlat raqami yoki garaj №",
+  "not_found": "Topilmadi"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -381,7 +385,9 @@
   "days": "рӯз",
   "urg_high": "баланд",
   "urg_medium": "миёна",
-  "urg_low": "паст"
+  "urg_low": "паст",
+  "find_vehicle": "🔎 Рақами давлатӣ ё № гараж",
+  "not_found": "Ёфт нашуд"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -509,7 +515,9 @@
   "days": "күн",
   "urg_high": "жоғары",
   "urg_medium": "орташа",
-  "urg_low": "төмен"
+  "urg_low": "төмен",
+  "find_vehicle": "🔎 Мемлекеттік нөмір не гараж №",
+  "not_found": "Табылмады"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -637,7 +645,9 @@
   "days": "दिन",
   "urg_high": "उच्च",
   "urg_medium": "मध्यम",
-  "urg_low": "निम्न"
+  "urg_low": "निम्न",
+  "find_vehicle": "🔎 नंबर प्लेट या गैराज नं.",
+  "not_found": "नहीं मिला"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -765,6 +775,8 @@
   "days": "ngày",
   "urg_high": "cao",
   "urg_medium": "trung bình",
-  "urg_low": "thấp"
+  "urg_low": "thấp",
+  "find_vehicle": "🔎 Biển số hoặc số gara",
+  "not_found": "Không tìm thấy"
  }
 }
