@@ -278,7 +278,7 @@ def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str |
             if c is not None and sum(1 for ws in top if any(w[2] < c for w in ws) and any(c < w[0] and w[2] < g for w in ws)) >= 3:
                 g1 = c
     syms: list[list[str]] = []
-    sym_pos = -1
+    sym_pos, hdr_joined = -1, False
     tail: list[str] = []
     def full_width(ws: list[tuple]) -> bool:
         return len(_join_words(ws)) > 50 and any(w[0] < g - 1 < g + 1 < w[2] for w in ws)
@@ -306,7 +306,18 @@ def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str |
             sym = [w for w in ws if w[2] < g1 + 1]
             if sym:
                 st = _join_words(sym)
-                if re.match(r"^\d+\s+\S", st) or not syms:
+                numbered = bool(re.match(r"^\d+\s+\S", st))
+                if not syms and not numbered and not hdr_joined and head_i >= 1 and all(w[2] < g1 + 1 for w in lines[head_i - 1]):
+                    # «Неисправность и ее | признаки» around the header line: one header «… признаки — причина — способ»
+                    out[head_i - 1] = _join_cell([out[head_i - 1], st]) + " — " + out[head_i]
+                    del out[head_i]
+                    hdr_joined = True
+                    ws = [w for w in ws if w[2] >= g1 + 1]
+                    if not ws:
+                        continue
+                    sym = []
+            if sym:
+                if numbered or not syms:
                     flush()
                     syms.append([st])
                     sym_pos = len(out)
@@ -328,6 +339,10 @@ def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str |
         new = bool(ROW_START_RE.match(L)) and not prev_l.endswith("-")
         owner = next((r for r in reversed(rows) if r[1]), None)
         last_r = owner[1][-1] if owner else ""
+        if L[:1] == "*" and k + 1 < len(body) and any(w[0] < g - 1 < g + 1 < w[2] for w in body[k + 1]):
+            flush()
+            out.append(_join_words(ws))  # a footnote running across both columns under the table
+            continue
         if new and owner is not None and L[:1] in "-–—*" and R:
             steps = re.findall(r"(?:^|[.;] )(\d+) [А-ЯЁ]", " ".join(owner[1]))
             m = re.match(r"(\d+) [А-ЯЁ]", R)
