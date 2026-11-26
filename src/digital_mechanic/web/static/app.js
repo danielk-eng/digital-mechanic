@@ -110,11 +110,13 @@ function captionFollow(p, frac) {
 // ---------------------------------------------------------------- markdown-lite with citation chips
 function inline(h, src) {
   h = h.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  // a label without a source (e.g. in the handoff summary) disappears together with the space before it («ТНВД ;» -> «ТНВД;»)
   return h.replace(/\[([^\]]{1,80})\]/g, (m, grp, off, whole) => {
     const labs = grp.match(/\b(?:S|X)\d+\b/g); if (!labs) return m;
+    if (!labs.some(l => src[l])) return "\u0000";
     const ctx = whole.slice(Math.max(0, off - 240), off).replace(/<[^>]+>/g, "").split(/\n|[.!?]\s|•/).filter(x => x.trim().length > 6).pop() || "";
     return labs.map(l => src[l] ? `<button class="cite ${src[l].extra ? "x" : ""}" data-doc="${esc(src[l].doc_id)}" data-page="${src[l].page}" data-q="${esc(ctx.trim().slice(0, 200))}" title="${esc(src[l].document)}">${t("page_short")} ${src[l].page}</button>` : "").join("");
-  });
+  }).replace(/[ \t]*\u0000/g, "");
 }
 function md(text, sources) {
   const src = Object.fromEntries((sources || []).map(s => [s.label, s]));
