@@ -78,7 +78,9 @@
   "page_image": "Изображение страницы",
   "pages": "Страницы",
   "extra_src": "Дополнительный источник (не база Заказчика)",
-  "privacy_note": "🔒 Данные сессии хранятся на сервере заказчика; в языковую модель уходит только замаскированный текст запроса."
+  "privacy_note": "🔒 Данные сессии хранятся на сервере заказчика; в языковую модель уходит только замаскированный текст запроса.",
+  "scope_only": "Ищу только в руководствах двигателя",
+  "books": "книг(и)"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -159,7 +161,9 @@
   "page_image": "Sahifa rasmi",
   "pages": "Sahifalar",
   "extra_src": "Qoʻshimcha manba (Buyurtmachi bazasi emas)",
-  "privacy_note": "🔒 Sessiya maʼlumotlari buyurtmachi serverida saqlanadi; til modeliga faqat niqoblangan soʻrov matni yuboriladi."
+  "privacy_note": "🔒 Sessiya maʼlumotlari buyurtmachi serverida saqlanadi; til modeliga faqat niqoblangan soʻrov matni yuboriladi.",
+  "scope_only": "Faqat ushbu dvigatel qoʻllanmalarida qidiraman",
+  "books": "ta kitob"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -240,7 +244,9 @@
   "page_image": "Тасвири саҳифа",
   "pages": "Саҳифаҳо",
   "extra_src": "Манбаи иловагӣ (на пойгоҳи Фармоишгар)",
-  "privacy_note": "🔒 Маълумоти сессия дар сервери фармоишгар нигоҳ дошта мешавад; ба модели забонӣ танҳо матни ниқобпӯшидаи дархост меравад."
+  "privacy_note": "🔒 Маълумоти сессия дар сервери фармоишгар нигоҳ дошта мешавад; ба модели забонӣ танҳо матни ниқобпӯшидаи дархост меравад.",
+  "scope_only": "Танҳо дар дастурҳои ҳамин муҳаррик ҷустуҷӯ мекунам",
+  "books": "китоб"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -321,7 +327,9 @@
   "page_image": "Бет суреті",
   "pages": "Беттер",
   "extra_src": "Қосымша дереккөз (Тапсырыс беруші базасы емес)",
-  "privacy_note": "🔒 Сессия деректері тапсырыс берушінің серверінде сақталады; тілдік модельге тек бүркемеленген сұрау мәтіні жіберіледі."
+  "privacy_note": "🔒 Сессия деректері тапсырыс берушінің серверінде сақталады; тілдік модельге тек бүркемеленген сұрау мәтіні жіберіледі.",
+  "scope_only": "Тек осы қозғалтқыштың нұсқаулықтарынан іздеймін",
+  "books": "кітап"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -402,7 +410,9 @@
   "page_image": "पृष्ठ की छवि",
   "pages": "पृष्ठ",
   "extra_src": "अतिरिक्त स्रोत (ग्राहक का आधार नहीं)",
-  "privacy_note": "🔒 सत्र का डेटा ग्राहक के सर्वर पर रहता है; भाषा मॉडल को केवल छिपाया गया (मास्क) अनुरोध पाठ भेजा जाता है।"
+  "privacy_note": "🔒 सत्र का डेटा ग्राहक के सर्वर पर रहता है; भाषा मॉडल को केवल छिपाया गया (मास्क) अनुरोध पाठ भेजा जाता है।",
+  "scope_only": "केवल इसी इंजन की पुस्तिकाओं में खोज",
+  "books": "पुस्तकें"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -483,6 +493,8 @@
   "page_image": "Ảnh trang",
   "pages": "Trang",
   "extra_src": "Nguồn bổ sung (không thuộc cơ sở của Khách hàng)",
-  "privacy_note": "🔒 Dữ liệu phiên được lưu trên máy chủ của khách hàng; mô hình ngôn ngữ chỉ nhận văn bản yêu cầu đã được che thông tin cá nhân."
+  "privacy_note": "🔒 Dữ liệu phiên được lưu trên máy chủ của khách hàng; mô hình ngôn ngữ chỉ nhận văn bản yêu cầu đã được che thông tin cá nhân.",
+  "scope_only": "Chỉ tìm trong sổ tay của động cơ",
+  "books": "cuốn"
  }
 }

@@ -72,3 +72,4 @@ html[data-fs=xl] .bar label.chip{padding:.4em .5em!important}
 .modal details.sec summary{cursor:pointer;font-weight:600}
 .modal mark{background:#ffe58a}
 .privacy-note{font-size:.85em;margin:.5em 0;line-height:1.35}
+.scope{display:inline-block;margin:.35em 0;padding:.25em .6em;border-radius:999px;background:#163a2a;color:#9be7bf;border:1px solid #2fbf71;font-size:.9em}

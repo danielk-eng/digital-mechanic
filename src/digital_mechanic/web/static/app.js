@@ -214,7 +214,7 @@ async function selectVehicle(vid) {
   VEH = r;
   const v = r.vehicle;
   $("#vehInfo").classList.remove("hidden");
-  $("#vehInfo").innerHTML = `<b>${esc(v.vehicle_id)}</b> · ${esc(v.model && v.model.startsWith(v.make) ? v.model : v.make + " " + (v.model || ""))} · ${esc(v.vehicle_type)}<br>⚙️ <b>${esc(v.engine_model)}</b> (${esc(v.fuel)}) · гараж. ${esc(v.garage_no)}<div class="muted">📚 ${r.manuals.map(m => esc(m.title)).join(" · ")}</div>` +
+  $("#vehInfo").innerHTML = `<b>${esc(v.vehicle_id)}</b> · ${esc(v.model && v.model.startsWith(v.make) ? v.model : v.make + " " + (v.model || ""))} · ${esc(v.vehicle_type)}<br>⚙️ <b>${esc(v.engine_model)}</b> (${esc(v.fuel)}) · гараж. ${esc(v.garage_no)}<div class="scope" title="${esc(r.manuals.map(m => m.title).join(" · "))}">🔎 ${t("scope_only")} <b>${esc(v.engine_model)}</b> · ${r.manuals.length} ${t("books")}</div><div class="muted">📚 ${r.manuals.map(m => esc(m.title)).join(" · ")}</div>` +
     (r.tickets.length ? `<div class="muted">${t("tickets")}: ${r.tickets.slice(0, 3).map(x => esc(x.ticket_id)).join(", ")}</div>` : "") +
     `<button id="btnHist" class="expand">🗂 ${t("history")}</button><div id="histBox" class="hidden"></div>`;
   $("#btnHist").onclick = async () => {
