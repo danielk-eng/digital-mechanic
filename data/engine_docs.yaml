@@ -1,7 +1,10 @@
-# Official document titles come from TZ section 3 on 2026-11-26.
-# Until then these slugs are placeholders only.
-# ЯМЗ-236М2: operation + repair
-# ЯМЗ-536: operation + repair
-# ЗМЗ-5234.10: repair
-# ЗМЗ-40904.10 and ЗМЗ-40905.10: one shared manual
-engines: {}
+# Engine -> manual mapping. Titles in `title` must be replaced by the official
+# designations from section 3 of the TZ when it is available (source_pages.document).
+mock: true
+documents:
+  YAMZ-236M2-OM: {title: "Руководство по эксплуатации двигателя ЯМЗ-236М2", filename: yamz_236m2_operation.pdf, engines: ["ЯМЗ-236М2"]}
+  YAMZ-236M2-RM: {title: "Руководство по ремонту двигателя ЯМЗ-236М2", filename: yamz_236m2_repair.pdf, engines: ["ЯМЗ-236М2"]}
+  YAMZ-536-OM: {title: "Руководство по эксплуатации двигателя ЯМЗ-536", filename: yamz_536_operation.pdf, engines: ["ЯМЗ-536"]}
+  YAMZ-536-RM: {title: "Руководство по ремонту двигателя ЯМЗ-536", filename: yamz_536_repair.pdf, engines: ["ЯМЗ-536"]}
+  ZMZ-5234-RM: {title: "Руководство по ремонту двигателя ЗМЗ-5234.10", filename: zmz_5234_repair.pdf, engines: ["ЗМЗ-5234.10"]}
+  ZMZ-409-OMRM: {title: "Руководство по эксплуатации, техническому обслуживанию и ремонту двигателей ЗМЗ-40904.10 и ЗМЗ-40905.10", filename: zmz_409_combined.pdf, engines: ["ЗМЗ-40904.10", "ЗМЗ-40905.10"]}
