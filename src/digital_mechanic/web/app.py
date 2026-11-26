@@ -451,7 +451,8 @@ def audit_csv(uid: str | None = Cookie(None)):
 def health() -> dict:
     return {"ml": AGENT.ml.health(), "toir": AGENT.toir.health(), "llm_configured": AGENT.llm.available, "model": S.llm_model,
             "pages": len(AGENT.index.pages), "extra_pages": len(AGENT.extra.pages) if AGENT.extra else 0,
-            "stt": "deepgram" if S.deepgram_api_key else "browser/whisper", "tracing": "opik" if AGENT.llm._opik else None}
+            "stt": "+".join(x for x in ("whisper-local" if S.speech_url else "", "deepgram" if S.deepgram_api_key else "") if x) or "browser",
+            "tts": "silero" if (S.speech_url or S.silero_enabled) else "browser", "tracing": "opik" if AGENT.llm._opik else None}
 
 
 @app.get("/api/usage")

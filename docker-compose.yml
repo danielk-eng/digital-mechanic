@@ -17,8 +17,20 @@ services:
     environment:
       ML_SERVICE_URL: ${ML_SERVICE_URL:-http://mock-ml:8001}
       TOIR_SERVICE_URL: ${TOIR_SERVICE_URL:-http://mock-toir:8002}
+      SPEECH_URL: ${SPEECH_URL:-}         # http://speech:9000 when the speech profile is on
     volumes:
       - ./var:/app/var              # SQLite, uploads, logs: local storage (152-FZ)
       - ./data/manuals:/app/data/manuals:ro   # PDFs for page images (optional, see scripts/fetch_manuals.py)
+      - ${EXTRA_IMAGES:-./data/extra/images}:/app/data/extra/images:ro   # page renders of the extra truck manuals
     depends_on: [mock-ml, mock-toir]
+    restart: unless-stopped
+  # Optional local speech (STT faster-whisper + Silero TTS): docker compose --profile speech up -d, SPEECH_URL=http://speech:9000
+  speech:
+    profiles: [speech]
+    build: ./services/speech
+    environment:
+      WHISPER_MODEL: ${WHISPER_MODEL:-large-v3-turbo}
+      WHISPER_COMPUTE: ${WHISPER_COMPUTE:-int8}
+    volumes:
+      - ${MODELS_DIR:-./var/models}:/models
     restart: unless-stopped

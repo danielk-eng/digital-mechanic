@@ -1,12 +1,12 @@
-"""End-to-end smoke over the HTTP API (needs scripts/run_demo.sh running)."""
-import json, sys, httpx
-B = "http://127.0.0.1:8000"
-def post(p, b): return httpx.post(B + p, json=b, timeout=120).json()
-def show(r):
-    print("TEXT:", r["text"]); c = r.get("card") or {}
-    print("CARD:", json.dumps({k: v for k, v in c.items() if k in ("kind", "light", "priority", "coverage", "decision", "draft", "citations", "ticket_id", "doubt")}, ensure_ascii=False)[:1800]); print()
-vid, ses = sys.argv[1], (sys.argv[2] if len(sys.argv) > 2 else None)
-r = post("/api/select", {"vehicle_id": vid}); sid = r["sid"]
-show(post("/api/check", {"sid": sid, "session_id": ses}))
-for q in sys.argv[3:]:
-    show(post("/api/chat", {"sid": sid, "text": q}))
+"""Smoke test of a running stand: login -> vehicles -> diagnose -> chat -> suggest -> history. Usage: smoke.py BASE_URL"""
+import sys, time, httpx
+B = sys.argv[1].rstrip("/")
+c = httpx.Client(base_url=B, timeout=300, follow_redirects=True)
+r = c.post("/api/login", json={"name": "Смоук Тест", "consent": True}); r.raise_for_status()
+vs = c.get("/api/vehicles").json(); vs = vs.get("vehicles", vs) if isinstance(vs, dict) else vs
+vid = vs[0]["id"] if isinstance(vs[0], dict) and "id" in vs[0] else vs[0].get("vehicle_id")
+t = time.time(); d = c.post("/api/diagnose", json={"vehicle_id": vid}).json(); print("diagnose", round(time.time()-t,1), "s", str(d)[:300])
+t = time.time(); a = c.post("/api/chat", json={"vehicle_id": vid, "text": "Что проверить в первую очередь?"}).json()
+print("chat", round(time.time()-t,1), "s", str(a)[:600])
+print("suggest", str(c.get("/api/suggest", params={"vehicle_id": vid}).json())[:300])
+print("history", c.get(f"/api/history/{vid}").status_code)
