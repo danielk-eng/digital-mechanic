@@ -198,7 +198,10 @@ function renderTurn(turn, expanded = false) {
   if (turn.preface) { /* already part of text */ }
   if (turn.text) {
     const hasSrc = (turn.sources || []).length > 0;
-    const und = (turn.understood || []).length ? `<div class="understood">${t("understood")}: ${turn.understood.map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join(", ")}</div>` : "";
+    // «стучит → стук», «клапана → клапаны» are just word forms: show only slang, abbreviations and typos
+    const pre = (a, b) => { let i = 0; while (i < a.length && a[i] === b[i]) i++; return i; };
+    const uu = (turn.understood || []).filter(([a, b]) => !(b.length <= a.length && pre(a.toLowerCase(), b.toLowerCase()) >= 3));
+    const und = uu.length ? `<div class="understood">${t("understood")}: ${uu.map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join(", ")}</div>` : "";
     const actions = [];
     if (hasSrc && !expanded && (ME.detail || "brief") === "brief") actions.push({label: t("expand"), onclick: (ev, b) => { b.remove(); eventTurn("expand", turn.text, null, true); }});
     if (hasSrc && VID) actions.push({icon: "ellipsis", aria: t("more_actions"), onclick: () => turnMenu(turn)});
