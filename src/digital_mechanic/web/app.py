@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
+import os
 import csv
 import io
 import json
@@ -61,6 +64,50 @@ def jlog(**kw) -> None:
         f.write(json.dumps(kw, ensure_ascii=False) + "\n")
 
 
+# Signed profile cookie: on serverless stands (Vercel) every instance has its own /tmp DB, so a session created on one
+# instance is unknown on the next. The cookie carries the user's own profile (no other data), HMAC-signed with a key
+# derived from the stand's secret; an unknown uid is restored from it.
+_PROFILE_KEYS = ("name", "role", "lang", "experience", "detail", "answer_lang", "big_font", "voice_out", "consent_at", "country")
+
+
+def _cookie_key() -> bytes:
+    base = os.environ.get("SESSION_SECRET") or S.api_key() or "dm-local"
+    return hashlib.sha256(("dm-profile-cookie:" + base).encode()).digest()
+
+
+def profile_cookie(u: dict) -> str:
+    raw = json.dumps({"id": u["id"], **{k: u.get(k) for k in _PROFILE_KEYS if k in u}}, ensure_ascii=False, separators=(",", ":")).encode()
+    b = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    return b + "." + hmac.new(_cookie_key(), b.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def restore_from_cookie(uid: str | None, up: str | None) -> dict | None:
+    if not uid or not up or "." not in up:
+        return None
+    b, sig = up.rsplit(".", 1)
+    if not hmac.compare_digest(sig, hmac.new(_cookie_key(), b.encode(), hashlib.sha256).hexdigest()[:32]):
+        return None
+    try:
+        d = json.loads(base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)))
+    except Exception:
+        return None
+    if d.get("id") != uid:
+        return None
+    return STORE.upsert_user(uid, **{k: d[k] for k in _PROFILE_KEYS if k in d and d[k] is not None})
+
+
+def set_profile_cookie(response: Response, u: dict) -> None:
+    response.set_cookie("up", profile_cookie(u), httponly=True, samesite="lax", max_age=30 * 86400)
+
+
+@app.middleware("http")
+async def _restore_session(request, call_next):
+    uid, up = request.cookies.get("uid"), request.cookies.get("up")
+    if uid and up and not STORE.user(uid):
+        restore_from_cookie(uid, up)
+    return await call_next(request)
+
+
 def user_of(uid: str | None, manager: bool = False) -> dict:
     u = STORE.user(uid) if uid else None
     if not u:
@@ -116,6 +163,7 @@ def login(body: LoginIn, response: Response) -> dict:
     u = STORE.upsert_user(uid, name=pii.mask(body.name.strip()[:60]) or "—", role=role, lang=lang_or_default(body.lang),
                           experience=body.experience if body.experience in EXPERIENCE_LEVELS else "experienced", consent_at=time.time())
     response.set_cookie("uid", uid, httponly=True, samesite="lax", max_age=30 * 86400)
+    set_profile_cookie(response, u)
     STORE.audit(user_id=uid, role=role, action="login", ok=1)
     return {"user": u}
 
@@ -146,7 +194,7 @@ class ProfileIn(BaseModel):
 
 
 @app.post("/api/me")
-def update_me(body: ProfileIn, uid: str | None = Cookie(None)) -> dict:
+def update_me(body: ProfileIn, response: Response, uid: str | None = Cookie(None)) -> dict:
     user_of(uid)
     kw = {k: v for k, v in body.model_dump().items() if v is not None}
     if "lang" in kw:
@@ -160,7 +208,9 @@ def update_me(body: ProfileIn, uid: str | None = Cookie(None)) -> dict:
     for k in ("big_font", "voice_out"):
         if k in kw:
             kw[k] = int(kw[k])
-    return {"user": STORE.upsert_user(uid, **kw)}
+    u = STORE.upsert_user(uid, **kw)
+    set_profile_cookie(response, u)
+    return {"user": u}
 
 
 @app.delete("/api/me")
@@ -168,12 +218,14 @@ def delete_me(response: Response, uid: str | None = Cookie(None)) -> dict:
     user_of(uid)
     STORE.delete_user_data(uid)
     response.delete_cookie("uid")
+    response.delete_cookie("up")
     return {"deleted": True}
 
 
 @app.post("/api/logout")
 def logout(response: Response) -> dict:
     response.delete_cookie("uid")
+    response.delete_cookie("up")
     return {"ok": True}
 
 

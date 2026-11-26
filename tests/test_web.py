@@ -122,3 +122,15 @@ def test_pwa_manifest_icons_exist():
     for i in m["icons"]:
         assert (st / i["src"].split("/static/")[1]).exists()
     assert "apple-touch-icon" in (st / "index.html").read_text(encoding="utf-8")
+
+
+def test_session_restored_from_signed_cookie_on_another_instance():
+    """Vercel: each serverless instance has its own /tmp DB; the signed profile cookie restores the user."""
+    from digital_mechanic.web import app as web
+    u = web.STORE.upsert_user("u-restore-1", name="Иван", role="mechanic", lang="uz", experience="novice", consent_at=1.0)
+    up = web.profile_cookie(u)
+    web.STORE.x("DELETE FROM users WHERE id=?", ("u-restore-1",))
+    r = web.restore_from_cookie("u-restore-1", up)
+    assert r and r["lang"] == "uz" and r["experience"] == "novice"
+    assert web.restore_from_cookie("u-other", up) is None  # bound to its uid
+    assert web.restore_from_cookie("u-restore-1", up[:-2] + "00") is None  # tampered

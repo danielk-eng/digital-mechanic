@@ -58,6 +58,10 @@ class Store:
         if "answer_lang" not in cols:  # answers may use a different language than the interface
             self._con.execute("ALTER TABLE users ADD COLUMN answer_lang TEXT DEFAULT ''")
             self._con.commit()
+        for col, ddl in (("country", "TEXT DEFAULT 'RU'"), ("profile", "TEXT DEFAULT ''")):  # data-law country; adaptive profile (JSON)
+            if col not in cols:
+                self._con.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
+                self._con.commit()
         tcols = {r[1] for r in self._con.execute("PRAGMA table_info(tickets)")}
         for col in ("attachments", "review"):  # ticket package (answer, pages, photos, summary) and chief's approval
             if col not in tcols:
@@ -84,7 +88,7 @@ class Store:
         if not u:
             self.x("INSERT INTO users(id, created_at) VALUES (?,?)", (uid, time.time()))
         for k, v in kw.items():
-            if k in {"name", "role", "lang", "experience", "detail", "answer_lang", "big_font", "voice_out", "consent_at"}:
+            if k in {"name", "role", "lang", "experience", "detail", "answer_lang", "big_font", "voice_out", "consent_at", "country", "profile"}:
                 self.x(f"UPDATE users SET {k}=? WHERE id=?", (v, uid))
         return self.one("SELECT * FROM users WHERE id=?", (uid,))
 
