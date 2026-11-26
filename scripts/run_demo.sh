@@ -4,6 +4,7 @@ set -e
 cd "$(dirname "$0")/.."
 [ -d .venv ] && . .venv/bin/activate
 export PYTHONPATH="$PWD/src"
+export LLM_CACHE_DIR="${LLM_CACHE_DIR:-$PWD/.cache/llm}"
 [ -z "$LLM_API_KEY" ] && [ -f /workspace/.tokenrouter_key ] && export LLM_API_KEY="$(cat /workspace/.tokenrouter_key)"
 uvicorn digital_mechanic.stubs.ml_stub:app --port 8101 --log-level warning &
 uvicorn digital_mechanic.stubs.toir_stub:app --port 8102 --log-level warning &

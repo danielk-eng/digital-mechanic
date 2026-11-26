@@ -43,6 +43,27 @@ class Llm:
     def json(self, step: str, system: str, user: str, max_tokens: int = 1500, attempt: int = 0) -> dict:
         if not self.enabled:
             raise LlmUnavailable("LLM is not configured")
+        ck = self._cache_path(system, user)
+        if ck is not None and ck.exists() and attempt == 0:
+            self.usage.per_step.append({"step": step + "_cached", "prompt_tokens": 0, "completion_tokens": 0, "seconds": 0})
+            return json.loads(ck.read_text(encoding="utf-8"))
+        out = self._call(step, system, user, max_tokens, attempt)
+        if ck is not None and attempt == 0:
+            ck.parent.mkdir(parents=True, exist_ok=True)
+            ck.write_text(json.dumps(out, ensure_ascii=False), encoding="utf-8")
+        return out
+
+    def _cache_path(self, system: str, user: str):
+        """Optional on-disk cache of identical requests (temperature 0). Off unless LLM_CACHE_DIR is set."""
+        import hashlib, os
+        d = os.environ.get("LLM_CACHE_DIR")
+        if not d:
+            return None
+        h = hashlib.sha256(f"{self.s.llm_model}\n{system}\n{user}".encode()).hexdigest()[:24]
+        from pathlib import Path
+        return Path(d) / f"{h}.json"
+
+    def _call(self, step: str, system: str, user: str, max_tokens: int, attempt: int) -> dict:
         t = time.time()
         try:
             r = self._cli().chat.completions.create(
@@ -68,7 +89,7 @@ class Llm:
         except LlmUnavailable:
             if attempt >= 1:
                 raise
-            return self.json(step + "_retry", system, user, max_tokens=max_tokens * 2, attempt=attempt + 1)
+            return self._call(step + "_retry", system, user, max_tokens * 2, attempt + 1)
 
 
 def parse_json(text: str) -> dict:
