@@ -19,7 +19,7 @@ from typing import Any, Optional
 
 from .. import pii, policy
 from ..clients import Fleet, MlClient, ServiceError, ToirClient
-from ..i18n import LANGS, lang_or_default
+from ..i18n import LANGS, answer_lang, lang_or_default
 from ..retrieval.bm25 import ExtraIndex, ManualIndex, snippet
 from ..schemas import CheckResult, CheckStatus, PolicyDecision, Reference, TicketRequest, Urgency, Vehicle
 from ..store import Store
@@ -301,7 +301,7 @@ class Agent:
         return "\n".join(lines)
 
     def _system(self, c: Conv, user: dict, manager: bool = False, detail: str | None = None) -> str:
-        lang = LANGS[lang_or_default(user.get("lang"))]["llm"]
+        lang = LANGS[answer_lang(user)]["llm"]
         if manager:
             return MANAGER_SYSTEM.format(lang_name=lang, context=f"Сейчас {time.strftime('%d.%m.%Y %H:%M')}.")
         return MECHANIC_SYSTEM.format(lang_name=lang, experience_rule=EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"]),
@@ -736,7 +736,7 @@ class Agent:
     def summary(self, c: Conv, user: dict) -> dict:
         from .handoff import summarize
 
-        return summarize(self, c, LANGS[lang_or_default(user.get("lang"))]["llm"])
+        return summarize(self, c, LANGS[answer_lang(user)]["llm"])
 
     def handoff(self, c: Conv, user: dict, note: str = "") -> dict:
         s = self.summary(c, user)

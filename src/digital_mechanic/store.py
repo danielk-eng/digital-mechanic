@@ -16,7 +16,7 @@ SCHEMA = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS users(
   id TEXT PRIMARY KEY, name TEXT, role TEXT, lang TEXT DEFAULT 'ru', experience TEXT DEFAULT 'experienced',
-  big_font INTEGER DEFAULT 0, voice_out INTEGER DEFAULT 0, consent_at REAL, created_at REAL, detail TEXT DEFAULT 'brief');
+  big_font INTEGER DEFAULT 0, voice_out INTEGER DEFAULT 0, consent_at REAL, created_at REAL, detail TEXT DEFAULT 'brief', answer_lang TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS diagnoses(
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user_id TEXT, vehicle_id TEXT, session_id TEXT, status TEXT,
   anomaly_type TEXT, anomaly_score REAL, confidence REAL, signal_quality TEXT, decision TEXT, urgency TEXT, payload TEXT);
@@ -55,6 +55,9 @@ class Store:
         if "detail" not in cols:  # migrate DBs created before brief/detailed answers
             self._con.execute("ALTER TABLE users ADD COLUMN detail TEXT DEFAULT 'brief'")
             self._con.commit()
+        if "answer_lang" not in cols:  # answers may use a different language than the interface
+            self._con.execute("ALTER TABLE users ADD COLUMN answer_lang TEXT DEFAULT ''")
+            self._con.commit()
         tcols = {r[1] for r in self._con.execute("PRAGMA table_info(tickets)")}
         for col in ("attachments", "review"):  # ticket package (answer, pages, photos, summary) and chief's approval
             if col not in tcols:
@@ -81,7 +84,7 @@ class Store:
         if not u:
             self.x("INSERT INTO users(id, created_at) VALUES (?,?)", (uid, time.time()))
         for k, v in kw.items():
-            if k in {"name", "role", "lang", "experience", "detail", "big_font", "voice_out", "consent_at"}:
+            if k in {"name", "role", "lang", "experience", "detail", "answer_lang", "big_font", "voice_out", "consent_at"}:
                 self.x(f"UPDATE users SET {k}=? WHERE id=?", (v, uid))
         return self.one("SELECT * FROM users WHERE id=?", (uid,))
 

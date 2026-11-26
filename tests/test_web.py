@@ -47,3 +47,14 @@ def test_delete_my_data(client):
     client.post("/api/login", json={"name": "X", "consent": True})
     assert client.delete("/api/me").json()["deleted"]
     assert client.get("/api/me").status_code == 401
+
+
+def test_answer_language_separate_from_ui(client):
+    import digital_mechanic.web.app as m
+    from digital_mechanic.i18n import answer_lang
+    client.post("/api/login", json={"name": "L", "consent": True, "lang": "ru"})
+    u = client.post("/api/me", json={"answer_lang": "uz"}).json()["user"]
+    assert u["lang"] == "ru" and answer_lang(u) == "uz"
+    assert "узбекском" in m.AGENT._system(None, u, manager=True)
+    u = client.post("/api/me", json={"answer_lang": "xx"}).json()["user"]
+    assert answer_lang(u) == "ru"  # unknown -> same as interface

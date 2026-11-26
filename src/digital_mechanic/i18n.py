@@ -13,3 +13,9 @@ LANGS = {
 
 def lang_or_default(code: str | None) -> str:
     return code if code in LANGS else "ru"
+
+
+def answer_lang(user: dict | None) -> str:
+    """Language of the agent's answers: its own setting, or the interface language when not set."""
+    user = user or {}
+    return user.get("answer_lang") if user.get("answer_lang") in LANGS else lang_or_default(user.get("lang"))

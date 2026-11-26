@@ -25,7 +25,7 @@ from ..bootstrap import build_agent
 from ..clients import ServiceError
 from ..config import get_settings
 from ..history import mask_name
-from ..i18n import LANGS, lang_or_default
+from ..i18n import LANGS, answer_lang, lang_or_default
 
 S = get_settings()
 AGENT = build_agent(S)
@@ -114,6 +114,7 @@ class ProfileIn(BaseModel):
     lang: str | None = None
     experience: str | None = None
     detail: str | None = None
+    answer_lang: str | None = None
     big_font: bool | None = None
     voice_out: bool | None = None
 
@@ -124,6 +125,8 @@ def update_me(body: ProfileIn, uid: str | None = Cookie(None)) -> dict:
     kw = {k: v for k, v in body.model_dump().items() if v is not None}
     if "lang" in kw:
         kw["lang"] = lang_or_default(kw["lang"])
+    if "answer_lang" in kw and kw["answer_lang"] not in LANGS:
+        kw["answer_lang"] = ""  # same as interface
     if kw.get("experience") not in (None, *EXPERIENCE_LEVELS):
         raise HTTPException(422, "experience: novice | experienced | expert")
     if kw.get("detail") not in (None, *DETAIL_LEVELS):
@@ -552,7 +555,7 @@ class ExtractIn(BaseModel):
 def extract(body: ExtractIn, uid: str | None = Cookie(None)) -> dict:
     u = user_of(uid)
     _page(body.doc_id, body.page)
-    return AGENT.section_extract(body.doc_id, body.page, body.q, pii.mask(body.question)[:300], LANGS[lang_or_default(u.get("lang"))]["llm"])
+    return AGENT.section_extract(body.doc_id, body.page, body.q, pii.mask(body.question)[:300], LANGS[answer_lang(u)]["llm"])
 
 
 @app.get("/page/{doc_id}/{page}.png")

@@ -454,7 +454,8 @@ async function speak(text) {
   A11Y.stop();
   const p = plain(text), token = ++SPEAK_SEQ;
   const after = () => { if (token === SPEAK_SEQ && $("#s_hands").checked) setTimeout(startRec, 300); };
-  if (ME.lang === "ru" && SERVER_TTS) {  // local Silero on the stand; 404 -> browser speech from now on
+  const al = ALANG();
+  if (al === "ru" && SERVER_TTS) {  // local Silero on the stand; 404 -> browser speech from now on
     try { const r = await fetch("/api/tts", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: p})});
       if (token !== SPEAK_SEQ) return;  // a newer message or a tap arrived while synthesizing
       if (r.ok) { const a = new Audio(URL.createObjectURL(await r.blob())); A11Y.audio = a;
@@ -462,16 +463,19 @@ async function speak(text) {
         a.onended = () => { caption(""); after(); }; a.play(); return; } SERVER_TTS = false; } catch (_) { SERVER_TTS = false; }
   }
   if (!window.speechSynthesis) return;
-  const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[ME.lang] || "ru-RU";
+  const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[al] || "ru-RU";
   u.onboundary = e => captionFollow(p, (e.charIndex || 0) / p.length); captionFollow(p, 0);
   u.onend = () => { caption(""); after(); }; speechSynthesis.speak(u);
 }
+const ALANG = () => (ME && ME.answer_lang) || (ME && ME.lang) || "ru";  // item 20: answers may use another language
 function stopSpeak() { SPEAK_SEQ++; A11Y.stop(); caption(""); }
 $("#chat").addEventListener("click", stopSpeak);  // tap on the chat stops reading
 
 // ---------------------------------------------------------------- settings / login
 function applyProfile() {
   langOptions($("#s_lang"), ME.lang);
+  langOptions($("#s_alang"), ME.answer_lang || "");
+  $("#s_alang").insertAdjacentHTML("afterbegin", `<option value="" ${ME.answer_lang ? "" : "selected"}>${t("same_as_ui")}</option>`);
   document.querySelectorAll("input[name=s_exp]").forEach(r => r.checked = r.value === ME.experience);
   document.querySelectorAll("input[name=s_detail]").forEach(r => r.checked = r.value === (ME.detail || "brief"));
   if (localStorage.getItem("tts") === null) A11Y.setTts(!!ME.voice_out);  // first run: take the old profile flag
@@ -480,6 +484,7 @@ function applyProfile() {
 async function saveProfile(patch) { ME = (await api("/api/me", {json: patch})).user; applyProfile(); }
 $("#btnSettings").onclick = () => $("#settings").classList.toggle("hidden");
 $("#s_lang").onchange = e => saveProfile({lang: e.target.value}).then(loadVehicles);
+$("#s_alang").onchange = e => saveProfile({answer_lang: e.target.value});
 document.querySelectorAll("input[name=s_exp]").forEach(r => r.onchange = () => saveProfile({experience: r.value}));
 document.querySelectorAll("input[name=s_detail]").forEach(r => r.onchange = () => saveProfile({detail: r.value}));
 $("#s_logout").onclick = async () => { await api("/api/logout", {method: "POST"}); location.reload(); };

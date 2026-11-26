@@ -114,7 +114,9 @@
   "recognizing": "Распознаю",
   "understood": "Понял как",
   "print": "Печать / PDF",
-  "print_note": "Все значения — дословно из руководства; ниже приложены цитируемые страницы. Нет страницы — нет цифры."
+  "print_note": "Все значения — дословно из руководства; ниже приложены цитируемые страницы. Нет страницы — нет цифры.",
+  "answer_lang": "Язык ответов",
+  "same_as_ui": "как интерфейс"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -231,7 +233,9 @@
   "recognizing": "Tanimoqda",
   "understood": "Shunday tushundim",
   "print": "Chop etish / PDF",
-  "print_note": "Barcha qiymatlar qoʻllanmadan soʻzma-soʻz; quyida keltirilgan sahifalar ilova qilingan."
+  "print_note": "Barcha qiymatlar qoʻllanmadan soʻzma-soʻz; quyida keltirilgan sahifalar ilova qilingan.",
+  "answer_lang": "Javoblar tili",
+  "same_as_ui": "interfeys kabi"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -348,7 +352,9 @@
   "recognizing": "Шинохта истодааст",
   "understood": "Чунин фаҳмидам",
   "print": "Чоп / PDF",
-  "print_note": "Ҳамаи қиматҳо аз дастур айнан гирифта шудаанд; саҳифаҳои иқтибосшуда дар поён замима шудаанд."
+  "print_note": "Ҳамаи қиматҳо аз дастур айнан гирифта шудаанд; саҳифаҳои иқтибосшуда дар поён замима шудаанд.",
+  "answer_lang": "Забони ҷавобҳо",
+  "same_as_ui": "мисли интерфейс"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -465,7 +471,9 @@
   "recognizing": "Танып жатыр",
   "understood": "Былай түсіндім",
   "print": "Басып шығару / PDF",
-  "print_note": "Барлық мәндер нұсқаулықтан сөзбе-сөз алынған; төменде дәйексөз беттері қоса берілген."
+  "print_note": "Барлық мәндер нұсқаулықтан сөзбе-сөз алынған; төменде дәйексөз беттері қоса берілген.",
+  "answer_lang": "Жауап тілі",
+  "same_as_ui": "интерфейс сияқты"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -582,7 +590,9 @@
   "recognizing": "पहचान रहा है",
   "understood": "मैंने ऐसे समझा",
   "print": "प्रिंट / PDF",
-  "print_note": "सभी मान मैनुअल से शब्दशः हैं; उद्धृत पृष्ठ नीचे संलग्न हैं।"
+  "print_note": "सभी मान मैनुअल से शब्दशः हैं; उद्धृत पृष्ठ नीचे संलग्न हैं।",
+  "answer_lang": "उत्तर की भाषा",
+  "same_as_ui": "इंटरफ़ेस जैसी"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -699,6 +709,8 @@
   "recognizing": "Đang nhận dạng",
   "understood": "Hiểu là",
   "print": "In / PDF",
-  "print_note": "Mọi giá trị đều trích nguyên văn từ sổ tay; các trang được trích dẫn đính kèm bên dưới."
+  "print_note": "Mọi giá trị đều trích nguyên văn từ sổ tay; các trang được trích dẫn đính kèm bên dưới.",
+  "answer_lang": "Ngôn ngữ trả lời",
+  "same_as_ui": "như giao diện"
  }
 }
