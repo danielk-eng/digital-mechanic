@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -28,6 +29,7 @@ from .. import media as umedia, pii, privacy_laws, voice
 from ..translate import Translator
 from ..agent.llm import REQUEST_COUNTRY, REQUEST_PRIMARY
 from .. import tenancy
+from ..replica import Replica
 from ..agent import profile as uprofile, style as ustyle, memory as umemory
 from ..agent.briefing import Briefing
 from .. import demo_seed
@@ -45,6 +47,7 @@ TR = Translator(AGENT.llm, AGENT.store, os.environ.get("I18N_DIR", "data/i18n"))
 for _lang, _pages in TR.pages.items():  # human translations of the manuals: search in the user's language, cite the original page
     AGENT.index.add_translations(_lang, _pages)
 STORE = AGENT.store
+REPLICA = Replica(STORE)  # Vercel: mirror companies/people/QR links through a private Blob
 tenancy.ensure_seed(STORE)
 AGENT.fleet = tenancy.ScopedFleet(AGENT.fleet)  # each request sees only its company's trucks (engineer: all)
 DEMO = demo_seed.load(os.environ.get("DEMO_USERS", "data/demo_users.json"))
@@ -175,6 +178,9 @@ def _session_uid(request) -> str | None:
 
 @app.middleware("http")
 async def _restore_session(request, call_next):
+    write = request.method not in ("GET", "HEAD", "OPTIONS")
+    if REPLICA.on and (request.url.path.startswith(("/api/", "/q/", "/manager", "/engineer")) or request.url.path == "/"):
+        await asyncio.to_thread(REPLICA.pull, write)  # serverless: shared companies/people/QR links (no-op on the deb stand)
     uid = _session_uid(request)
     up = request.cookies.get("up")
     if uid and up and not STORE.user(uid):
@@ -193,6 +199,8 @@ async def _restore_session(request, call_next):
     crow = STORE.one("SELECT llm_primary FROM companies WHERE id=?", (co,)) if co else None
     REQUEST_PRIMARY.set((crow or {}).get("llm_primary") or None)  # the engineer may switch the provider per company
     response = await call_next(request)
+    if REPLICA.on and request.url.path.startswith(("/api/", "/q/")):
+        await asyncio.to_thread(REPLICA.push)  # only uploads when the mirrored tables changed (incl. a user restored from cookie)
     if uid and request.url.path == "/api/session":  # sliding renewal: active users are never asked for the PIN again
         response.set_cookie("s", request.cookies["s"], httponly=True, samesite="lax", max_age=SESSION_MAX_AGE,
                             secure=bool(os.environ.get("VERCEL")))
@@ -668,8 +676,14 @@ def photo_file(name: str, uid: str | None = Cookie(None)):
     u = user_of(uid)
     if not re.fullmatch(r"[\w.-]{3,80}", name) or not (Path(S.uploads_dir) / name).is_file():
         raise HTTPException(404)
-    if u["role"] != "manager" and not STORE.one("SELECT 1 FROM media WHERE user_id=? AND files LIKE ?", (u["id"], f'%"{name}"%')):
-        raise HTTPException(404)
+    if u["role"] != "engineer":  # own uploads; the chief: uploads about his company's trucks or by his people (other companies: 404)
+        rows = STORE.q("SELECT user_id, vehicle_id FROM media WHERE files LIKE ?", (f'%"{name}"%',))
+        mine = any(r["user_id"] == u["id"] for r in rows)
+        if not mine and u["role"] == "manager":
+            fleet, staff = set(AGENT.fleet.ids()), _staff_ids(tenancy.company_of(u))
+            mine = any(r["vehicle_id"] in fleet or r["user_id"] in staff for r in rows)
+        if not mine:
+            raise HTTPException(404)
     return FileResponse(Path(S.uploads_dir) / name)
 
 
@@ -1260,7 +1274,7 @@ def eng_health(uid: str | None = Cookie(None)) -> dict:
     out["index"] = {"ok": True, "pages": len(AGENT.index.pages), "extra_pages": len(AGENT.extra.pages) if AGENT.extra else 0}
     out["translate"] = {"ok": True, **TR.stats()}
     errs = STORE.q("SELECT action, COUNT(*) AS n FROM audit WHERE ok=0 AND ts>? GROUP BY action ORDER BY n DESC LIMIT 8", (time.time() - 86400,))
-    return {"services": out, "errors_24h": errs}
+    return {"services": out, "errors_24h": errs, "shared_state": {"on": REPLICA.on, **REPLICA.stats}}
 
 
 class McpIn(BaseModel):
@@ -1560,6 +1574,12 @@ class CompanyPatch(BaseModel):
     active: bool | None = None
     note: str | None = None
     vehicles: list[str] | None = None  # trucks of this company (moved from wherever they were)
+    delete: bool = False  # remove the company with its people; its trucks go back to the seed company
+
+
+class EngUserPatch(BaseModel):
+    active: bool | None = None
+    delete: bool = False
 
 
 class ChiefIn(BaseModel):
@@ -1602,6 +1622,16 @@ def eng_company_edit(cid: str, body: CompanyPatch, uid: str | None = Cookie(None
     me_ = user_of(uid, roles=("engineer",))
     if not STORE.one("SELECT id FROM companies WHERE id=?", (cid,)):
         raise HTTPException(404)
+    if body.delete:
+        if cid == tenancy.SEED_ID:
+            raise HTTPException(400, "the seed company stays")
+        people = [r["id"] for r in STORE.q("SELECT id FROM users WHERE company_id=?", (cid,))]
+        for p_ in people:
+            STORE.delete_user_data(p_)
+        STORE.x("DELETE FROM company_vehicles WHERE company_id=?", (cid,))
+        STORE.x("DELETE FROM companies WHERE id=?", (cid,))
+        STORE.audit(user_id=me_["id"], role=me_["role"], action="company_delete", input=f"{cid}, people {len(people)}", ok=1)
+        return {"deleted": cid, "people": len(people)}
     if body.name is not None and body.name.strip():
         STORE.x("UPDATE companies SET name=? WHERE id=?", (body.name.strip()[:80], cid))
     if body.llm_primary is not None:
@@ -1620,6 +1650,26 @@ def eng_company_edit(cid: str, body: CompanyPatch, uid: str | None = Cookie(None
             STORE.x("INSERT OR REPLACE INTO company_vehicles(vehicle_id, company_id) VALUES (?,?)", (v, cid))
     STORE.audit(user_id=me_["id"], role=me_["role"], action="company_edit", input=f"{cid} {sorted(k for k, v in body.model_dump().items() if v is not None)}", ok=1)
     return {"company": _company_view(STORE.one("SELECT * FROM companies WHERE id=?", (cid,)))}
+
+
+@app.post("/api/eng/users/{target}")
+def eng_user_edit(target: str, body: EngUserPatch, uid: str | None = Cookie(None)) -> dict:
+    """The engineer may switch off or remove any account (not himself, not the fixed demo accounts)."""
+    me_ = user_of(uid, roles=("engineer",))
+    u = STORE.user(target)
+    if not u:
+        raise HTTPException(404)
+    if target == me_["id"] or target.startswith("demo-"):
+        raise HTTPException(400, "not this account")
+    if body.delete:
+        STORE.delete_user_data(target)
+    elif body.active is not None:
+        STORE.upsert_user(target, active=int(body.active))
+        if not body.active:
+            STORE.x("UPDATE sessions SET revoked=1 WHERE user_id=?", (target,))
+            STORE.x("UPDATE login_tokens SET revoked=1 WHERE user_id=?", (target,))
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="user_delete" if body.delete else "user_active", input=target, ok=1)
+    return {"ok": True, "deleted": body.delete}
 
 
 @app.post("/api/eng/companies/{cid}/chief")
@@ -1780,23 +1830,36 @@ def _qr_row(token: str) -> dict | None:
     return r
 
 
+_QR_T: dict = {}
+
+
+def _qr_t(lang: str | None) -> dict:
+    if not _QR_T:
+        _QR_T.update(json.loads((STATIC / "qr_i18n.json").read_text(encoding="utf-8")))
+    return {**_QR_T["ru"], **_QR_T.get(lang or "ru", {})}
+
+
 @app.get("/q/{token}", response_class=HTMLResponse)
-def qr_page(token: str) -> HTMLResponse:
+def qr_page(token: str, request: Request) -> HTMLResponse:
     """The QR opens this screen: whose link it is, and a PIN field. Nothing happens without the PIN."""
     r = _qr_row(token)
     u = STORE.user(r["user_id"]) if r else None
     if not u or not u.get("active", 1):
-        return HTMLResponse(QR_HTML.replace("{{body}}", "<h1>Ссылка не действует</h1><p>Срок истёк или ссылку заменили на новую. Попросите новый QR-код в профиле.</p>"), status_code=410)
-    body = (f"<h1>Вход на этом устройстве</h1><p>{html.escape(u['name'])}</p>"
-            f"<form id='f'><label for='pin'>Ваш PIN</label><input id='pin' inputmode='numeric' autocomplete='one-time-code' pattern='[0-9]*' maxlength='8' required autofocus>"
-            f"<button>Войти</button><p id='e' class='err'></p></form>"
+        lang = (request.headers.get("accept-language") or "ru")[:2].lower()
+        t = _qr_t(lang)
+        return HTMLResponse(QR_HTML.replace("{{lang}}", lang if lang in _QR_T else "ru").replace("{{body}}", f"<h1>{t['p_title']}</h1><p>{html.escape(t['p_gone'])}</p>"), status_code=410)
+    lang = u.get("lang") or "ru"
+    t = _qr_t(lang)
+    body = (f"<h1>{html.escape(t['p_title'])}</h1><p>{html.escape(u['name'])}</p>"
+            f"<form id='f'><label for='pin'>{html.escape(t['p_pin'])}</label><input id='pin' inputmode='numeric' autocomplete='one-time-code' pattern='[0-9]*' maxlength='8' required autofocus>"
+            f"<button>{html.escape(t['p_go'])}</button><p id='e' class='err'></p></form>"
             f"<script>document.getElementById('f').onsubmit=async e=>{{e.preventDefault();const r=await fetch('/api/qr/redeem',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
             f"body:JSON.stringify({{token:{json.dumps(token)},pin:document.getElementById('pin').value}})}});const d=await r.json().catch(()=>({{}}));"
-            f"if(r.ok)location.href=d.redirect;else document.getElementById('e').textContent=r.status===429?'Слишком много попыток, подождите 10 минут':'Неверный PIN';}}</script>")
-    return HTMLResponse(QR_HTML.replace("{{body}}", body))
+            f"if(r.ok)location.href=d.redirect;else document.getElementById('e').textContent=r.status===429?{json.dumps(t['p_locked'], ensure_ascii=False)}:r.status===410?{json.dumps(t['p_gone'], ensure_ascii=False)}:{json.dumps(t['p_bad'], ensure_ascii=False)};}}</script>")
+    return HTMLResponse(QR_HTML.replace("{{lang}}", lang if lang in _QR_T else "ru").replace("{{body}}", body))
 
 
-QR_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+QR_HTML = """<!doctype html><html lang="{{lang}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Вход · Цифровой механик</title><link rel="stylesheet" href="/static/app.css"><style>main{max-width:360px;margin:12vh auto;padding:24px}
 form{display:flex;flex-direction:column;gap:12px}input{min-height:52px;font-size:1.4rem;letter-spacing:.3em;text-align:center;border-radius:12px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)}
 button{min-height:52px;border-radius:12px;border:0;background:var(--accent);color:#fff;font-weight:600;font-size:1rem}.err{color:var(--danger);min-height:1.2em}</style></head>

@@ -8,21 +8,26 @@
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.detail || r.statusText); return d;
   }
+  let D = null;  // strings in 9 languages: /static/qr_i18n.json
+  const dict = async () => D || (D = await fetch("/static/qr_i18n.json").then(r => r.json()).catch(() => ({ru: {}})));
+  let L = "ru";
+  const T = (k, e) => ((D[L] && D[L][k]) || (D.ru && D.ru[k]) || k).replace("{e}", e || "");
   const until = ts => new Date(ts * 1000).toLocaleString("ru-RU", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"});
   // box: element to render into; opts: {userId, email, name}
-  function mount(box, opts = {}) {
+  async function mount(box, opts = {}) {
+    await dict(); L = opts.lang || document.documentElement.lang || "ru"; if (!D[L]) L = "ru";
     const who = opts.userId ? {user_id: opts.userId} : {};
     let cur = null;
-    const intro = `<p class="small muted">QR-код переносит вход на телефон, планшет или в приложение: наведите камеру, откройте ссылку и введите ${opts.userId ? "свой" : "ваш"} PIN. Ссылка действует 24 часа.</p>`;
-    const idle = () => { box.innerHTML = intro + `<div class="card-actions" style="justify-content:flex-start"><button class="btn primary sm" data-q="issue">Показать QR-код</button><button class="btn ghost sm" data-q="revoke">Отозвать ссылку</button></div><p class="small" data-q="msg"></p>`; bind(); };
+    const intro = `<p class="small muted">${T(opts.userId ? "intro_other" : "intro_self")}</p>`;
+    const idle = () => { box.innerHTML = intro + `<div class="card-actions" style="justify-content:flex-start"><button class="btn primary sm" data-q="issue">${T("show")}</button><button class="btn ghost sm" data-q="revoke">${T("revoke_link")}</button></div><p class="small" data-q="msg"></p>`; bind(); };
     const show = q => {
       cur = q;
-      box.innerHTML = intro + `<div class="qrbox"><img src="${q.qr_png}" alt="QR-код для входа: ${esc(q.user)}" width="220" height="220">` +
-        `<div><p class="small">${esc(q.user)} · действует до ${until(q.expires)}</p><p class="small mono qrlink">${esc(q.link)}</p>` +
-        `<div class="field"><label class="label" for="qr_mail">Почта</label><input id="qr_mail" class="input" type="email" autocomplete="email" value="${esc(q.email || opts.email || "")}"></div>` +
-        `<div class="card-actions" style="justify-content:flex-start"><button class="btn primary sm" data-q="mail">Отправить на почту</button>` +
-        `<a class="btn ghost sm" download="qr-vhod.png" href="${q.qr_png}">Скачать PNG</a><button class="btn ghost sm" data-q="copy">Копировать ссылку</button>` +
-        `<button class="btn ghost sm" data-q="issue">Обновить</button><button class="btn ghost sm" data-q="revoke">Отозвать</button></div><p class="small" data-q="msg"></p></div></div>`;
+      box.innerHTML = intro + `<div class="qrbox"><img src="${q.qr_png}" alt="${T("alt")}: ${esc(q.user)}" width="220" height="220">` +
+        `<div><p class="small">${esc(q.user)} · ${T("until")} ${until(q.expires)}</p><p class="small mono qrlink">${esc(q.link)}</p>` +
+        `<div class="field"><label class="label" for="qr_mail">${T("mail")}</label><input id="qr_mail" class="input" type="email" autocomplete="email" value="${esc(q.email || opts.email || "")}"></div>` +
+        `<div class="card-actions" style="justify-content:flex-start"><button class="btn primary sm" data-q="mail">${T("send")}</button>` +
+        `<a class="btn ghost sm" download="qr-vhod.png" href="${q.qr_png}">${T("png")}</a><button class="btn ghost sm" data-q="copy">${T("copy")}</button>` +
+        `<button class="btn ghost sm" data-q="issue">${T("refresh")}</button><button class="btn ghost sm" data-q="revoke">${T("revoke")}</button></div><p class="small" data-q="msg"></p></div></div>`;
       bind();
     };
     const msg = t => { const m = box.querySelector('[data-q="msg"]'); if (m) m.textContent = t; };
@@ -30,18 +35,18 @@
       box.querySelectorAll("button[data-q]").forEach(b => b.onclick = async () => {
         try {
           if (b.dataset.q === "issue") show(await call("/api/qr/issue", who));
-          else if (b.dataset.q === "revoke") { await call("/api/qr/revoke", who); cur = null; idle(); msg("Ссылка отозвана: войти по ней больше нельзя."); }
-          else if (b.dataset.q === "copy") { await navigator.clipboard.writeText(cur.link); msg("Ссылка скопирована."); }
+          else if (b.dataset.q === "revoke") { await call("/api/qr/revoke", who); cur = null; idle(); msg(T("revoked")); }
+          else if (b.dataset.q === "copy") { await navigator.clipboard.writeText(cur.link); msg(T("copied")); }
           else if (b.dataset.q === "mail") {
             const r = await call("/api/qr/email", {...who, email: box.querySelector("#qr_mail").value.trim()});
             show(r);
-            if (r.sent) msg(`Письмо отправлено на ${r.email}.`);
-            else { msg("Почтовый сервер не настроен: открываю письмо в вашей почте, QR-код можно скачать и приложить."); location.href = r.mailto; }
+            if (r.sent) msg(T("sent", r.email));
+            else { msg(T("no_smtp")); location.href = r.mailto; }
           }
-        } catch (e) { msg(e.message === "no e-mail in the profile" ? "Укажите почту." : e.message === "e-mail" ? "Проверьте адрес почты." : e.message); }
+        } catch (e) { msg(e.message === "no e-mail in the profile" ? T("need_mail") : e.message === "e-mail" ? T("bad_mail") : e.message); }
       });
     }
     idle();
   }
-  window.QRLink = {mount};
+  window.QRLink = {mount, t: async (k, lang) => { await dict(); L = D[lang] ? lang : "ru"; return T(k); }};
 })();

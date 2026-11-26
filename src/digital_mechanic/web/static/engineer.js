@@ -134,8 +134,9 @@ function companyCard(r, id, vOwner) {
     `<div class="field"><label class="label" for="cc_prim">Языковая модель для компании</label><select id="cc_prim" class="input">${r.llm_primary.map(o => `<option value="${o}" ${o === (c.llm_primary || "") ? "selected" : ""}>${esc(PRIM[o] || o)}</option>`).join("")}</select></div>` +
     `<label class="switch"><span>Компания активна</span><input type="checkbox" id="cc_act" ${c.active ? "checked" : ""}></label>` +
     `<div class="field"><span class="label">Машины компании (отметка переносит машину сюда)</span><div class="vpick">${r.all_vehicles.map(v => `<label><input type="checkbox" value="${esc(v)}" ${c.vehicles.includes(v) ? "checked disabled" : ""}> <span class="mono">${esc(v)}</span>${c.vehicles.includes(v) ? "" : ` <span class="sub">${esc(vOwner[v] || "")}</span>`}</label>`).join("")}</div></div>` +
-    `<div class="card-actions"><button class="btn primary" id="cc_save">Сохранить</button></div>` +
-    `<div class="section-label">Главный механик</div>` + (c.chiefs.length ? `<p class="small">${c.chiefs.map(x => `${esc(x.name)}, код <b class="mono">${esc(x.login || "")}</b>`).join("<br>")}</p>` : "") +
+    `<div class="card-actions"><button class="btn primary" id="cc_save">Сохранить</button>${id === "neurodvs" ? "" : `<button class="btn danger" id="cc_del">Удалить компанию</button>`}</div>` +
+    `<div class="section-label">Главный механик</div>` + (c.chiefs.length ? `<div class="small">${c.chiefs.map(x => `<div style="margin:6px 0">${esc(x.name)}, код <b class="mono">${esc(x.login || "")}</b>` +
+      (String(x.id).startsWith("demo-") ? "" : ` <button class="btn ghost sm" data-uoff="${esc(x.id)}">Выключить</button><button class="btn ghost sm" data-udel="${esc(x.id)}">Удалить</button>`) + `</div>`).join("")}</div>` : "") +
     `<div class="field"><label class="label" for="ch_name">Имя</label><input id="ch_name" class="input" autocomplete="off"></div>` +
     `<div class="field"><label class="label" for="ch_pin">PIN (4–8 цифр, пусто — придумаем)</label><input id="ch_pin" class="input" inputmode="numeric" autocomplete="off"></div>` +
     `<div class="field"><label class="label" for="ch_email">Почта</label><input id="ch_email" class="input" type="email" autocomplete="off"></div>` +
@@ -146,6 +147,13 @@ function companyCard(r, id, vOwner) {
     try { await api(`/api/eng/companies/${id}`, {json: {name: $("#cc_name").value.trim(), llm_primary: $("#cc_prim").value, active: $("#cc_act").checked,
       vehicles: $$(".vpick input:checked:not(:disabled)").map(x => x.value)}}); $("#layer").innerHTML = ""; companies(); } catch (e) { alert(e.message); }
   };
+  const del = $("#cc_del"); if (del) del.onclick = async () => {
+    if (!confirm(`Удалить «${c.name}» вместе с её людьми? Машины вернутся в основную компанию.`)) return;
+    try { await api(`/api/eng/companies/${id}`, {json: {delete: true}}); $("#layer").innerHTML = ""; companies(); } catch (e) { alert(e.message); }
+  };
+  $$("[data-uoff]").forEach(b => b.onclick = async () => { try { await api(`/api/eng/users/${b.dataset.uoff}`, {json: {active: false}}); b.textContent = "Выключен"; b.disabled = true; } catch (e) { alert(e.message); } });
+  $$("[data-udel]").forEach(b => b.onclick = async () => { if (!confirm("Удалить пользователя и его данные?")) return;
+    try { await api(`/api/eng/users/${b.dataset.udel}`, {json: {delete: true}}); $("#layer").innerHTML = ""; companies(); } catch (e) { alert(e.message); } });
   $("#ch_go").onclick = async () => {
     const name = $("#ch_name").value.trim(); if (!name) return;
     try {

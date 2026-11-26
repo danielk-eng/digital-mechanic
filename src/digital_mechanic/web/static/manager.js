@@ -306,7 +306,7 @@ async function loadUsers() {
 function newUser(r) {
   side(t("user_new"), `<div class="field"><label class="label" for="nu_name">${t("login_name")}</label><input id="nu_name" class="input"></div>` +
     `<div class="field"><label class="label" for="nu_title">${t("job_title")}</label><input id="nu_title" class="input"></div>` +
-    `<div class="field"><label class="label" for="nu_email">Почта (для QR-входа)</label><input id="nu_email" class="input" type="email" autocomplete="off"></div>` +
+    `<div class="field"><label class="label" for="nu_email">${t("email_qr")}</label><input id="nu_email" class="input" type="email" autocomplete="off"></div>` +
     `<div class="field"><label class="label" for="nu_role">${t("role")}</label><select id="nu_role" class="input">${r.roles.map(x => `<option value="${x}">${esc({mechanic: t("role_mechanic"), manager: t("role_chief"), engineer: t("role_engineer")}[x])}</option>`).join("")}</select></div>` +
     `<div class="field"><label class="label" for="nu_exp">${t("level")}</label><select id="nu_exp" class="input">${r.levels.map(x => `<option value="${x}" ${x === "experienced" ? "selected" : ""}>${esc(t("lvl_" + x))}</option>`).join("")}</select></div>` +
     `<div class="field"><label class="label" for="nu_lang">${t("language")}</label><select id="nu_lang" class="input">${Object.keys(I18N).map(l => `<option value="${l}">${l}</option>`).join("")}</select></div>` +
@@ -342,15 +342,15 @@ async function userCard(id) {
     (id.startsWith("demo-") ? `<p class="sub">${t("demo_fixed")}</p>` :  // demo PINs are printed on the login screen: fixed
     `<div class="card-actions" style="justify-content:flex-start"><button class="btn ghost sm" id="uc_pin">${t("new_pin")}</button>` +
     `<button class="btn ${u.active ? "danger" : "primary"} sm" id="uc_act">${u.active ? t("deactivate") : t("activate")}</button></div>`) + `<div id="uc_out"></div>` +
-    `<div class="section-label">Вход на другом устройстве</div><div id="uc_qr"></div>`;
+    `<div class="section-label" id="uc_qr_t"></div><div id="uc_qr"></div>`;
   const body = $("#layer .vbd"); if (body) body.innerHTML = b;
-  if (window.QRLink && $("#uc_qr")) QRLink.mount($("#uc_qr"), {userId: id, email: u.email});
+  if (window.QRLink && $("#uc_qr")) { QRLink.mount($("#uc_qr"), {userId: id, email: u.email, lang: ME.lang}); QRLink.t("title", ME.lang).then(x => $("#uc_qr_t").textContent = x); }
   if (!$("#uc_pin")) return;
   $("#uc_pin").onclick = async () => { const x = await api(`/api/admin/users/${encodeURIComponent(id)}`, {json: {new_pin: true}}); $("#uc_out").innerHTML = `<p>${t("pin")}: <b class="mono">${esc(x.pin)}</b> <span class="small muted">${t("pin_once")}</span></p>`; };
   $("#uc_act").onclick = async () => { await api(`/api/admin/users/${encodeURIComponent(id)}`, {json: {active: !u.active}}); loadUsers(); userCard(id); };
 }
 $("#msend").onclick = () => ask(); $("#mmic").onclick = micToggle; $("#mtxt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } };
-$("#myqr").onclick = () => { side("Мой вход по QR", `<div id="my_qr"></div>`); QRLink.mount($("#my_qr"), {email: ME.email}); };
+$("#myqr").onclick = async () => { side(await QRLink.t("mine", ME.lang), `<div id="my_qr"></div>`); QRLink.mount($("#my_qr"), {email: ME.email, lang: ME.lang}); };
 $("#logout").onclick = async () => { await fetch("/api/logout", {method: "POST"}); location.href = "/"; };
 const TH_IC = {dark: "moon", light: "sun", contrast: "contrast"};
 function themeIcon() { $("#theme").innerHTML = icon(TH_IC[A11Y.theme()]); }

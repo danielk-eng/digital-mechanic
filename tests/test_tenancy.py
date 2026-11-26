@@ -147,3 +147,37 @@ def test_qr_email_mailto_without_smtp_and_mock_smtp(m, world, monkeypatch):
     monkeypatch.setattr(m, "send_mail", lambda to, subj, text, png: sent.append((to, subj, "/q/" in text, png[:4])))
     r = b.post("/api/qr/email", json={"user_id": mb["id"]}).json()
     assert r["sent"] is True and sent == [("s@example.com", "Вход в «Цифровой механик»", True, b"\x89PNG")]
+
+
+def test_media_files_scoped_by_company(m, world):
+    up = m.Path(m.S.uploads_dir); up.mkdir(parents=True, exist_ok=True)
+    (up / "b_truck.jpg").write_bytes(b"\xff\xd8x"); (up / "a_truck.jpg").write_bytes(b"\xff\xd8y")
+    m.STORE.add_media(world["mech_b"]["id"], "O819CY198", "photo", ["b_truck.jpg"], "", None)
+    m.STORE.add_media("demo-ivanov", "O727CA198", "photo", ["a_truck.jpg"], "", None)
+    a, b = world["chief_a"], world["chief_b"]
+    assert b.get("/api/photo/b_truck.jpg").status_code == 200 and a.get("/api/photo/b_truck.jpg").status_code == 404
+    assert a.get("/api/photo/a_truck.jpg").status_code == 200 and b.get("/api/photo/a_truck.jpg").status_code == 404
+    assert world["eng"].get("/api/photo/b_truck.jpg").status_code == 200
+
+
+def test_qr_page_speaks_the_users_language(m, world):
+    eng = world["eng"]
+    m.STORE.upsert_user(world["mech_b"]["id"], lang="uz")
+    q = eng.post("/api/qr/issue", json={"user_id": world["mech_b"]["id"]}).json()
+    page = TestClient(m.app).get("/q/" + q["link"].split("/q/")[1]).text
+    assert "Shu qurilmada kirish" in page and 'lang="uz"' in page and "PIN-kodingiz" in page
+
+
+def test_engineer_deactivates_and_deletes_users_and_companies(m, world):
+    eng, a = world["eng"], world["chief_a"]
+    sid = world["mech_b"]["id"]
+    assert a.post(f"/api/eng/users/{sid}", json={"active": False}).status_code == 403  # chief: engineer only
+    assert eng.post("/api/eng/users/demo-ivanov", json={"active": False}).status_code == 400
+    assert eng.post(f"/api/eng/users/{sid}", json={"active": False}).json()["ok"]
+    assert TestClient(m.app).post("/api/login/demo", json={"account": world["mech_b"]["login"], "pin": world["mech_b"]["pin"], "consent": True}).status_code in (401, 403)
+    assert eng.post("/api/eng/companies/neurodvs", json={"delete": True}).status_code == 400
+    r = eng.post(f"/api/eng/companies/{world['b']['id']}", json={"delete": True}).json()
+    assert r["people"] >= 2
+    cos = eng.get("/api/eng/companies").json()["companies"]
+    assert [c["name"] for c in cos] == ["НейроДВС"] and len(cos[0]["vehicles"]) == 50
+    assert not m.STORE.user(sid) and not m.STORE.q("SELECT 1 FROM users WHERE name='Петров Б.'")

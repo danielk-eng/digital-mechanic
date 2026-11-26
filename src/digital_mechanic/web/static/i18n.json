@@ -347,7 +347,8 @@
   "f_to": "по",
   "f_reset": "Сбросить",
   "f_nothing": "Ничего не найдено — измените фильтры",
-  "ask_any_ph": "Задайте вопрос"
+  "ask_any_ph": "Задайте вопрос",
+  "email_qr": "Почта (для QR-входа)"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -697,7 +698,8 @@
   "f_to": "gacha",
   "f_reset": "Tozalash",
   "f_nothing": "Hech narsa topilmadi — filtrlarni o'zgartiring",
-  "ask_any_ph": "Savol bering"
+  "ask_any_ph": "Savol bering",
+  "email_qr": "Elektron pochta (QR orqali kirish uchun)"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -1047,7 +1049,8 @@
   "f_to": "то",
   "f_reset": "Тоза кардан",
   "f_nothing": "Чизе ёфт нашуд — филтрҳоро иваз кунед",
-  "ask_any_ph": "Савол диҳед"
+  "ask_any_ph": "Савол диҳед",
+  "email_qr": "Почта (барои воридшавӣ бо QR)"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -1397,7 +1400,8 @@
   "f_to": "дейін",
   "f_reset": "Тазалау",
   "f_nothing": "Ештеңе табылмады — сүзгілерді өзгертіңіз",
-  "ask_any_ph": "Сұрақ қойыңыз"
+  "ask_any_ph": "Сұрақ қойыңыз",
+  "email_qr": "Пошта (QR арқылы кіру үшін)"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -1747,7 +1751,8 @@
   "f_to": "तक",
   "f_reset": "रीसेट",
   "f_nothing": "कुछ नहीं मिला — फ़िल्टर बदलें",
-  "ask_any_ph": "प्रश्न पूछें"
+  "ask_any_ph": "प्रश्न पूछें",
+  "email_qr": "ईमेल (QR लॉगिन के लिए)"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -2097,7 +2102,8 @@
   "f_to": "đến",
   "f_reset": "Đặt lại",
   "f_nothing": "Không tìm thấy — hãy đổi bộ lọc",
-  "ask_any_ph": "Đặt câu hỏi"
+  "ask_any_ph": "Đặt câu hỏi",
+  "email_qr": "Email (để đăng nhập bằng QR)"
  },
  "bn": {
   "app_title": "ডিজিটাল মেকানিক",
@@ -2447,7 +2453,8 @@
   "f_to": "পর্যন্ত",
   "f_reset": "রিসেট",
   "f_nothing": "কিছু পাওয়া যায়নি — ফিল্টার বদলান",
-  "ask_any_ph": "প্রশ্ন করুন"
+  "ask_any_ph": "প্রশ্ন করুন",
+  "email_qr": "ইমেইল (QR লগইনের জন্য)"
  },
  "ky": {
   "app_title": "Санарип механик",
@@ -2797,7 +2804,8 @@
   "f_to": "чейин",
   "f_reset": "Тазалоо",
   "f_nothing": "Эч нерсе табылган жок — чыпкаларды өзгөртүңүз",
-  "ask_any_ph": "Суроо бериңиз"
+  "ask_any_ph": "Суроо бериңиз",
+  "email_qr": "Почта (QR аркылуу кирүү үчүн)"
  },
  "be": {
   "app_title": "Лічбавы механік",
@@ -3147,6 +3155,7 @@
   "f_to": "па",
   "f_reset": "Скінуць",
   "f_nothing": "Нічога не знойдзена — змяніце фільтры",
-  "ask_any_ph": "Задайце пытанне"
+  "ask_any_ph": "Задайце пытанне",
+  "email_qr": "Пошта (для ўваходу па QR)"
  }
 }
