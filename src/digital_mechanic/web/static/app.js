@@ -990,6 +990,6 @@ async function start() {
 (async () => {
   hydrateIcons();
   I18N = await (await fetch("/static/i18n.json")).json();
-  try { ME = (await api("/api/session")).user; if (!ME) throw new Error("login"); start(); }
+  try { const ss = await api("/api/session"); SERVER_TTS = ss.server_tts !== false; ME = ss.user; if (!ME) throw new Error("login"); start(); }
   catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = () => { COUNTRIES = null; $("#l_country").innerHTML = ""; applyI18n(); }; $("#l_country").onchange = loginCountry; applyI18n(); $("#login").classList.remove("hidden"); }
 })();

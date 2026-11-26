@@ -192,7 +192,8 @@ def login(body: LoginIn, response: Response) -> dict:
 def session(uid: str | None = Cookie(None)) -> dict:
     """Boot check without a 401 in the browser console: {"user": null} when not logged in."""
     u = STORE.user(uid) if uid else None
-    return {"user": u, "langs": {k: v["name"] for k, v in LANGS.items()}}
+    # server_tts: false -> the browser speaks itself (no POST /api/tts that can only answer 404)
+    return {"user": u, "langs": {k: v["name"] for k, v in LANGS.items()}, "server_tts": bool(S.speech_url or S.silero_enabled)}
 
 
 @app.get("/api/me")
