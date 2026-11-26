@@ -341,9 +341,12 @@ class Agent:
         rule = EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"])
         if user.get("_vocab_hint"):
             rule += "\n" + user["_vocab_hint"]  # adaptive profile: the mechanic's own terms (agent/profile.py)
-        rule += personal
-        return MECHANIC_SYSTEM.format(lang_name=lang, experience_rule=rule,
+        base = MECHANIC_SYSTEM.format(lang_name=lang, experience_rule=rule,
                                       length_rule=DETAIL.get(detail or user.get("detail") or "brief", DETAIL["brief"]), context=self._context(c))
+        if personal:  # last in the prompt: the manner applies to every format above (also «Причина/Проверить/Исправить»)
+            base += ("\n\nКАК ГОВОРИТЬ С ЭТИМ ЧЕЛОВЕКОМ (обязательно для любого формата ответа, включая краткий; "
+                     "факты, цифры и метки источников не меняются):" + personal)
+        return base
 
     def _expand(self, c: Conv, user: dict, answer: str, turn: "Turn") -> "Turn":
         """Re-render an existing grounded answer in detail: same fragments, same labels, same verification."""

@@ -24,6 +24,11 @@ REPEAT_DAYS = 90
 URG_RU = {"high": "высокая", "medium": "средняя", "low": "низкая"}
 
 
+def _days(n: int) -> str:
+    n = int(n); f = "день" if n % 10 == 1 and n % 100 != 11 else "дня" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "дней"
+    return f"{n} {f}"
+
+
 def _d(iso: str | None) -> str:
     return f"{iso[8:10]}.{iso[5:7]}" if iso and len(iso) >= 10 else "—"
 
@@ -134,7 +139,7 @@ class Briefing:
         rep = self.repeat(vid, unit, s.checked_at) if unit else None
         if rep:
             what = rep.get("done") or ", ".join(x.lower() for x in rep["steps"][-1:] or rep["parts"])
-            lines.append(f"**Повтор:** этот узел на этой машине уже ремонтировали {rep['days']} дн. назад: {_d(rep['date'])}, {rep['ticket_id']}, "
+            lines.append(f"**Повтор:** этот узел на этой машине уже ремонтировали {_days(rep['days'])} назад: {_d(rep['date'])}, {rep['ticket_id']}, "
                          f"{rep['mechanic'] or 'механик'} {what}. Возможен повторный отказ.")
             insights.append({"kind": "repeat", "unit": unit, "days": rep["days"], "ticket_id": rep["ticket_id"], "date": rep["date"],
                              "mechanic": rep["mechanic"], "cite": {"history": rep["source"], "vehicle_id": vid, "ticket_id": rep["ticket_id"]}})
@@ -170,14 +175,15 @@ class Briefing:
             pick = fixer or owner
             why = (f"он закрыл такой же случай на {sim[0]['vehicle_id']}" if fixer else "он закреплён за этой машиной")
             if pick and owner and pick is not owner:
-                why += f", а {owner['name'].rstrip('.')} работал с этой машиной и поможет"
+                why += f", а {owner['name']} работал с этой машиной и поможет"
             c.pending = {"vehicle_id": vid, "session_id": s.session_id, "assignee": pick["uid"] if pick else None, "assignee_name": pick["name"] if pick else None,
                          "sources": sources, "repeat": insights[0] if rep else None, "similar": sim[0] if sim else None}
             lines.append(f"**Предлагаю:** создать заявку на дефектовку и назначить {pick.get('name_acc') or pick['name'] if pick else 'механика'}: {why}. Создать?")
             turn.actions = [{"id": "brief_yes", "kind": "send", "label": "Создать и назначить", "text": "Да, создавай"},
                             {"id": "brief_no", "kind": "send", "label": "Не сейчас", "text": "Нет, позже"}]
         turn.text = "\n".join(lines)
-        turn.speak = self._speakable(turn.text)
+        # aloud: the short version (no history line, no page list, no owner line), the screen keeps the full text
+        turn.speak = self._speakable("\n".join(x for x in lines if not x.startswith(("**История:**", "По руководству", "**Ответственный:**"))))
         return turn
 
     def _doc_title(self, doc_id: str) -> str:
@@ -187,7 +193,8 @@ class Briefing:
     @staticmethod
     def _speakable(text: str) -> str:
         t = re.sub(r"\[S\d+\]|\*\*", "", text)
-        return re.sub(r"\s+", " ", t).strip()
+        t = re.sub(r"\s+", " ", t)
+        return re.sub(r"\s+([,.;:])", r"\1", t).strip()
 
     def create(self, c, user: dict, text: str, turn):
         p = c.pending
@@ -204,7 +211,7 @@ class Briefing:
             ops.append(f"Учесть решение по {p['similar']['vehicle_id']} ({p['similar']['ticket_id']}): " + "; ".join(x.lower() for x in p["similar"]["steps"][1:3]))
         ops.append("Повторная запись звука двигателя после работ")
         concl = (f"{s.anomaly_type} {s.anomaly_title}: {s.description}, оценка {_num(s.anomaly_score)}, уверенность {_num(s.confidence)}."
-                 + (f" Узел ремонтировали {p['repeat']['days']} дн. назад ({p['repeat']['ticket_id']})." if p.get("repeat") else ""))
+                 + (f" Узел ремонтировали {_days(p['repeat']['days'])} назад ({p['repeat']['ticket_id']})." if p.get("repeat") else ""))
         req = TicketRequest(vehicle_id=p["vehicle_id"], session_id=s.session_id, anomaly_type=s.anomaly_type, conclusion=pii.mask(concl), urgency=u,
                             operations=ops, spare_parts=[], references=[Reference(manual=x["document"], pdf_page=x["page"]) for x in src])
         ack = self.a.toir.create_ticket(req)
