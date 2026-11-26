@@ -1,5 +1,6 @@
 """Runtime settings. Secrets come from environment variables only (never logged)."""
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,8 +8,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # External services (TZ F6): swap mocks for production by editing .env only
-    ml_service_url: str = "http://127.0.0.1:8001"
-    toir_service_url: str = "http://127.0.0.1:8002"
+    ml_service_url: str = Field("http://127.0.0.1:8001", validation_alias=AliasChoices("ML_SERVICE_URL", "MOCK_ML_URL"))
+    toir_service_url: str = Field("http://127.0.0.1:8002", validation_alias=AliasChoices("TOIR_SERVICE_URL", "MOCK_TOIR_URL"))
     http_timeout_s: float = 20.0
 
     # Data

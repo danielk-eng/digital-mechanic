@@ -1,0 +1,4 @@
+# Optional: local speech fallback, local Russian TTS, LLM tracing. Not needed for the core scenarios.
+faster-whisper>=1.1      # STT fallback (Tajik and offline); WHISPER_MODEL=small
+torch>=2.4               # Silero TTS (SILERO_ENABLED=1)
+opik>=1.5                # Comet Opik tracing (COMET_API_KEY)
