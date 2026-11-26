@@ -11,7 +11,7 @@ import re
 from ..retrieval.bm25 import tokens
 
 KINDS = [
-    ("danger", re.compile(r"внимание|предупрежд|запрещ|опасн|не допуска|осторожн|ожог|травм|во избежание", re.I)),
+    ("danger", re.compile(r"внимание|предупрежд|запрещ|(?<!без)опасн|не допуска|осторожн|ожог|травм|во избежание", re.I)),  # not «меры безопасности»
     ("torque", re.compile(r"\d\s*(?:Н\s?[·.∙•*]?\s?м|кгс\s?[·.∙•*]?\s?м)", re.I)),
     ("tool", re.compile(r"динамометрическ|ключ\w*\s+(?:на\s|S\s*=)|щуп|приспособлени|съ[её]мник|оправк|индикатор\w*\s|стетоскоп|компрессометр|манометр", re.I)),
     ("value", re.compile(r"\d[\d,.…\-–]*\s*(?:мм|МПа|бар|кгс/см|°\s?С|°C|об/мин|кПа)\b", re.I)),
@@ -49,9 +49,12 @@ def clip(s: str, rx, width: int = 230) -> str:
     return ("…" if lo else "") + s[lo:hi].strip() + ("…" if hi < len(s) else "")
 
 
+GENERIC = set(tokens("двигатель двигателя двигателе мотор машина машины автомобиль грузовик почему что как"))
+
+
 def key_facts(frags: list[dict], query: str, answer: str, limit: int = 4) -> list[dict]:
     """frags: [{"label","doc_id","page","text"}] cited by the answer, in citation order."""
-    qq = set(tokens(query))
+    qq = set(tokens(query)) - GENERIC  # «двигатель» alone does not tie a manual line to the question
     q = qq | set(tokens(answer))
     cands = []
     for rank, f in enumerate(frags[:4]):

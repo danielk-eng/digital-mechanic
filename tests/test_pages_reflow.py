@@ -125,3 +125,10 @@ def test_viewer_text_drops_the_printed_page_number():
     assert view_text("Причина — Способ\nстрока\n190") == "Причина — Способ\nстрока"
     assert view_text("текст\nСтраница 3\n") == "текст"
     assert view_text("Рис. 5\nтекст 12") == "Рис. 5\nтекст 12"
+
+
+def test_key_fact_danger_not_from_safety_boilerplate():
+    """«соблюдая меры безопасности» on an oil-change page is no warning for «почему стучит двигатель»."""
+    from digital_mechanic.agent.facts import key_facts
+    fr = [{"label": "S1", "doc_id": "x", "page": 34, "text": "ЗАМЕНА МАСЛА Для удаления из картера вместе с маслом отложений сливать масло из прогретого двигателя, соблюдая меры безопасности."}]
+    assert key_facts(fr, "почему стучит двигатель", "Причина: ранний впрыск") == []
