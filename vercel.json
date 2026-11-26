@@ -1,4 +1,4 @@
 {
-  "functions": { "api/index.py": { "maxDuration": 300, "memory": 1024 } },
+  "functions": { "api/index.py": { "maxDuration": 300, "memory": 1024, "includeFiles": "api/bundle.tar.gz" } },
   "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
 }
