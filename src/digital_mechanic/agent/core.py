@@ -479,12 +479,12 @@ class Agent:
             hits = [h for h in hits if own(h[0])]
         return sorted(hits, key=lambda h: -h[1] * (1.6 if own(h[0]) else 1.0))[:k]
 
-    def tool_search_extra(self, c: Conv, query: str) -> dict:
+    def tool_search_extra(self, c: Conv, query: str, k: int = 3) -> dict:
         make = (c.vehicle.make or "").upper()
         if not self.extra or make not in self.extra.makes():
             return {"fragments": [], "note": f"дополнительных руководств для марки {c.vehicle.make} нет"}
         out = []
-        hits = self.extra_hits(c.vehicle, query)
+        hits = self.extra_hits(c.vehicle, query, k=k)
         for p, _ in hits:
             lab = self._add_frag(c, "X", doc_id=p.doc_id, document=p.document, page=p.page, text=p.text, extra=True, image=p.image)
             out.append({"label": lab, "document": p.document + " [доп. источник, не база Заказчика]", "pdf_page": p.page, "text": snippet(p.text, query, 1500)})
@@ -781,6 +781,17 @@ class Agent:
                            "новый search_manual — только если ответа в них нет; если вопрос не о двигателе или данных нет — так и скажи):\n\n" +
                            "\n\n".join(f"[{f['label']}] {f['document']}, стр. PDF {f['pdf_page']}" + (f" — {f['section']}" if f.get("section") else "") +
                                         f"\n{f['text'][:1300]}" for f in r["fragments"][:6]))
+            if not ticket_ask and not codes and self.extra and (c.vehicle.make or "").upper() in self.extra.makes():
+                # The engine manual had no answer (the grounded pass declined) or the question is about the chassis:
+                # this truck's own vehicle manual (or the labelled sibling) is searched up front instead of hoping the model calls the tool.
+                x = self.tool_search_extra(c, q, k=5)
+                if x["fragments"]:
+                    self.progress.setdefault(c.cid, []).append(PROGRESS["search_extra_docs"] + f": {q[:80]}")
+                    turn.tools.append({"tool": "search_extra_docs", "args": {"query": q}, "ok": True, "auto": True,
+                                       "hits": [f"{f['label']}:{f['document']} стр.{f['pdf_page']}" for f in x["fragments"]]})
+                    masked += (f"\n\nФРАГМЕНТЫ РУКОВОДСТВА ПО АВТОМОБИЛЮ {c.vehicle.model or c.vehicle.make} (доп. источник, метки X#: шасси, кабина, "
+                               "тормоза, шины, сцепление, КПП, мосты; нормативы двигателя — только из S#; если фрагмент не про вопрос — не используй):\n\n" +
+                               "\n\n".join(f"[{f['label']}] {f['document']}, стр. PDF {f['pdf_page']}\n{f['text'][:1300]}" for f in x["fragments"]))
 
         messages = [{"role": "system", "content": self._system(c, user, manager)}]
         for m in self.store.messages(c.cid, 12):
