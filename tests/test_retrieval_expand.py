@@ -47,5 +47,14 @@ def test_no_prefetch_for_actions(make_agent):
     a = make_agent([msg("ок")])
     c = a.conv("u1", "M333YK47")
     a.diagnose(c, "S-0005")
-    a.handle(c, {"lang": "ru"}, "Создай заявку")
+    a.handle(c, {"lang": "ru"}, "Покажи историю машины")
     assert "ФРАГМЕНТЫ РУКОВОДСТВА" not in a.llm.calls[0]["messages"][-1]["content"]
+
+
+def test_ticket_request_prefetches_fault_procedures(make_agent):
+    a = make_agent([msg("ок")])
+    c = a.conv("u1", "M333YK47")
+    a.diagnose(c, "S-0005")  # anomaly F08
+    a.handle(c, {"lang": "ru"}, "Создай заявку")
+    first = a.llm.calls[0]["messages"][-1]["content"]
+    assert "ФРАГМЕНТЫ РУКОВОДСТВА" in first and "[S1]" in first

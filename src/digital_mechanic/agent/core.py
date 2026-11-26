@@ -35,6 +35,7 @@ URG_RU = {"high": "высокий", "medium": "средний", "low": "низк
 # requests that are actions (ticket, repair, diagnosis, history) — no manual prefetch before the LLM call
 PREFETCH_SKIP = re.compile(r"заявк|дефектовк|начать ремонт|начни ремонт|ремонт по шагам|истори|результат|получи\w* диагноз|главн\w* механик|"
                            r"сколько машин|подтвержда|отмен|^\s*(да|нет|ок|спасибо)[\s.!]*$", re.I)
+TICKET_RE = re.compile(r"заявк|дефектовк|начать ремонт|начни ремонт|ремонт по шагам", re.I)
 CONFIRM_RE = re.compile(r"^\s*(да[,.!\s]*)?(подтвержда\w*|отправля\w*|отправь\w*|tasdiqla\w*|тасдиқ\w*|растаймын|xác nhận|पुष्टि)", re.I)
 CANCEL_RE = re.compile(r"^\s*(отмен\w*|не надо|не отправля\w*|отбой|bekor|бекор|болдырма\w*|hủy|रद्द)", re.I)
 NEXT_RE = re.compile(r"^\s*(готово|сделал\w*|сделано|дальше|следующ\w*|далее|tayyor|keyingi\w*|тайёр|дайын|келесі|xong|tiếp|हो गया|अगला)[\s.!]*$", re.I)
@@ -605,10 +606,13 @@ class Agent:
             masked = (masked + "\n" if masked else "") + f"[Фото от механика, описание: {image_note}]"
         if not self.llm.available:
             return self._fallback(c, masked, turn)
-        if c.vehicle and not event and raw and not image_note and not PREFETCH_SKIP.search(raw):
+        ticket_ask = bool(c.vehicle and c.check and c.check.status == CheckStatus.anomaly and TICKET_RE.search(raw or "") and not c.draft)
+        if c.vehicle and not event and raw and not image_note and (ticket_ask or not PREFETCH_SKIP.search(raw)):
             # Retrieval before the first LLM call: the model usually answers in ONE round instead of
             # "decide to search" + "answer" (≈ half the latency). It may still search again if fragments do not fit.
-            q = self.normalizer.normalize(pii.mask(raw) if self.pii_masking else raw)[0]
+            # For a ticket request the procedures for the current fault are prefetched, so prepare_ticket gets quotes at once.
+            q = (f"{c.check.anomaly_title} {c.check.description} проверка регулировка замена" if ticket_ask
+                 else self.normalizer.normalize(pii.mask(raw) if self.pii_masking else raw)[0])
             r = self.tool_search_manual(c, q, k=5)
             self.progress.setdefault(c.cid, []).append(PROGRESS["search_manual"] + f": {q[:80]}")
             turn.tools.append({"tool": "search_manual", "args": {"query": q}, "ok": True, "auto": True,

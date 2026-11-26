@@ -41,7 +41,8 @@ def test_agent_picks_tools_and_ticket_goes_through_gate(make_agent):
     c = a.conv("u1", "M333YK47")
     a.diagnose(c, "S-0005")
     turn = a.handle(c, {"lang": "ru"}, "Создать заявку")
-    assert [t["tool"] for t in turn.tools] == ["search_manual", "prepare_ticket"]
+    assert [t["tool"] for t in turn.tools if not t.get("auto")] == ["search_manual", "prepare_ticket"]
+    assert turn.tools[0]["auto"]  # procedures for the current fault prefetched for the ticket
     assert c.draft and len(c.draft["operations"]) == 1 and c.draft["rejected"]
     assert any(cd["kind"] == "ticket_draft" for cd in turn.cards)
     assert a.toir.sent == []  # nothing sent before confirmation
