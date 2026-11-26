@@ -96,6 +96,7 @@ def make_agent(index, official_apps, tmp_path):
         extra = ExtraIndex(load_extra(str(ROOT / "data/index/extra_pages.jsonl.gz")))
         a = Agent(Fleet(ROOT / "data/official/vehicles.json", ROOT / "data/official/fault_types.json"), MlViaTestClient(ml_tc), ToirViaTestClient(toir_tc),
                   index, extra, ScriptedLlm(script), Store(tmp_path / "t.db"), docs)
+        a.expand_prefetch = False  # scripted LLM: a background «Подробнее» would take the next scripted reply
         return a
     return _make
 

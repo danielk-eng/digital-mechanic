@@ -133,6 +133,31 @@ def test_expand_reuses_fragments_and_verifies_numbers(make_agent):
     assert long.sources and long.sources[0]["page"] == short.sources[0]["page"]
 
 
+def test_expand_is_prefetched_after_brief_answer(make_agent):
+    a = make_agent([
+        msg(None, [tool_call("search_manual", {"query": "момент затяжки болтов крышек коренных подшипников"}, 1)]),
+        msg("421-461 Н·м [S1]."),
+        msg("Подробно: момент 421-461 Н·м [S1]. Выдумка 777 Н·м [S1]."),
+        msg("Подробно: момент 421-461 Н·м [S1]. Выдумка 777 Н·м [S1]."),
+    ])
+    a.expand_prefetch = True
+    c = a.conv("u1", "M333YK47")
+    a.diagnose(c, "S-0005")
+    short = a.handle(c, {"lang": "ru", "role": "mechanic"}, "Момент затяжки коренных?")
+    pf = a._prefetch[c.cid]
+    assert pf["done"].wait(10) and pf["ok"]
+    n_calls = len(a.llm.calls)
+    long = a.handle(c, {"lang": "ru", "role": "mechanic"}, short.text, event="expand")
+    assert len(a.llm.calls) == n_calls  # the click reused the background run
+    assert "421" in long.text and "777" not in long.text and long.sources
+    assert any(t.get("tool") == "expand_prefetch" for t in long.tools)
+    assert c.cid not in a._prefetch  # used once
+    # a different answer does not take a stale prefetch
+    a.prefetch_expand(c, {"lang": "ru"}, short.text)
+    a._prefetch[c.cid]["done"].wait(10)
+    assert a._prefetch_take(c, "совсем другой ответ про форсунки [S1]", ["S1"]) is None
+
+
 def test_expand_without_citations(make_agent):
     a = make_agent([])
     c = a.conv("u1", "M333YK47")

@@ -7,7 +7,9 @@ index committed to the repo, so the running app does not need the PDFs to answer
 from __future__ import annotations
 
 import gzip
+import html
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
@@ -52,9 +54,261 @@ def _extract_pypdf(pdf: Path) -> list[str]:
     return [(p.extract_text() or "") for p in PdfReader(str(pdf)).pages]
 
 
+# ---------------------------------------------------------------- figure captions beside the text column
+# On A5 manuals a figure and its caption often sit in one column and the procedure text in the other.
+# pdftotext orders lines by height across both columns, so caption lines end up inside the text
+# ("вставить болт 2 в отверРис. 28. Крепление генератора стие передней лапы ..."). We re-read such pages
+# with word boxes, pull the side caption out of the flow and append it as its own paragraph.
+CAPTION_RE = re.compile(r"^(Рис\.|Рисунок|Fig\.)\s*\d")
+_WORD_RE = re.compile(r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</word>')
+GAP_SPLIT = 14.0  # pt between words that starts a new segment (another column)
+
+
+@dataclass
+class _Seg:
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    words: list
+
+    @property
+    def text(self) -> str:
+        out, prev = "", None
+        for x0, x1, w in self.words:
+            out += ("" if prev is not None and x0 - prev < 0.6 else (" " if out else "")) + w
+            prev = x1
+        return out
+
+
+def _segments(page_xml: str) -> list[_Seg]:
+    segs: list[_Seg] = []
+    for line in re.findall(r"<line [^>]*>(.*?)</line>", page_xml, re.S):
+        cur = None
+        for m in _WORD_RE.finditer(line):
+            x0, y0, x1, y1 = map(float, m.groups()[:4])
+            w = html.unescape(m.group(5))
+            if cur is None or x0 - cur.x1 > GAP_SPLIT:
+                cur = _Seg(x0, y0, x1, y1, [])
+                segs.append(cur)
+            cur.words.append((x0, x1, w))
+            cur.x1, cur.y0, cur.y1 = max(cur.x1, x1), min(cur.y0, y0), max(cur.y1, y1)
+    return segs
+
+
+def _beside(a: _Seg, others: list[_Seg]) -> list[_Seg]:
+    """Segments of another column that share height with a (horizontally disjoint, vertically overlapping)."""
+    return [o for o in others if o is not a and (o.x0 > a.x1 + 4 or o.x1 < a.x0 - 4) and o.y0 < a.y1 + 30 and o.y1 > a.y0 - 30]
+
+
+def reflow_side_captions(page_xml: str) -> str | None:
+    """Text of the page with side captions moved out of the text flow, or None when the page has none."""
+    segs = sorted(_segments(page_xml), key=lambda s: (round(s.y0), s.x0))
+    captions: list[list[_Seg]] = []
+    taken: set[int] = set()
+    for i, s in enumerate(segs):
+        if id(s) in taken or not CAPTION_RE.match(s.text):
+            continue
+        side = _beside(s, segs)
+        if not side:
+            continue
+        left = side[0].x0 > s.x1  # caption column is left of the text column
+        border = min(o.x0 for o in side) - 2 if left else max(o.x1 for o in side) + 2
+        block, last = [s], s
+        for t in segs[i + 1:]:
+            if t.y0 - last.y1 > 9:
+                break
+            inside = (t.x1 <= border and t.x0 >= s.x0 - 14) if left else (t.x0 >= border and t.x1 <= s.x1 + 40)
+            if inside and id(t) not in taken:
+                block.append(t)
+                last = t
+        captions.append(block)
+        taken.update(id(t) for t in block)
+    if not captions:
+        return None
+    lines: list[list[_Seg]] = []
+    for s in segs:
+        if id(s) in taken:
+            continue
+        if lines and abs(lines[-1][0].y0 - s.y0) < 2.5:
+            lines[-1].append(s)
+        else:
+            lines.append([s])
+    body = "\n".join(" ".join(t.text for t in sorted(ln, key=lambda t: t.x0)) for ln in lines)
+    return body + "".join("\n\n" + "\n".join(t.text for t in b) for b in captions)
+
+
+# ---------------------------------------------------------------- «Причина | Способ устранения» tables
+# pdftotext reads such tables column by column (all causes, then all remedies) or mixes the cell lines, so a cause
+# and its remedy end up apart. We rebuild the table row by row: «cause — remedy», hyphenation joined inside cells.
+TABLE_LEFT_RE = re.compile(r"^(Вероятн\w+ |Возможн\w+ )?(Причин|Неисправност)\w*", re.I)
+TABLE_RIGHT_RE = re.compile(r"(Способ|Метод)\w* устранения", re.I)
+ROW_START_RE = re.compile(r"^([А-ЯЁA-Z]|\d+(\.\d+)+\.?\s|\d+\.\s|[а-я]\)\s)")  # new cause: capital, «5.22 », «3. », «а) »
+MAX_CELL = 450
+
+
+def _words(page_xml: str) -> list[list[tuple]]:
+    """Lines of words (x0, y0, x1, y1, text), merged when pdftotext split one visual line into several."""
+    lines: list[list[tuple]] = []
+    for line in re.findall(r"<line [^>]*>(.*?)</line>", page_xml, re.S):
+        ws = [(*map(float, m.groups()[:4]), html.unescape(m.group(5))) for m in _WORD_RE.finditer(line)]
+        if ws:
+            lines.append(ws)
+    lines.sort(key=lambda ws: min(w[1] for w in ws))
+    out: list[list[tuple]] = []
+    for ws in lines:
+        if out and abs(min(w[1] for w in out[-1]) - min(w[1] for w in ws)) < 2.5:
+            out[-1].extend(ws)
+        else:
+            out.append(list(ws))
+    return [sorted(ws, key=lambda w: w[0]) for ws in out]
+
+
+def _join_words(ws: list[tuple]) -> str:
+    return _Seg(0, 0, 0, 0, [(w[0], w[2], w[4]) for w in ws]).text
+
+
+def _join_cell(lines: list[str]) -> str:
+    out = ""
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
+            continue
+        if out.endswith("-") and ln[:1].islower():
+            out = out[:-1] + ln
+        else:
+            out = (out + " " + ln) if out else ln
+    return out
+
+
+def _gutter(lines: list[list[tuple]], lo: float, hi: float) -> float | None:
+    """x between lo and hi crossed by the fewest words (ties: the middle of the widest free gap)."""
+    if hi - lo < 4:
+        return None
+    best = None
+    x = lo
+    while x <= hi:
+        n = sum(1 for ws in lines for w in ws if w[0] < x < w[2])
+        if best is None or n < best[0]:
+            best = (n, x, x)
+        elif n == best[0] and abs(x - best[2] - 1) < 1.01:
+            best = (n, best[1], x)
+        x += 1
+    if best is None:
+        return None
+    total = sum(len(ws) for ws in lines) or 1
+    return (best[1] + best[2]) / 2 if best[0] <= 0.05 * total else None
+
+
+def _split(ws: list[tuple], g: float) -> tuple[list[tuple], list[tuple], bool]:
+    """Left/right words of a table line; phrase=True when the line is one phrase across the gutter (sub-heading)."""
+    left = [w for w in ws if (w[0] + w[2]) / 2 < g]
+    right = [w for w in ws if (w[0] + w[2]) / 2 >= g]
+    crossing = any(w[0] < g - 1 < g + 1 < w[2] for w in ws)
+    # a centred sub-heading reads on across the gutter («Двигатель не развивает | мощности, дымит»), a row does not
+    joined = bool(left and right and right[0][0] - left[-1][2] < 7 and left[0][4][:1].isupper() and right[0][4][:1].islower())
+    lone_number = not right and len(left) == 1 and left[0][4].isdigit() or not left and len(right) == 1 and right[0][4].isdigit()
+    return left, right, crossing or joined or lone_number
+
+
+def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str | None, float | None]:
+    """(row-wise text, gutter) for a cause/remedy table page; (None, None) when the page is not such a table.
+    prev_gutter: the table continues from the previous page without a header."""
+    lines = _words(page_xml)
+    if not lines:
+        return None, None
+    head_i, g = None, None
+    for i, ws in enumerate(lines):
+        t = _join_words(ws)
+        if len(t) > 90:
+            continue
+        segs: list[list[tuple]] = []
+        for w in ws:
+            if segs and w[0] - segs[-1][-1][2] < GAP_SPLIT:
+                segs[-1].append(w)
+            else:
+                segs.append([w])
+        if len(segs) == 2 and TABLE_LEFT_RE.match(_join_words(segs[0])) and TABLE_RIGHT_RE.search(_join_words(segs[1])):
+            body = lines[i + 1:]
+            g = _gutter(body, segs[0][-1][2], segs[1][0][0])
+            if g is not None:
+                head_i = i
+                break
+    if head_i is None:
+        if prev_gutter is None:
+            return None, None
+        body = lines[1:-1] if len(lines) > 3 else lines
+        split = [_split(ws, prev_gutter) for ws in body]
+        both = sum(1 for l, r, ph in split if l and r and not ph)
+        clean = sum(1 for l, r, ph in split if not ph)
+        lefts = [l for l, r, ph in split if l and not ph]
+        if not body or clean < 0.8 * len(body) or both < max(3, 0.3 * len(body)) or len(lefts) < 3:
+            return None, None
+        g, head_i = prev_gutter, -1
+    out = [_join_words(ws) for ws in lines[:head_i + 1]]
+    if head_i >= 0:
+        out[-1] = " — ".join(_join_words(x) for x in ([w for w in lines[head_i] if w[2] < g], [w for w in lines[head_i] if w[0] > g]))
+    rows: list[list[list[str]]] = []
+
+    long_cells = []
+
+    def flush() -> None:
+        for lc, rc in rows:
+            L, R = _join_cell(lc), _join_cell(rc)
+            long_cells.extend(x for x in (L, R) if len(x) > MAX_CELL)
+            out.append(f"{L} — {R}" if L and R else (L or R))
+        rows.clear()
+
+    for ws in lines[head_i + 1:]:
+        left, right, phrase = _split(ws, g)
+        if phrase or not (left or right):
+            flush()
+            out.append(_join_words(ws))  # sub-heading across the table, page number, notes
+            continue
+        L, R = _join_words(left), _join_words(right)
+        cur = rows[-1] if rows else None
+        prev_l = (cur[0][-1] if cur and cur[0] else "")
+        new = bool(ROW_START_RE.match(L)) and not prev_l.endswith("-")
+        if cur is None or new:
+            rows.append([[L] if L else [], [R] if R else []])
+        else:
+            if L:
+                cur[0].append(L)
+            if R:
+                cur[1].append(R)
+    flush()
+    if long_cells:  # rows ran together (three-column table, list items): keep pdftotext's text
+        return None, g
+    return "\n".join(x for x in out if x.strip()), g
+
+
+def _extract_bbox_pages(pdf: Path) -> list[str]:
+    out = subprocess.run(["pdftotext", "-enc", "UTF-8", "-bbox-layout", str(pdf), "-"], capture_output=True, check=True).stdout.decode("utf-8", "replace")
+    return re.findall(r"<page [^>]*>(.*?)</page>", out, re.S)
+
+
+def _pick(plain: str, reflowed: str | None) -> str:
+    """Reflowed text only when it keeps the words (rotated or odd pages lose them: keep pdftotext)."""
+    if not reflowed:
+        return plain
+    letters = lambda x: len(re.findall(r"\w", x))  # hyphen joins change word counts, not letters
+    return reflowed if letters(reflowed) >= 0.97 * letters(plain) else plain
+
+
 def extract_pdf(pdf: Path) -> list[str]:
     if shutil.which("pdftotext"):
-        return _extract_pdftotext(pdf)
+        pages = _extract_pdftotext(pdf)
+        try:
+            boxes = _extract_bbox_pages(pdf)
+        except (subprocess.CalledProcessError, OSError):
+            boxes = []
+        if len(boxes) == len(pages):
+            out, g = [], None
+            for t, b in zip(pages, boxes):
+                tab, g = reflow_table(b, g)
+                out.append(_pick(t, tab) if tab else _pick(t, reflow_side_captions(b)))
+            pages = out
+        return pages
     return _extract_pypdf(pdf)
 
 

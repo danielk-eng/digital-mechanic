@@ -85,6 +85,7 @@ def test_session_endpoint_no_401():
     from digital_mechanic.web.app import app
     r = TestClient(app).get("/api/session")
     assert r.status_code == 200 and r.json()["user"] is None
+    assert r.json()["server_tts"] in (True, False)  # the browser skips POST /api/tts when false (was a 404 in the console)
 
 
 def test_vehicle_title_not_overwritten_by_i18n():

@@ -144,6 +144,13 @@ class Agent:
         self._init_lock = threading.Lock()
         self._sections = None
         self._extracts: dict[tuple, dict] = {}
+        # «Подробнее» is written in the background right after a brief answer (the mechanic reads the brief one
+        # meanwhile), so the click returns the ready text or joins the run in progress. Off on serverless (Vercel):
+        # threads freeze after the response there.
+        import os
+
+        self.expand_prefetch = os.getenv("EXPAND_PREFETCH", "0" if os.getenv("VERCEL") else "1") == "1"
+        self._prefetch: dict[str, dict] = {}
 
     @property
     def normalizer(self):
@@ -177,6 +184,8 @@ class Agent:
             msg, _ = self.llm.chat("section_extract", [
                 {"role": "system", "content": "Ты помогаешь механику. Перескажи раздел руководства коротко (2–4 предложения или 3–5 пунктов) "
                  f"на {lang} языке, только по тексту раздела, ничего не добавляя. Если задан вопрос — выжимка отвечает на него. "
+                 "Если прямого ответа (например, кода ошибки) в разделе нет — не пиши, что его нет: перескажи то, что в разделе "
+                 "относится к теме вопроса и цитате (причины, проверки, способы устранения). "
                  "Числа, моменты, зазоры, давления переписывай ТОЛЬКО если они есть в тексте, без изменений. Без вступлений."},
                 {"role": "user", "content": f"Вопрос механика: {question or '-'}\nЦитата: {hint[:300]}\nРаздел «{sec.label}» (стр. {sec.span}):\n{body}"}],
                 max_tokens=500)
@@ -346,16 +355,61 @@ class Agent:
             turn.text = answer
             turn.sources = [self._source_view(l, c) for l in labels]
             return turn
+        self.progress.setdefault(c.cid, []).append(PROGRESS["expand"])
+        pf = self._prefetch_take(c, answer, labels)
+        if pf is not None:
+            # join the background run: mirror its live lines into this conversation's draft until it is done
+            while not pf["done"].wait(0.25):
+                self.drafts[c.cid] = pf["draft"]
+            if pf.get("ok"):
+                turn.text, turn.tokens = pf["text"], pf["tokens"]
+                turn.tools.extend(pf["tools"] + [{"tool": "expand_prefetch", "ready_s": round(pf["t_done"] - pf["t0"], 1)}])
+                turn.sources = [self._source_view(l, c) for l in cited_labels(turn.text) if l in c.frags]
+                return turn
+        return self._expand_run(c, user, answer, turn)
+
+    def _prefetch_take(self, c: Conv, answer: str, labels: list[str]) -> dict | None:
+        with self._lock:
+            pf = self._prefetch.pop(c.cid, None)
+        if not pf or pf["labels"] != labels:
+            return None
+        a, b = set(re.findall(r"\w+", pf["answer"].lower())), set(re.findall(r"\w+", answer.lower()))
+        return pf if a and len(a & b) / len(a | b) >= 0.8 else None  # same answer (novice glosses may add words)
+
+    def prefetch_expand(self, c: Conv, user: dict, answer: str) -> None:
+        labels = [l for l in cited_labels(answer) if l in c.frags]
+        if not labels or not self.llm.available:
+            return
+        snap = Conv(cid=c.cid, uid=c.uid, vehicle=c.vehicle, check=c.check, decision=c.decision, draft=c.draft,
+                    frags={k: dict(v) for k, v in c.frags.items()}, n_s=c.n_s, n_x=c.n_x)
+        pf = {"labels": labels, "answer": answer, "draft": "", "done": threading.Event(), "t0": time.time()}
+        with self._lock:
+            self._prefetch[c.cid] = pf
+
+        def run() -> None:
+            t = Turn()
+            try:
+                self._expand_run(snap, user, answer, t, sink=pf)
+                pf.update(ok=t.ok and bool(t.text), text=t.text, tokens=t.tokens, tools=t.tools)
+            except Exception as e:  # never break the conversation: the click falls back to a normal run
+                pf.update(ok=False, error=str(e)[:200])
+            finally:
+                pf["t_done"] = time.time()
+                pf["done"].set()
+
+        threading.Thread(target=run, daemon=True, name=f"expand-{c.cid}").start()
+
+    def _expand_run(self, c: Conv, user: dict, answer: str, turn: "Turn", sink: dict | None = None) -> "Turn":
+        labels = [l for l in cited_labels(answer) if l in c.frags]
         # Reuse the fragments already retrieved for this answer (no new search) and a slim prompt: only the
         # grounding rules, no tool list / vehicle history -> fewer input tokens and a bounded output length.
-        self.progress.setdefault(c.cid, []).append(PROGRESS["expand"])
         frags = "\n\n".join(f"[{l}] {c.frags[l]['document']}, стр. PDF {c.frags[l]['page']}\n{snippet(c.frags[l]['text'], answer, 1800)}" for l in labels[:6])
         lang = LANGS[answer_lang(user)]["llm"]
         system = EXPAND_SYSTEM.format(lang_name=lang, experience_rule=EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"]))
         messages = [{"role": "system", "content": system},
                     {"role": "user", "content": EXPAND_PROMPT.format(answer=answer[:2500], frags=frags)}]
         try:
-            msg, tok = self.llm.chat("expand", messages, max_tokens=1500, on_text=self._live(c, messages))
+            msg, tok = self.llm.chat("expand", messages, max_tokens=1500, on_text=self._live(c, messages, sink))
             turn.tokens += tok
             out = self._verify_answer(c, messages, (msg.content or "").strip(), turn)
         except LlmUnavailable as e:
@@ -566,6 +620,10 @@ class Agent:
 
                 frags = [{"label": l, **c.frags[l]} for l in cited_labels(turn.text) if l in c.frags and not c.frags[l].get("extra")]
                 turn.facts = key_facts(frags, text, turn.text)
+                # the UI offers «Подробнее» under a cited brief answer: start writing it now
+                if (self.expand_prefetch and event != "expand" and turn.ok and c.vehicle and user.get("role") != "manager"
+                        and (user.get("detail") or "brief") == "brief"):
+                    self.prefetch_expand(c, user, turn.text)
             return turn
 
     def answer_actions(self, c: Conv, turn: Turn, intents: set[str]) -> list[dict]:
@@ -813,7 +871,7 @@ class Agent:
                 allowed |= numbers(m["content"])
         return allowed
 
-    def _live(self, c: Conv, messages: list[dict]):
+    def _live(self, c: Conv, messages: list[dict], sink: dict | None = None):
         """Callback for the streamed answer: publish only COMPLETE lines whose numbers are all found in the
         fragments (same rule as the final number guard), so the mechanic reads the answer while it is written
         but never sees an unverified figure. The final verified answer replaces this draft."""
@@ -833,7 +891,10 @@ class Agent:
                 ln = re.sub(r"\[(?:S|X)\d+\]", "", ln).rstrip()
                 if ln.strip() and not unverified_numbers(ln, evidence, allowed):
                     ok.append(ln)
-            self.drafts[c.cid] = "\n".join(ok)[-3000:]
+            if sink is not None:
+                sink["draft"] = "\n".join(ok)[-3000:]  # background run: not this conversation's live draft
+            else:
+                self.drafts[c.cid] = "\n".join(ok)[-3000:]
         return cb
 
     def _verify_answer(self, c: Conv, messages: list[dict], answer: str, turn: Turn) -> str:

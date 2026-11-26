@@ -285,7 +285,9 @@ mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 2px}
 .insp [contenteditable]{outline:none;border-bottom:1px dashed var(--border-2)}
 
 /* manager */
+html.mgr{scrollbar-gutter:stable}
 .mgr-main{max-width:1280px;margin:0 auto;padding:24px}
+#tab-fleet:empty{min-height:70vh}
 .mgr-bar{display:flex;align-items:center;gap:12px;height:var(--bar);padding:0 24px;border-bottom:1px solid var(--border);background:var(--bg);position:sticky;top:0;z-index:10}
 .mgr-bar h1{font-size:1.05rem;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px}.kpis:empty{min-height:133px}
@@ -331,6 +333,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .pageview{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px;margin-bottom:12px;scroll-margin-top:8px}
 .pageview .pv-head{font-size:.82rem;font-weight:600;color:var(--text-2);margin-bottom:12px}
 .pageview .pagetext{margin-bottom:12px}
+.trow{display:block;padding:8px 0;border-bottom:1px solid var(--border)}.trow .tc{display:block;font-weight:500}.trow .tr{display:block;color:var(--text-2);padding-left:12px;margin-top:2px}
+.tsub{display:block;font-weight:600;margin:12px 0 2px}
+.figcap{display:block;margin:4px 0 8px;padding:6px 12px;border-left:3px solid var(--border-2);color:var(--text-2);font-size:.82rem;line-height:1.45}
 .pageview .pageimg{display:block;width:100%;border-radius:var(--r);border:1px solid var(--border);background:#fff}
 .pnav{display:flex;justify-content:space-between;gap:8px;margin-bottom:16px}
 .pnav .btn{min-width:112px}.pnav .btn:disabled{opacity:.4;cursor:default}
