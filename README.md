@@ -41,8 +41,11 @@ Windows (PowerShell): `pip install -r requirements.txt`, затем в трёх 
 `uvicorn mock_ml.app:app --port 8001`, `uvicorn mock_toir.app:app --port 8002`, и из корня
 `$env:PYTHONPATH="src"; uvicorn digital_mechanic.web.app:app --port 8000`.
 
-PDF руководств в репозитории нет (текстовый индекс страниц уже собран в `data/index/`). Чтобы показывать
-картинки страниц, скачайте PDF из папки Заказчика: `python scripts/fetch_manuals.py` → `data/manuals/`.
+Руководств производителей в репозитории нет — ни PDF, ни текстов страниц, ни картинок (права на распространение у нас нет).
+Есть список `data/manuals_manifest.json` (источник, sha256, условия). Первый запуск после клонирования:
+`python scripts/fetch_manuals.py` — скачает каждое руководство из первоисточника, сверит sha256 и соберёт индексы
+`data/index/*.jsonl.gz` и картинки страниц у вас (для сканов нужен `tesseract-ocr-rus`, без него `--ocr never`).
+Подробнее: `docs/ПУБЛИКАЦИЯ.md`.
 Без ключа LLM приложение работает в упрощённом режиме: вердикт, найденные страницы, заявка по шаблону.
 
 ## Сценарии защиты

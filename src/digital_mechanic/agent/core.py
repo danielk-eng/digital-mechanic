@@ -467,14 +467,24 @@ class Agent:
                                 "section": f.get("section", ""), "note": "продолжение того же раздела"})
         return {"engine": c.vehicle.engine_model, "fragments": out} if out else {"engine": c.vehicle.engine_model, "fragments": [], "note": "ничего не найдено"}
 
+    def extra_hits(self, vehicle, query: str, k: int = 3) -> list:
+        """Vehicle-manual pages for this truck: its own model's manual only when there is one (no sibling numbers)."""
+        make = (vehicle.make or "").upper()
+        if not self.extra or make not in self.extra.makes():
+            return []
+        model = (vehicle.model or "").lower()
+        own = lambda p: bool(model) and any(model == m.lower() or model.startswith(m.lower() + "-") for m in p.models)  # noqa: E731
+        hits = self.extra.search(make, query, k=24)
+        if any(own(p) for p in self.extra.pages if p.make == make):
+            hits = [h for h in hits if own(h[0])]
+        return sorted(hits, key=lambda h: -h[1] * (1.6 if own(h[0]) else 1.0))[:k]
+
     def tool_search_extra(self, c: Conv, query: str) -> dict:
         make = (c.vehicle.make or "").upper()
         if not self.extra or make not in self.extra.makes():
             return {"fragments": [], "note": f"дополнительных руководств для марки {c.vehicle.make} нет"}
         out = []
-        model = (c.vehicle.model or "").lower()
-        own = lambda p: bool(model) and any(model == m.lower() or model.startswith(m.lower() + "-") for m in p.models)  # noqa: E731
-        hits = sorted(self.extra.search(make, query, k=8), key=lambda h: -h[1] * (1.6 if own(h[0]) else 1.0))[:3]  # this model's manual first
+        hits = self.extra_hits(c.vehicle, query)
         for p, _ in hits:
             lab = self._add_frag(c, "X", doc_id=p.doc_id, document=p.document, page=p.page, text=p.text, extra=True, image=p.image)
             out.append({"label": lab, "document": p.document + " [доп. источник, не база Заказчика]", "pdf_page": p.page, "text": snippet(p.text, query, 1500)})

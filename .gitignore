@@ -39,3 +39,4 @@ data/extra/images/
 # (scripts/stand_bundle.sh, scripts/vercel_bundle.sh). A fresh clone rebuilds the engine index from the PDFs: docs/ПУБЛИКАЦИЯ.md
 data/index/*.jsonl.gz
 data/i18n/pages_*.jsonl.gz
+data/extra/pdf/

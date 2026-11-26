@@ -10,3 +10,21 @@ def test_new_official_chassis_manuals_indexed_and_model_first():
     assert sum("а" <= ch <= "я" for ch in p.text.lower()) > 100  # cp1251 text layer decoded
     hits = ex.search("УАЗ", "давление в шинах", k=3)
     assert hits and hits[0][0].doc_id == "EXTRA-UAZPATRIOT-RE"
+
+
+def test_every_fleet_model_has_its_vehicle_manual():
+    """50/50: each model of the fleet gets pages of its own (or the labelled sibling) vehicle manual, not another model's."""
+    import json
+    from types import SimpleNamespace
+    from digital_mechanic.agent.core import Agent
+    ex = ExtraIndex(load_extra("data/index/extra_pages.jsonl.gz"))
+    a = Agent.__new__(Agent); a.extra = ex
+    want = {"МАЗ-5337": "EXTRA-MAZ555100-RE", "МАЗ-5551": "EXTRA-MAZ555100-RE", "МАЗ-54331": "EXTRA-MAZ555100-RE",
+            "МАЗ-5340С2": "EXTRA-MAZ5440C9", "ПАЗ-3205": "EXTRA-PAZ32053-RE", "ПАЗ-3206": "EXTRA-PAZ32053-RE"}
+    vs = json.load(open("data/official/vehicles.json"))["vehicles"]
+    assert all(v["model"] for v in vs)
+    for v in vs:
+        hits = a.extra_hits(SimpleNamespace(make=v["make"], model=v["model"]), "давление воздуха в шинах")
+        assert hits, v["vehicle_id"]
+        if v["model"] in want:
+            assert all(h[0].doc_id.startswith(want[v["model"]]) for h in hits), (v["model"], [h[0].doc_id for h in hits])

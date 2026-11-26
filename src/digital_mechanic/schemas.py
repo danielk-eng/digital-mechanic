@@ -35,6 +35,12 @@ class Vehicle(BaseModel):
     engine_model: str
     fuel: Optional[str] = None
 
+    def model_post_init(self, _ctx) -> None:
+        # The customer's mock has 12 MAZ trucks with ЯМЗ-536 and no model: the plant fits ЯМЗ-536 to the 5340С2/6312С3
+        # family, whose manual (5440С9-3902002 РЭ) we index; the mock files carry the same value (audit/MANUAL_COVERAGE.md).
+        if not self.model and (self.make or "").upper() == "МАЗ" and self.engine_model == "ЯМЗ-536":
+            self.model = "МАЗ-5340С2"
+
     @property
     def label(self) -> str:
         name = self.model or self.make or ""
