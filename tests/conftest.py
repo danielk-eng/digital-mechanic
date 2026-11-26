@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -6,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
+os.environ.pop("CLOUDRU_API_KEY", None)  # tests never call the real providers
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "vendor" / "neurodvs_mock"
 sys.path.insert(0, str(VENDOR))

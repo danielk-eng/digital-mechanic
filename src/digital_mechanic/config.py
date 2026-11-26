@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     llm_hedge_ttft_s: float = 5.0  # streaming: no first token after N s -> second identical request, first to start streaming wins
     # "off" sends thinking={"type":"disabled"} (DeepSeek-style); ~4x faster answers. "on" keeps model default.
     llm_thinking: str = "off"
+    # Cloud.ru Foundation Models (OpenAI-compatible, servers in Russia): primary for users from `cloudru_countries`
+    # (152-FZ: data of RF citizens processed in RF); TokenRouter stays the fallback (and primary elsewhere).
+    cloudru_api_key: str = ""
+    cloudru_base_url: str = "https://foundation-models.api.cloud.ru/v1"
+    cloudru_model: str = "GigaChat/GigaChat-4-708B-A41"
+    cloudru_countries: str = "RU,BY,KZ,UZ,KG,TJ"
+    llm_primary: str = "auto"  # auto: Cloud.ru for cloudru_countries (and when the country is unknown), else TokenRouter; or cloudru | tokenrouter
+    cloudru_stt: bool = True  # STT on Cloud.ru: GigaASR (ru), whisper-large-v3 (other languages)
 
     # Voice
     deepgram_api_key: str = ""

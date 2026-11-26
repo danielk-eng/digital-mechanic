@@ -146,6 +146,23 @@ def postprocess(text: str, lang: str) -> str:
     return text
 
 
+CLOUDRU_STT = {"ru": "GigaChat/GigaASR"}  # other languages: openai/whisper-large-v3
+
+
+def cloudru_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
+    """Cloud.ru Foundation Models (servers in Russia): GigaASR for Russian, whisper-large-v3 for the other languages."""
+    if not (s.cloudru_api_key and s.cloudru_stt):
+        raise SttUnavailable("no cloudru key")
+    ext = {"audio/wav": "wav", "audio/mpeg": "mp3", "audio/ogg": "ogg", "audio/mp4": "m4a"}.get((mime or "").split(";")[0], "webm")
+    r = httpx.post(f"{s.cloudru_base_url.rstrip('/')}/audio/transcriptions", headers={"Authorization": f"Bearer {s.cloudru_api_key}"},
+                   files={"file": (f"a.{ext}", audio, mime or "audio/webm")},
+                   data={"model": CLOUDRU_STT.get(lang, "openai/whisper-large-v3"), "language": lang, "prompt": prompt_for(lang) if lang != "ru" else ""},
+                   timeout=s.speech_timeout_s)
+    if r.status_code != 200:
+        raise SttUnavailable(f"cloudru {r.status_code}")
+    return postprocess((r.json().get("text") or "").strip(), lang)
+
+
 def speech_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
     if not s.speech_url:
         raise SttUnavailable("no speech service")
@@ -156,10 +173,16 @@ def speech_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
     return postprocess(r.json()["text"].strip(), lang)
 
 
-def transcribe(audio: bytes, mime: str, lang: str, s: Settings, local_first: bool = False) -> tuple[str, str]:
-    """Return (text, engine): local whisper service -> Deepgram (ru/hi/vi) -> in-process whisper."""
+def transcribe(audio: bytes, mime: str, lang: str, s: Settings, local_first: bool = False, country: str | None = None) -> tuple[str, str]:
+    """Return (text, engine): [Cloud.ru for RU-region users] -> local whisper service -> Deepgram -> in-process whisper.
+    Cloud.ru goes first for `cloudru_countries` unless the law of the person's country wants the data in that country
+    (local_first and country != RU: KZ, UZ): then the stand's own whisper is first and Cloud.ru second."""
     errors = []
     chain = [] if lang in NO_WHISPER else [("whisper-local", lambda: speech_stt(audio, mime, lang, s))]
+    ru_region = {x.strip().upper() for x in s.cloudru_countries.split(",") if x.strip()}
+    if s.cloudru_api_key and s.cloudru_stt and (country or "RU").upper() in ru_region:
+        cr = ("cloudru", lambda: cloudru_stt(audio, mime, lang, s))
+        chain.insert(0 if (not local_first or (country or "RU").upper() == "RU") else len(chain), cr)
     if lang in DEEPGRAM_LANGS:
         dg = ("deepgram", lambda: deepgram_stt(audio, mime, lang, s))
         first = lang in DEEPGRAM_FIRST and s.stt_order == "cloud-first" and not local_first  # local-first (strict 152-FZ): audio stays on the stand

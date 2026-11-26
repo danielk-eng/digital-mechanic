@@ -25,6 +25,7 @@ from pydantic import BaseModel
 
 from .. import media as umedia, pii, privacy_laws, voice
 from ..translate import Translator
+from ..agent.llm import REQUEST_COUNTRY
 from ..agent import profile as uprofile, style as ustyle, memory as umemory
 from ..agent.briefing import Briefing
 from .. import demo_seed
@@ -181,6 +182,8 @@ async def _restore_session(request, call_next):
     if cookie:
         hdr.append((b"cookie", cookie.encode("latin-1", "ignore")))
     request.scope["headers"] = hdr
+    me = STORE.user(uid) if uid else None
+    REQUEST_COUNTRY.set((me or {}).get("country"))  # LLM provider by the person's country (152-FZ: RU -> Cloud.ru)
     response = await call_next(request)
     if uid and request.url.path == "/api/session":  # sliding renewal: active users are never asked for the PIN again
         response.set_cookie("s", request.cookies["s"], httponly=True, samesite="lax", max_age=SESSION_MAX_AGE,
@@ -829,7 +832,7 @@ async def media_upload(kind: str = Form(...), vehicle_id: str = Form(...), text:
         if kind == "video" and feats.get("duration_s"):
             try:  # speech in the clip ("вот тут стучит") goes to the agent; engine noise alone gives nothing
                 txt, _eng = voice.transcribe(adata, "audio/wav", LANGS[lang_or_default(u.get("lang"))]["stt"], S,
-                                             local_first=privacy_laws.requires_localization(u.get("country")))
+                                             local_first=privacy_laws.requires_localization(u.get("country")), country=u.get("country"))
                 speech = umedia.meaningful_speech(txt)
             except voice.SttUnavailable:
                 speech = ""
@@ -885,7 +888,7 @@ async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), uid: str | 
     try:
         # data-localization countries (RU, UZ, KZ): local Whisper first, cloud only if the local one is unavailable
         text, engine = voice.transcribe(data, audio.content_type or "audio/webm", LANGS[lang_or_default(lang)]["stt"], S,
-                                        local_first=privacy_laws.requires_localization(u.get("country")))
+                                        local_first=privacy_laws.requires_localization(u.get("country")), country=u.get("country"))
     except voice.SttUnavailable as e:
         raise HTTPException(503, f"STT unavailable: {e}")
     STORE.audit(user_id=u["id"], role=u["role"], action="stt", input=f"{len(data)} bytes {lang}", output=pii.mask(text)[:500], tools=[{"tool": engine}], ok=1)
@@ -1061,8 +1064,8 @@ def health() -> dict:
     # public: no model name or other configuration details (they are in the engineer menu, behind the engineer PIN)
     return {"ml": AGENT.ml.health(), "toir": AGENT.toir.health(), "llm_configured": AGENT.llm.available,
             "pages": len(AGENT.index.pages), "extra_pages": len(AGENT.extra.pages) if AGENT.extra else 0,
-            "stt": "+".join(x for x in ("whisper-local" if S.speech_url else "", "deepgram" if S.deepgram_api_key else "") if x) or "browser",
-            "tts": "silero" if (S.speech_url or S.silero_enabled) else "browser", "tracing": "opik" if AGENT.llm._opik else None}
+            "stt": "server" if (S.speech_url or S.deepgram_api_key or S.cloudru_api_key) else "browser",
+            "tts": "server" if (S.speech_url or S.silero_enabled) else "browser"}
 
 
 @app.get("/api/usage")
@@ -1092,7 +1095,7 @@ def _models_view() -> dict:
     opts = [m.strip() for m in os.environ.get("LLM_MODELS", "").split(",") if m.strip()]
     cur = {k: getattr(S, k, None) for k in MODEL_KNOBS}
     return {"current": cur, "llm_options": sorted(set(opts + [S.llm_model])), "stt_orders": STT_ORDERS,
-            "stt_engines": {"whisper_local": bool(S.speech_url), "deepgram": bool(S.deepgram_api_key), "browser": True},
+            "stt_engines": {"cloudru": bool(S.cloudru_api_key and S.cloudru_stt), "whisper_local": bool(S.speech_url), "deepgram": bool(S.deepgram_api_key), "browser": True},
             "deepgram_langs": sorted(voice.DEEPGRAM_LANGS), "no_whisper": sorted(voice.NO_WHISPER), "llm_configured": AGENT.llm.available}
 
 
@@ -1181,7 +1184,8 @@ def eng_health(uid: str | None = Cookie(None)) -> dict:
         except Exception:  # noqa: BLE001
             ok = False
         out[name] = {"ok": ok, "ms": int((time.time() - t0) * 1000)}
-    out["llm"] = {"ok": AGENT.llm.available, "model": S.llm_model, "usage": AGENT.llm.usage.as_dict()}
+    out["llm"] = {"ok": AGENT.llm.available, "model": S.llm_model, "providers": AGENT.llm.order("RU"), "providers_other": AGENT.llm.order("IN"),
+                  "cloudru_model": S.cloudru_model if S.cloudru_api_key else None, "usage": AGENT.llm.usage.as_dict()}
     out["stt"] = {"ok": True, "engines": _models_view()["stt_engines"], "order": S.stt_order}
     out["index"] = {"ok": True, "pages": len(AGENT.index.pages), "extra_pages": len(AGENT.extra.pages) if AGENT.extra else 0}
     out["translate"] = {"ok": True, **TR.stats()}
