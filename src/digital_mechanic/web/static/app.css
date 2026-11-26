@@ -339,3 +339,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .answer-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
 .answer-actions .btn{gap:8px}
 .cite{margin-left:4px}
+.terms{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.term{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 10px;border-radius:8px;background:var(--surface-2);color:var(--text);border:0;font-size:.85rem;cursor:pointer}
+.term:hover{background:var(--surface-3)}

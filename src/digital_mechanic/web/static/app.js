@@ -734,6 +734,7 @@ function settingsSheet() {
     `<div class="field"><span class="label">${t("theme")}</span>${segHtml("s_theme", [["dark", t("theme_dark")], ["light", t("theme_light")], ["contrast", t("theme_contrast")]], A11Y.theme())}</div>` +
     `<label class="switch"><span>${t("voice_speaks")}</span><input type="checkbox" id="s_vtts" ${A11Y.voiceSpeaks() ? "checked" : ""}></label>` +
     `<label class="switch"><span>${t("captions")}</span><input type="checkbox" id="s_cc" ${A11Y.captions() ? "checked" : ""}></label>` +
+    `<div class="sep"></div><div class="field"><span class="label">${t("my_profile")}</span><div id="s_prof" class="small muted">${t("loading")}</div></div>` +
     `<div class="sep"></div><p class="small muted">${t("privacy_note")} <a href="/privacy?country=${esc(ME.country || "RU")}" target="_blank">${t("policy")}</a></p>` +
     `<div class="card-actions"><button class="btn ghost" id="s_logout">${icon("log-out", 18)}<span>${t("logout")}</span></button><button class="btn danger" id="s_delete">${t("delete_data")}</button></div>`, sh => {
     langOptions(sh.querySelector("#s_lang"), ME.lang); langOptions(sh.querySelector("#s_alang"), ME.answer_lang || "", true);
@@ -742,6 +743,7 @@ function settingsSheet() {
     loadCountries().then(() => { const sel = sh.querySelector("#s_country"); countryOptions(sel, ME.country || "RU");
       const law = () => { const c = COUNTRIES.find(x => x.code === sel.value); sh.querySelector("#s_law").textContent = c ? `${c.law}. ${c.localize ? t("stt_local") : ""}` : ""; };
       law(); sel.onchange = async () => { await saveProfile({country: sel.value}); law(); }; });
+    drawProfile(sh);
     bindSeg(sh, "s_exp", v => saveProfile({experience: v}));
     bindSeg(sh, "s_detail", v => saveProfile({detail: v}));
     bindSeg(sh, "s_fs", v => { A11Y.setSize(v); layout(); });
@@ -751,6 +753,19 @@ function settingsSheet() {
     sh.querySelector("#s_logout").onclick = async () => { await api("/api/logout", {method: "POST"}); location.reload(); };
     sh.querySelector("#s_delete").onclick = async () => { if (confirm(t("delete_confirm"))) { await api("/api/me", {method: "DELETE"}); location.reload(); } };
   });
+}
+// What the assistant learned about the user (agent/profile.py): visible, editable, deletable.
+async function drawProfile(sh, prof) {
+  const box = sh.querySelector("#s_prof"); if (!box) return;
+  try { prof = prof || (await api("/api/me")).profile; } catch (_) { box.textContent = ""; return; }
+  const lvl = {novice: t("exp_novice"), experienced: t("exp_expert"), expert: t("exp_pro")}[prof.inferred];
+  box.innerHTML = `<p>${t("role")}: <b>${esc(ME.role === "manager" ? t("role_manager") : t("role_mechanic"))}</b>. ${t("prof_messages")}: ${prof.messages}.` +
+    (lvl ? ` ${t("prof_inferred")}: <b>${esc(short(lvl))}</b>.` : "") + (prof.prefers_detail ? ` ${t("prof_prefers_detail")}` : "") + `</p>` +
+    `<p style="margin-top:8px">${t("prof_terms")}:</p><div class="terms">` +
+    (prof.terms.length ? prof.terms.map(k => `<button class="term" data-k="${esc(k)}" aria-label="${esc(t("remove"))} ${esc(k)}">${esc(k)} ${icon("x", 14)}</button>`).join("") : `<span>${t("prof_no_terms")}</span>`) + `</div>` +
+    `<button class="btn ghost sm" id="s_preset" style="margin-top:12px">${icon("rotate-ccw", 16)}<span>${t("prof_reset")}</span></button>`;
+  box.querySelectorAll(".term").forEach(b => b.onclick = async () => drawProfile(sh, (await api("/api/me/profile", {json: {remove_term: b.dataset.k}})).profile));
+  box.querySelector("#s_preset").onclick = async () => drawProfile(sh, (await api("/api/me/profile", {json: {reset: true}})).profile);
 }
 async function saveProfile(patch) { try { ME = (await api("/api/me", {json: patch})).user; applyI18n(); } catch (e) { toast(friendlyError(e)); } }
 

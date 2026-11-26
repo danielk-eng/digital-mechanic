@@ -238,7 +238,16 @@
   "page_no_text": "На этой странице нет текста (рисунок или схема).",
   "country": "Страна",
   "consent_law": "Согласие на обработку персональных данных по закону {law}",
-  "stt_local": "Закон требует хранить данные в стране: речь распознаётся локально на сервере."
+  "stt_local": "Закон требует хранить данные в стране: речь распознаётся локально на сервере.",
+  "my_profile": "Что помощник знает о вас",
+  "prof_messages": "Вопросов",
+  "prof_inferred": "По вопросам похоже на уровень",
+  "prof_prefers_detail": "Часто открываете «Подробнее».",
+  "prof_terms": "Ваши термины (агент отвечает в них)",
+  "prof_no_terms": "пока нет",
+  "prof_reset": "Сбросить профиль",
+  "remove": "Убрать",
+  "loading": "Загрузка…"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -475,7 +484,16 @@
   "page_no_text": "Bu sahifada matn yoʻq (rasm yoki sxema).",
   "country": "Mamlakat",
   "consent_law": "{law} qonuniga muvofiq shaxsiy maʼlumotlarimni qayta ishlashga roziman",
-  "stt_local": "Qonun maʼlumotlarni mamlakatda saqlashni talab qiladi: nutq serverda mahalliy tanib olinadi."
+  "stt_local": "Qonun maʼlumotlarni mamlakatda saqlashni talab qiladi: nutq serverda mahalliy tanib olinadi.",
+  "my_profile": "Yordamchi siz haqingizda nimani biladi",
+  "prof_messages": "Savollar",
+  "prof_inferred": "Savollarga koʻra daraja",
+  "prof_prefers_detail": "Koʻpincha «Batafsil»ni ochasiz.",
+  "prof_terms": "Atamalaringiz (yordamchi shularda javob beradi)",
+  "prof_no_terms": "hozircha yoʻq",
+  "prof_reset": "Profilni tozalash",
+  "remove": "Olib tashlash",
+  "loading": "Yuklanmoqda…"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -712,7 +730,16 @@
   "page_no_text": "Дар ин саҳифа матн нест (расм ё нақша).",
   "country": "Кишвар",
   "consent_law": "Ба коркарди маълумоти шахсӣ мувофиқи қонуни {law} розӣ ҳастам",
-  "stt_local": "Қонун нигоҳдории маълумотро дар кишвар талаб мекунад: нутқ дар сервер маҳаллӣ шинохта мешавад."
+  "stt_local": "Қонун нигоҳдории маълумотро дар кишвар талаб мекунад: нутқ дар сервер маҳаллӣ шинохта мешавад.",
+  "my_profile": "Ёрдамчӣ дар бораи шумо чӣ медонад",
+  "prof_messages": "Саволҳо",
+  "prof_inferred": "Аз рӯи саволҳо сатҳ",
+  "prof_prefers_detail": "Аксар «Муфассал»-ро мекушоед.",
+  "prof_terms": "Истилоҳҳои шумо",
+  "prof_no_terms": "ҳоло нест",
+  "prof_reset": "Профилро тоза кардан",
+  "remove": "Хориҷ",
+  "loading": "Боркунӣ…"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -949,7 +976,16 @@
   "page_no_text": "Бұл бетте мәтін жоқ (сурет немесе сызба).",
   "country": "Ел",
   "consent_law": "{law} заңы бойынша дербес деректерімді өңдеуге келісемін",
-  "stt_local": "Заң деректерді елде сақтауды талап етеді: сөз серверде жергілікті танылады."
+  "stt_local": "Заң деректерді елде сақтауды талап етеді: сөз серверде жергілікті танылады.",
+  "my_profile": "Көмекші сіз туралы не біледі",
+  "prof_messages": "Сұрақтар",
+  "prof_inferred": "Сұрақтар бойынша деңгей",
+  "prof_prefers_detail": "«Толығырақ» жиі ашасыз.",
+  "prof_terms": "Сіздің терминдеріңіз",
+  "prof_no_terms": "әзірге жоқ",
+  "prof_reset": "Профильді тазарту",
+  "remove": "Алып тастау",
+  "loading": "Жүктелуде…"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -1186,7 +1222,16 @@
   "page_no_text": "इस पृष्ठ पर पाठ नहीं है (चित्र या आरेख)।",
   "country": "देश",
   "consent_law": "{law} के अनुसार व्यक्तिगत डेटा के प्रसंस्करण के लिए सहमति",
-  "stt_local": "कानून डेटा देश में रखने की मांग करता है: आवाज़ सर्वर पर स्थानीय रूप से पहचानी जाती है।"
+  "stt_local": "कानून डेटा देश में रखने की मांग करता है: आवाज़ सर्वर पर स्थानीय रूप से पहचानी जाती है।",
+  "my_profile": "सहायक आपके बारे में क्या जानता है",
+  "prof_messages": "प्रश्न",
+  "prof_inferred": "प्रश्नों के अनुसार स्तर",
+  "prof_prefers_detail": "आप अक्सर «विस्तार» खोलते हैं।",
+  "prof_terms": "आपके शब्द",
+  "prof_no_terms": "अभी नहीं",
+  "prof_reset": "प्रोफ़ाइल रीसेट",
+  "remove": "हटाएँ",
+  "loading": "लोड हो रहा है…"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -1423,6 +1468,15 @@
   "page_no_text": "Trang này không có văn bản (hình hoặc sơ đồ).",
   "country": "Quốc gia",
   "consent_law": "Tôi đồng ý xử lý dữ liệu cá nhân theo {law}",
-  "stt_local": "Luật yêu cầu lưu dữ liệu trong nước: giọng nói được nhận dạng cục bộ trên máy chủ."
+  "stt_local": "Luật yêu cầu lưu dữ liệu trong nước: giọng nói được nhận dạng cục bộ trên máy chủ.",
+  "my_profile": "Trợ lý biết gì về bạn",
+  "prof_messages": "Câu hỏi",
+  "prof_inferred": "Theo câu hỏi, trình độ",
+  "prof_prefers_detail": "Bạn thường mở «Chi tiết».",
+  "prof_terms": "Thuật ngữ của bạn",
+  "prof_no_terms": "chưa có",
+  "prof_reset": "Đặt lại hồ sơ",
+  "remove": "Xoá",
+  "loading": "Đang tải…"
  }
 }

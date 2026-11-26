@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import pii, privacy_laws, voice
+from ..agent import profile as uprofile
 from ..agent.llm import LlmUnavailable
 from ..agent.prompts import VISION_PROMPT
 from ..bootstrap import build_agent
@@ -192,7 +193,25 @@ def session(uid: str | None = Cookie(None)) -> dict:
 
 @app.get("/api/me")
 def me(uid: str | None = Cookie(None)) -> dict:
-    return {"user": user_of(uid), "langs": {k: v["name"] for k, v in LANGS.items()}}
+    u = user_of(uid)
+    return {"user": u, "profile": uprofile.public(uprofile.load(u)), "langs": {k: v["name"] for k, v in LANGS.items()}}
+
+
+class ProfileEditIn(BaseModel):
+    remove_term: str | None = None
+    reset: bool = False
+
+
+@app.post("/api/me/profile")
+def edit_profile(body: ProfileEditIn, uid: str | None = Cookie(None)) -> dict:
+    """Settings: the user sees what the assistant learned about him and can remove a term or reset everything."""
+    u = user_of(uid)
+    p = uprofile.load({"profile": ""} if body.reset else u)
+    if body.remove_term:
+        p["terms"].pop(body.remove_term, None)
+        p["inferred"] = uprofile.inferred_level(p)
+    STORE.upsert_user(u["id"], profile=uprofile.dump(p))
+    return {"profile": uprofile.public(p)}
 
 
 EXPERIENCE_LEVELS = ("novice", "experienced", "expert")
@@ -474,9 +493,17 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
         raise HTTPException(404, "unknown vehicle")
     if c.vehicle is None and u["role"] != "manager":
         raise HTTPException(400, "choose a vehicle")
-    turn = AGENT.handle(c, u, body.text[:4000], event=body.event)
+    # adaptive profile: learn the mechanic's terms, answer in them; novices get short glosses the first few times
+    prof = uprofile.load(u)
+    if u["role"] == "mechanic":
+        uprofile.update_from_message(prof, body.text or "", body.event)
+    level = u.get("experience") or "experienced"
+    turn = AGENT.handle(c, {**u, "_vocab_hint": uprofile.prompt_hint(prof, level)}, body.text[:4000], event=body.event)
+    turn.text, glossed = uprofile.gloss(turn.text, prof, level)
+    if u["role"] == "mechanic":
+        STORE.upsert_user(u["id"], profile=uprofile.dump(prof))
     # "expand" re-renders the previous answer: do not store it again as a user message
-    shown = {"expand": "", "alternatives": "🔀 Другие варианты"}.get(body.event or "", None)
+    shown = {"expand": "", "alternatives": "Другие варианты"}.get(body.event or "", None)
     _record(u, c, "chat" if not body.event else body.event, body.text if shown is None else shown, turn, t0)
     return {**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000)}
 

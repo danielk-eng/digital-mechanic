@@ -318,7 +318,10 @@ class Agent:
         lang = LANGS[answer_lang(user)]["llm"]
         if manager:
             return MANAGER_SYSTEM.format(lang_name=lang, context=f"Сейчас {time.strftime('%d.%m.%Y %H:%M')}.")
-        return MECHANIC_SYSTEM.format(lang_name=lang, experience_rule=EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"]),
+        rule = EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"])
+        if user.get("_vocab_hint"):
+            rule += "\n" + user["_vocab_hint"]  # adaptive profile: the mechanic's own terms (agent/profile.py)
+        return MECHANIC_SYSTEM.format(lang_name=lang, experience_rule=rule,
                                       length_rule=DETAIL.get(detail or user.get("detail") or "brief", DETAIL["brief"]), context=self._context(c))
 
     def _expand(self, c: Conv, user: dict, answer: str, turn: "Turn") -> "Turn":
