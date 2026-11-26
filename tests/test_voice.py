@@ -42,3 +42,27 @@ def test_deepgram_sends_keyterms_for_russian(monkeypatch):
     monkeypatch.setattr(httpx, "post", fake_post)
     out = voice.deepgram_stt(b"x", "audio/webm", "ru", Settings(deepgram_api_key="k"))
     assert out == "ЯМЗ-236 стучит" and ("keyterm", "ЯМЗ") in seen["params"] and ("mip_opt_out", "true") in seen["params"]
+
+
+def test_uz_cyrillic_to_latin_and_hi_loanwords():
+    from digital_mechanic.voice import hi_devanagari, postprocess, uz_latin
+    assert uz_latin("Мой босими паст, двигател тақиллаяпти") == "Moy bosimi past, dvigatel taqillayapti"
+    assert uz_latin("Dvigatel salt yurishda") == "Dvigatel salt yurishda"  # already Latin
+    assert uz_latin("Ердаги мой") == "Yerdagi moy"
+    assert hi_devanagari("Engine idle पर खट खट कर रहा है.") == "इंजन आइडल पर खटखट कर रहा है."
+    assert hi_devanagari("Check engine light") == "Check engine light"  # no Devanagari -> untouched
+    assert postprocess("Я М З 536", "ru") == "ЯМЗ-536"
+
+
+def test_stt_route_per_language(monkeypatch):
+    from digital_mechanic import voice
+    from digital_mechanic.config import Settings
+    used = []
+    monkeypatch.setattr(voice, "deepgram_stt", lambda a, m, lang, s: used.append(("dg", lang)) or "dg")
+    monkeypatch.setattr(voice, "speech_stt", lambda a, m, lang, s: used.append(("wh", lang)) or "wh")
+    cf = Settings(stt_order="cloud-first", deepgram_api_key="k", speech_url="http://x")
+    assert voice.transcribe(b"x", "audio/webm", "uz", cf) == ("dg", "deepgram")
+    assert voice.transcribe(b"x", "audio/webm", "kk", cf) == ("wh", "whisper-local")  # kk: Whisper with a Kazakh prompt is better
+    lf = Settings(stt_order="local-first", deepgram_api_key="k", speech_url="http://x")
+    assert voice.transcribe(b"x", "audio/webm", "uz", lf) == ("wh", "whisper-local")  # strict 152-FZ: audio stays local
+    assert voice.prompt_for("kk").startswith("Жүк") and "Диагностика" not in voice.prompt_for("uz")
