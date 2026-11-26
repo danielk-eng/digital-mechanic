@@ -111,7 +111,8 @@
   "insp_confirm": "Подтвердить осмотр",
   "insp_saved": "Осмотр сохранён и передан главному",
   "captions": "Крупные субтитры речи",
-  "recognizing": "Распознаю"
+  "recognizing": "Распознаю",
+  "understood": "Понял как"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -225,7 +226,8 @@
   "insp_confirm": "Koʻrikni tasdiqlash",
   "insp_saved": "Koʻrik saqlandi va bosh mexanikka yuborildi",
   "captions": "Katta subtitrlar",
-  "recognizing": "Tanimoqda"
+  "recognizing": "Tanimoqda",
+  "understood": "Shunday tushundim"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -339,7 +341,8 @@
   "insp_confirm": "Тасдиқи муоина",
   "insp_saved": "Муоина сабт ва ба сармеханик фиристода шуд",
   "captions": "Субтитрҳои калон",
-  "recognizing": "Шинохта истодааст"
+  "recognizing": "Шинохта истодааст",
+  "understood": "Чунин фаҳмидам"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -453,7 +456,8 @@
   "insp_confirm": "Тексеруді растау",
   "insp_saved": "Тексеру сақталды және бас механикке жіберілді",
   "captions": "Үлкен субтитрлер",
-  "recognizing": "Танып жатыр"
+  "recognizing": "Танып жатыр",
+  "understood": "Былай түсіндім"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -567,7 +571,8 @@
   "insp_confirm": "निरीक्षण की पुष्टि करें",
   "insp_saved": "निरीक्षण सहेजा गया और मुख्य मैकेनिक को भेजा गया",
   "captions": "बड़े उपशीर्षक",
-  "recognizing": "पहचान रहा है"
+  "recognizing": "पहचान रहा है",
+  "understood": "मैंने ऐसे समझा"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -681,6 +686,7 @@
   "insp_confirm": "Xác nhận kiểm tra",
   "insp_saved": "Đã lưu và gửi thợ trưởng",
   "captions": "Phụ đề lớn",
-  "recognizing": "Đang nhận dạng"
+  "recognizing": "Đang nhận dạng",
+  "understood": "Hiểu là"
  }
 }

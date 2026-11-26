@@ -83,7 +83,8 @@ function renderTurn(turn, expanded = false) {
   if (turn.text) {
     const canExpand = !expanded && (turn.sources || []).length && (ME.detail || "brief") === "brief";
     const canAlt = VID && (turn.sources || []).length;
-    const d = addMsg("bot", factsHtml(turn.facts) + md(turn.text, turn.sources) + sourcesHtml(turn.sources) +
+    const und = (turn.understood || []).length ? `<div class="muted understood">🔎 ${t("understood")}: ${turn.understood.map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join(", ")}</div>` : "";
+    const d = addMsg("bot", und + factsHtml(turn.facts) + md(turn.text, turn.sources) + sourcesHtml(turn.sources) +
       `<div class="row acts">` + (canExpand ? `<button class="expand">${t("expand")} ▾</button>` : "") +
       (canAlt ? `<button class="expand alt">🔀 ${t("alternatives")}</button><button class="expand hyp">🧪 ${t("hypothesis")}</button>` : "") + `</div>`);
     if (canExpand) d.querySelector(".expand").onclick = ev => { ev.stopPropagation(); ev.target.remove(); expandAnswer(turn.text); };

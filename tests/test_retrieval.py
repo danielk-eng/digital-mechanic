@@ -38,3 +38,11 @@ def test_kamaz_mirror_excluded():
     assert pages and all(p.make != "КАМАЗ" and p.source != "avtoalfa.com" for p in pages)
     raw = [json.loads(l) for l in gzip.open("data/index/extra_pages.jsonl.gz", "rt", encoding="utf-8")]
     assert not any("KAMAZ" in r["doc_id"] for r in raw)
+
+
+def test_slang_and_typos_to_manual_terms(pages):
+    from digital_mechanic.retrieval.synonyms import Normalizer
+    n = Normalizer(pages)
+    out, ch = n.normalize("помпа течёт, зазоры клапонов")
+    assert "водяной насос" in out and "клапанов" in out and len(ch) == 2
+    assert n.normalize("давление упало")[1] == []  # common words are left alone

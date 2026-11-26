@@ -92,9 +92,11 @@ class Turn:
     tokens: int = 0
     ok: bool = True
     facts: list[dict] = field(default_factory=list)
+    understood: list = field(default_factory=list)  # [(original, manual term)] "did you mean"
 
     def as_dict(self) -> dict:
-        return {"text": self.text, "cards": self.cards, "sources": self.sources, "tools": self.tools, "facts": self.facts}
+        return {"text": self.text, "cards": self.cards, "sources": self.sources, "tools": self.tools, "facts": self.facts,
+                "understood": self.understood}
 
 
 ALT_PROMPT = ("Другие варианты: предложи до 3 других возможных причин, которые мы ещё НЕ обсуждали, и как проверить каждую — "
@@ -120,6 +122,14 @@ class Agent:
         self._lock = threading.Lock()
         self._sections = None
         self._extracts: dict[tuple, dict] = {}
+
+    @property
+    def normalizer(self):
+        if getattr(self, "_norm", None) is None:
+            from ..retrieval.synonyms import Normalizer
+
+            self._norm = Normalizer(self.index.pages)
+        return self._norm
 
     @property
     def sections(self):
@@ -336,6 +346,7 @@ class Agent:
         return label
 
     def tool_search_manual(self, c: Conv, query: str, k: int = 4) -> dict:
+        query = self.normalizer.normalize(query)[0]
         hits = self.index.search(c.vehicle.engine_model, query, k=k)
         out = []
         for h in hits:
@@ -519,6 +530,11 @@ class Agent:
                             ". Для каждого в этом порядке: до 3 вероятных причин и первая проверка по руководству этого двигателя, с метками. "
                             "Норматив времени на работу — только если он есть во фрагменте, иначе напиши «время в книге не указано». Порядок не меняй.")
             event = None
+        if c.vehicle and not event and raw:
+            norm, changes = self.normalizer.normalize(masked)
+            if changes:  # slang / typos -> manual terms; the model sees both, the mechanic sees "understood as"
+                turn.understood = changes
+                masked = f"{masked}\n(в терминах руководства: {norm})"
         if event in ("alternatives", "hypothesis") and c.vehicle:
             raw = masked = (ALT_PROMPT if event == "alternatives" else HYPOTHESIS_PROMPT.format(h=masked[:300]))
             event = None
