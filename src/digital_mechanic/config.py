@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     llm_vision_model: str = ""  # defaults to llm_model
     llm_timeout_s: float = 90.0
     llm_max_tool_rounds: int = 5
+    llm_hedge_s: float = 12.0  # resend the same request if no answer after N s, take the first; 0 = off
     # "off" sends thinking={"type":"disabled"} (DeepSeek-style); ~4x faster answers. "on" keeps model default.
     llm_thinking: str = "off"
 

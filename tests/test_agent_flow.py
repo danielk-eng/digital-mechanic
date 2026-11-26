@@ -227,3 +227,25 @@ def test_inspection_draft_no_new_numbers(make_agent):
     a.store.add_message(c.cid, "u1", "M333YK47", "assistant", "ok", {"photo": "p.jpg", "photo_desc": "Ремень привода с трещинами"})
     r = draft(a, c)
     assert r["items"] and "25" not in r["items"][0]["finding"] and r["photos"] == ["p.jpg"]
+
+
+def test_llm_hedged_request_takes_first_answer():
+    import threading, time
+    from types import SimpleNamespace
+    from digital_mechanic.agent.llm import Llm
+    from digital_mechanic.config import Settings
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+        if len(calls) == 1:
+            time.sleep(1.5)  # the first request hangs
+            return "slow"
+        return "fast"
+    llm = Llm(Settings(llm_api_key="x", llm_hedge_s=0.2))
+    llm._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    t = time.time()
+    assert llm._create({}) == "fast" and time.time() - t < 1.0 and len(calls) == 2
+    llm2 = Llm(Settings(llm_api_key="x", llm_hedge_s=0))
+    llm2._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: "one")))
+    assert llm2._create({}) == "one"

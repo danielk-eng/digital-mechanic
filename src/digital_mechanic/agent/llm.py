@@ -39,6 +39,7 @@ class Llm:
         self.usage = Usage()
         self._lock = threading.Lock()
         self._client = None
+        self._pool = None
         self._opik = None
         if s.comet_api_key:
             try:  # optional dependency
@@ -66,6 +67,30 @@ class Llm:
             self._client = self._opik(c) if self._opik else c
         return self._client
 
+    def _create(self, kw: dict) -> Any:
+        """Hedged request: if the free model has not answered in `llm_hedge_s`, send the same request again
+        and take whichever finishes first (cuts the long tail of provider latency; the loser is ignored)."""
+        hedge = self.s.llm_hedge_s
+        if hedge <= 0:
+            return self._cli().chat.completions.create(**kw)
+        import concurrent.futures as cf
+
+        if self._pool is None:
+            self._pool = cf.ThreadPoolExecutor(max_workers=16, thread_name_prefix="llm")
+        futs = [self._pool.submit(self._cli().chat.completions.create, **kw)]
+        done, _ = cf.wait(futs, timeout=hedge)
+        if not done:
+            futs.append(self._pool.submit(self._cli().chat.completions.create, **kw))
+        err: BaseException | None = None
+        while futs:
+            done, _ = cf.wait(futs, return_when=cf.FIRST_COMPLETED)
+            for f in done:
+                futs.remove(f)
+                if f.exception() is None:
+                    return f.result()
+                err = f.exception()
+        raise err  # type: ignore[misc]
+
     def _account(self, step: str, r: Any, dt: float) -> int:
         u = getattr(r, "usage", None)
         pt, ct = (u.prompt_tokens or 0, u.completion_tokens or 0) if u else (0, 0)
@@ -89,7 +114,7 @@ class Llm:
         last: Exception | None = None
         for attempt in range(2):
             try:
-                r = self._cli().chat.completions.create(**kw)
+                r = self._create(kw)
                 break
             except LlmUnavailable:
                 raise
