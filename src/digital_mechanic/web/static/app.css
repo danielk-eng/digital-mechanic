@@ -333,6 +333,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .pageview{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px;margin-bottom:12px;scroll-margin-top:8px}
 .pageview .pv-head{font-size:.82rem;font-weight:600;color:var(--text-2);margin-bottom:12px}
 .pageview .pagetext{margin-bottom:12px}
+.figcap{display:block;margin:4px 0 8px;padding:6px 12px;border-left:3px solid var(--border-2);color:var(--text-2);font-size:.82rem;line-height:1.45}
 .pageview .pageimg{display:block;width:100%;border-radius:var(--r);border:1px solid var(--border);background:#fff}
 .pnav{display:flex;justify-content:space-between;gap:8px;margin-bottom:16px}
 .pnav .btn{min-width:112px}.pnav .btn:disabled{opacity:.4;cursor:default}

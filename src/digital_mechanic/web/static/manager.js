@@ -56,6 +56,11 @@ function side(title, html) {
   $("#layer").innerHTML = `<div class="scrim" id="scrim"></div><aside class="side" role="dialog" aria-modal="true"><div class="vhd"><b>${esc(title)}</b><button class="icon-btn" id="sClose" aria-label="close">${icon("x")}</button></div><div class="vbd">${html}</div></aside>`;
   $("#scrim").onclick = closeSide; $("#sClose").onclick = closeSide;
 }
+// same page text rendering as the mechanic viewer: joined hyphenation, figure captions as captions
+function pageHtml(x) {
+  const r = String(x || "").replace(/([а-яё])-\n(?=[а-яё])/g, "$1").replace(/([^\n.:;!?])\n(?=[a-zа-яё(«])/g, "$1 ");
+  return esc(r).replace(/(^|\n)\n((?:Рис\.|Рисунок)\s*\d[\s\S]*?)(?=\n\n|$)/g, '$1<span class="figcap">$2</span>');
+}
 function closeSide() { $("#layer").innerHTML = ""; }
 async function openVehicle(vid) {
   side(vid, `<div class="skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div>`);
@@ -83,7 +88,7 @@ async function pageViewer(doc, page) {
     const i = pages.indexOf(n), prev = pages[i - 1], next = pages[i + 1];
     v.innerHTML = `<div class="vhd"><button class="icon-btn" id="pvClose">${icon("arrow-left")}</button><div class="t"><b>${t("page")} ${n}</b><span>${esc(p.full_title || "")}</span></div></div>` +
       `<div class="vbd"><div class="wrap"><div class="pages">${pages.map(k => `<button data-pg="${k}" class="${k === n ? "on" : ""}">${t("page_short")} ${k}</button>`).join("")}</div>` +
-      `<section class="pageview"><div class="pagetext">${esc(p.text || "")}</div>${p.has_image ? `<img class="pageimg" src="/page/${encodeURIComponent(doc)}/${n}.png" alt="">` : ""}</section>` +
+      `<section class="pageview"><div class="pagetext">${pageHtml(p.text)}</div>${p.has_image ? `<img class="pageimg" src="/page/${encodeURIComponent(doc)}/${n}.png" alt="">` : ""}</section>` +
       `<div class="pnav"><button class="btn ghost sm" data-pg="${prev ?? ""}" ${prev == null ? "disabled" : ""}>${icon("chevron-left", 18)}${t("page_short")} ${prev ?? "—"}</button>` +
       `<button class="btn ghost sm" data-pg="${next ?? ""}" ${next == null ? "disabled" : ""}>${t("page_short")} ${next ?? "—"}${icon("chevron-right", 18)}</button></div>` +
       (s && s.pdf ? `<p class="pdflink"><a target="_blank" rel="noopener" href="/manuals/${encodeURIComponent(doc)}.pdf#page=${n}">${icon("external-link", 14)}${t("open_pdf")}</a></p>` : "") + `</div></div>`;
