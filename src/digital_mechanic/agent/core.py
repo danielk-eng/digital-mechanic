@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Optional
 
 from .. import pii, policy
@@ -477,6 +478,9 @@ class Agent:
         tk_by_v: dict[str, list] = {}
         for t in tickets:
             tk_by_v.setdefault(t["vehicle_id"], []).append(t)
+        waiting = {t["vehicle_id"] for t in tickets if (t.get("status") or "created") == "created"} | {h["vehicle_id"] for h in self.store.handoffs("open") if h.get("vehicle_id")}
+        ops = {"in_repair": 0, "awaiting": 0, "on_line": 0, "idle": 0}
+        now = time.time()
         for v in self.fleet.all():
             ss = self.fleet.sessions(v.vehicle_id)
             last = ss[-1] if ss else None
@@ -485,12 +489,23 @@ class Agent:
             u, why = policy.urgency(last) if last and last.status == CheckStatus.anomaly else (None, [])
             scores = [s.anomaly_score for s in ss if s.anomaly_score is not None]
             rank = {"quarantine": 0, "attention": 1, "ready": 2}[st]
-            rows.append({"vehicle_id": v.vehicle_id, "garage_no": v.garage_no, "model": v.model or v.make, "engine_model": v.engine_model, "status": st,
+            # item 21: operational state — in repair / idle (not allowed out, no repair started) / on the line; "awaiting" overlaps
+            rep, idle = v.vehicle_id in open_rep, st == "quarantine" and v.vehicle_id not in open_rep
+            ops["in_repair" if rep else "idle" if idle else "on_line"] += 1
+            ops["awaiting"] += v.vehicle_id in waiting
+            since = None
+            if idle and last and last.checked_at:
+                try:
+                    since = max(0.0, round((now - datetime.fromisoformat(last.checked_at).timestamp()) / 86400, 1))
+                except ValueError:
+                    since = None
+            rows.append({"ops": "in_repair" if rep else "idle" if idle else "on_line", "awaiting": v.vehicle_id in waiting, "idle_days": since,
+                         "vehicle_id": v.vehicle_id, "garage_no": v.garage_no, "model": v.model or v.make, "engine_model": v.engine_model, "status": st,
                          "last": last.model_dump(mode="json") if last else None, "urgency": u.value if u else None, "urgency_basis": why,
                          "scores": scores, "in_repair": v.vehicle_id in open_rep, "tickets": len(tk_by_v.get(v.vehicle_id, [])),
                          "_rank": (rank, -(last.anomaly_score or 0) if last else 0)})
         rows.sort(key=lambda r: r.pop("_rank"))
-        return {"counts": {**counts, "in_repair": len(open_rep), "tickets": len(tickets), "total": len(rows)}, "vehicles": rows}
+        return {"counts": {**counts, "in_repair": len(open_rep), "tickets": len(tickets), "total": len(rows)}, "ops": ops, "vehicles": rows}
 
     # ------------------------------------------------------------------ chat turn
     def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None) -> Turn:

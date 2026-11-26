@@ -107,3 +107,4 @@ html[data-theme=contrast] .chip{background:#000}
 @media (max-width:480px){header h1{font-size:.95em}header .a11y button{padding:.3em .5em}}
 a{color:var(--blue)}
 .chip a,a.chip{color:inherit}
+.tiles.ops{margin-bottom:.6em}.tiles.ops .tile{border-color:#2b3a47}.tiles.ops .tile.on{border-color:var(--accent)}

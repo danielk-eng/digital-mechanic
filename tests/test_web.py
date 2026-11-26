@@ -58,3 +58,11 @@ def test_answer_language_separate_from_ui(client):
     assert "узбекском" in m.AGENT._system(None, u, manager=True)
     u = client.post("/api/me", json={"answer_lang": "xx"}).json()["user"]
     assert answer_lang(u) == "ru"  # unknown -> same as interface
+
+
+def test_fleet_ops_tiles(client):
+    client.post("/api/login", json={"name": "Главный", "role": "manager", "consent": True})
+    f = client.get("/api/fleet").json()
+    o = f["ops"]
+    assert o["in_repair"] + o["on_line"] + o["idle"] == f["counts"]["total"]
+    assert o["idle"] == sum(v["ops"] == "idle" for v in f["vehicles"]) and o["awaiting"] >= 0

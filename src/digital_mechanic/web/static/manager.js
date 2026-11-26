@@ -30,7 +30,11 @@ function spark(scores) {
 
 async function loadFleet() {
   FLEET = await api("/api/fleet");
-  const c = FLEET.counts;
+  const c = FLEET.counts, o = FLEET.ops || {};
+  // item 21: operational picture first — in repair / waiting for approval / on the line / idle (quarantine, no repair started)
+  const idleMax = Math.max(0, ...FLEET.vehicles.filter(v => v.ops === "idle").map(v => v.idle_days || 0));
+  $("#opsTiles").innerHTML = [["op_in_repair", "🛠", o.in_repair], ["op_awaiting", "⏳", o.awaiting], ["op_on_line", "🚚", o.on_line], ["op_idle", "⛔", o.idle, idleMax ? `${t("idle_max")} ${idleMax} ${t("days")}` : ""]].map(([k, ic, n, sub]) =>
+    `<div class="tile ${FILTER === k ? "on" : ""}" data-k="${k}"><div class="muted">${ic} ${t(k)}</div><div class="n">${n ?? 0}</div>${sub ? `<div class="muted">${sub}</div>` : ""}</div>`).join("");
   $("#tiles").innerHTML = [["ready", "🟢"], ["attention", "🟡"], ["quarantine", "🔴"], ["in_repair", "🛠"], ["tickets", "📝"]].map(([k, ic]) =>
     `<div class="tile ${FILTER === k ? "on" : ""}" data-k="${k}"><div class="muted">${ic} ${t(k)}</div><div class="n">${c[k]}</div></div>`).join("");
   document.querySelectorAll(".tile").forEach(el => el.onclick = () => { FILTER = FILTER === el.dataset.k ? null : el.dataset.k; if (el.dataset.k === "tickets") return tab("tickets"); tab("fleet"); renderFleet(); loadFleetTiles(); });
@@ -39,11 +43,12 @@ async function loadFleet() {
 function loadFleetTiles() { document.querySelectorAll(".tile").forEach(el => el.classList.toggle("on", el.dataset.k === FILTER)); }
 
 function renderFleet() {
-  const rows = FLEET.vehicles.filter(v => !FILTER || (FILTER === "in_repair" ? v.in_repair : v.status === FILTER));
+  const OPF = {op_in_repair: v => v.ops === "in_repair", op_awaiting: v => v.awaiting, op_on_line: v => v.ops === "on_line", op_idle: v => v.ops === "idle"};
+  const rows = FLEET.vehicles.filter(v => !FILTER || (OPF[FILTER] ? OPF[FILTER](v) : FILTER === "in_repair" ? v.in_repair : v.status === FILTER));
   $("#tab-fleet").innerHTML = `<div class="muted">${rows.length} / ${FLEET.counts.total} · сортировка: карантин → внимание → норма, затем по оценке отклонения</div><table><tr><th>ТС</th><th>Модель / двигатель</th><th>Статус</th><th>Последняя проверка</th><th>Динамика</th><th>Приоритет</th><th>Заявки</th></tr>` +
-    rows.map(v => { const l = v.last || {}; return `<tr class="click" data-v="${v.vehicle_id}"><td><b>${esc(v.vehicle_id)}</b><br><span class="muted">${esc(v.garage_no)}</span></td><td>${esc(v.model)}<br><span class="muted">${esc(v.engine_model)}</span></td><td>${badge(v.status, v.in_repair)}</td>
+    rows.map(v => { const l = v.last || {}; return `<tr class="click" data-v="${v.vehicle_id}"><td><b>${esc(v.vehicle_id)}</b><br><span class="muted">${esc(v.garage_no)}</span></td><td>${esc(v.model)}<br><span class="muted">${esc(v.engine_model)}</span></td><td>${badge(v.status, v.in_repair)}${v.awaiting ? `<br><span class="muted">⏳ ${t("op_awaiting")}</span>` : ""}${v.idle_days != null ? `<br><span class="muted">⛔ ${t("op_idle")} ${v.idle_days} ${t("days")}</span>` : ""}</td>
       <td>${esc(l.session_id)} · ${esc((l.checked_at || "").slice(0, 10))}<br><span class="muted">${l.status === "anomaly" ? esc(l.anomaly_type + " " + l.anomaly_title) + " · " + l.anomaly_score : l.status === "check_failed" ? "сбой записи — повторить" : "норма"}</span></td>
-      <td>${spark(v.scores)}</td><td>${v.urgency ? `<span class="badge b-${v.urgency === "high" ? "quarantine" : v.urgency === "medium" ? "attention" : "ready"}">${v.urgency}</span>` : ""}</td><td>${v.tickets || ""}</td></tr>`; }).join("") + "</table>";
+      <td>${spark(v.scores)}</td><td>${v.urgency ? `<span class="badge b-${v.urgency === "high" ? "quarantine" : v.urgency === "medium" ? "attention" : "ready"}">${t("urg_" + v.urgency)}</span>` : ""}</td><td>${v.tickets || ""}</td></tr>`; }).join("") + "</table>";
   document.querySelectorAll("tr[data-v]").forEach(tr => tr.onclick = () => openVehicle(tr.dataset.v));
 }
 
