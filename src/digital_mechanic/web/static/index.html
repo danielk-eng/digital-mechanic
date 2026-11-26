@@ -1,77 +1,70 @@
 <!doctype html>
 <html lang="ru"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0b1013"><link rel="manifest" href="/static/manifest.json">
-<title>Цифровой механик</title><link rel="stylesheet" href="/static/app.css"><script src="/static/a11y.js"></script><script src="/static/timeline.js" defer></script>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<meta name="theme-color" content="#0e1013"><link rel="manifest" href="/static/manifest.json"><link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<title>Цифровой механик</title>
+<link rel="preload" href="/static/fonts/inter-cyrillic-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/a11y.js"></script><script src="/static/icons.js"></script><script src="/static/timeline.js" defer></script>
 </head><body>
-<!-- login -->
-<section id="login" class="login card hidden">
-  <h2 data-t="app_title">Цифровой механик</h2>
-  <label data-t="language">Язык</label><select id="l_lang"></select>
-  <label data-t="login_name">Ваше имя</label><input id="l_name" type="text" autocomplete="off">
-  <div class="row" style="margin-top:.6em">
-    <label><input type="radio" name="role" value="mechanic" checked> <span data-t="role_mechanic">Механик</span></label>
-    <label><input type="radio" name="role" value="manager"> <span data-t="role_manager">Главный механик</span></label>
+
+<section id="login" class="login hidden">
+  <div class="login-box">
+    <div class="brand"><div class="logo" data-icon="wrench"></div><h1 data-t="app_title">Цифровой механик</h1></div>
+    <div class="field"><label for="l_name" data-t="login_name">Ваше имя</label><input id="l_name" class="input" type="text" autocomplete="name"></div>
+    <div class="field"><span class="label" data-t="role">Роль</span>
+      <div class="seg" id="l_role"><button data-v="mechanic" class="on" data-t="role_mechanic">Механик</button><button data-v="manager" data-t="role_manager">Главный механик</button></div></div>
+    <div class="field"><label for="l_lang" data-t="language">Язык</label><select id="l_lang" class="input"></select></div>
+    <label class="check"><input id="l_consent" type="checkbox"><span><span data-t="consent">Согласие на обработку персональных данных</span> (<a href="/privacy" target="_blank" data-t="policy">политика</a>)</span></label>
+    <p class="note" data-t="privacy_note">Данные сессии хранятся на сервере заказчика. В языковую модель уходит только замаскированный текст запроса.</p>
+    <button class="btn primary block" id="l_go" data-t="enter">Войти</button>
   </div>
-  <div style="margin-top:.4em">
-    <label><input type="radio" name="exp" value="novice"> <span data-t="exp_novice">Новичок</span></label>
-    <label><input type="radio" name="exp" value="experienced" checked> <span data-t="exp_expert">Опытный</span></label>
-    <label><input type="radio" name="exp" value="expert"> <span data-t="exp_pro">Эксперт</span></label>
-  </div>
-  <label style="margin-top:.8em"><input id="l_consent" type="checkbox"> <span data-t="consent">Согласие 152-ФЗ</span> — <a href="/privacy" target="_blank" style="color:var(--accent)">?</a></label>
-  <div class="muted privacy-note" data-t="privacy_note">🔒 Данные сессии хранятся на сервере заказчика; в языковую модель уходит только замаскированный текст запроса.</div>
-  <button class="primary" id="l_go" style="width:100%;margin-top:1em" data-t="enter">Войти</button>
 </section>
 
-<!-- app -->
 <div id="app" class="hidden">
-<header>
-  <h1>🔧 <span data-t="app_title">Цифровой механик</span></h1>
-  <div class="grow"></div>
-  <button id="btnSettings" title="settings">⚙️</button>
-</header>
-<main>
-  <div id="settings" class="card hidden">
-    <div class="row"><b data-t="settings">Настройки</b></div>
-    <label data-t="language">Язык</label><select id="s_lang"></select>
-    <label data-t="answer_lang">Язык ответов</label><select id="s_alang"></select>
-    <div style="margin:.5em 0">
-      <label><input type="radio" name="s_exp" value="novice"> <span data-t="exp_novice"></span></label><br>
-      <label><input type="radio" name="s_exp" value="experienced"> <span data-t="exp_expert"></span></label><br>
-      <label><input type="radio" name="s_exp" value="expert"> <span data-t="exp_pro"></span></label>
+  <header class="appbar">
+    <button class="veh-btn" id="vehBtn" aria-haspopup="dialog">
+      <span class="dot" id="vehDot"></span>
+      <span class="t"><b id="vehTitle" data-t="choose_vehicle">Выберите машину</b><span id="vehSub"></span></span>
+      <span data-icon="chevron-down" data-size="18" class="chev"></span>
+    </button>
+    <button class="icon-btn hidden" id="btnMenu" data-t-aria="actions" data-icon="ellipsis"></button>
+    <button class="icon-btn" id="btnSettings" data-t-aria="settings" data-icon="settings"></button>
+  </header>
+  <main class="chat-main" id="main">
+    <section id="empty" class="hidden"></section>
+    <section id="vehInfo" class="veh-card hidden"></section>
+    <div id="chat" class="chat" aria-live="polite"></div>
+  </main>
+  <footer class="composer hidden" id="composer"><div class="inner">
+    <div class="suggest" id="quick"></div>
+    <div class="inputbox">
+      <label class="icon-btn" data-t-aria="photo" data-icon="camera"><input id="photo" type="file" accept="image/*" capture="environment" hidden></label>
+      <textarea id="txt" rows="1" data-tp="ask_placeholder" enterkeyhint="send"></textarea>
+      <button class="icon-btn send-btn hidden" id="send" data-t-aria="send" data-icon="arrow-up"></button>
+      <button class="icon-btn mic-btn" id="mic" data-t-aria="voice_mode" data-icon="audio-lines"></button>
     </div>
-    <div style="margin:.5em 0"><b data-t="detail">Ответы</b>:
-      <label><input type="radio" name="s_detail" value="brief"> <span data-t="detail_brief">Кратко</span></label>
-      <label><input type="radio" name="s_detail" value="detailed"> <span data-t="detail_detailed">Подробно</span></label>
-    </div>
-    <div style="margin:.5em 0"><span data-t="font_size">Размер текста</span>: A / A+ / A++ · 🔊</div>
-    <div class="muted privacy-note" data-t="privacy_note">🔒</div>
-    <label><input type="checkbox" id="s_cc"> 💬 <span data-t="captions">Субтитры</span></label><br>
-    <label><input type="checkbox" id="s_hands"> 🖐 Без рук: после ответа слушать снова</label>
-    <div class="row" style="margin-top:.7em"><button id="s_logout" data-t="logout">Выйти</button><button id="s_delete">Удалить мои данные (152-ФЗ)</button><a class="muted" href="/privacy" target="_blank">Политика ПДн</a></div>
-  </div>
-  <input id="vfind" type="text" autocomplete="off" inputmode="text" data-tp="find_vehicle" placeholder="🔎 Госномер или гаражный №" style="width:100%;font-size:1.05em;padding:.6em;margin-bottom:.4em">
-  <div id="vfindRes" class="row"></div>
-  <select id="vehicle" style="font-size:1.05em;padding:.7em"></select>
-  <div id="vehInfo" class="card hidden"></div>
-  <div class="row">
-    <button class="primary" id="btnDiag" style="flex:1;font-size:1.1em;padding:.9em" data-t="get_result">Получить результат диагностики</button>
-    <select id="sess" style="width:auto"></select>
-  </div>
-  <div id="chat"></div>
-</main>
-<div id="caption" class="caption hidden" aria-live="polite"></div>
-<div class="bar"><div class="inner">
-  <div class="quick" id="quick"></div>
-  <div class="row" style="flex-wrap:nowrap">
-    <button class="mic" id="mic" title="voice">🎤</button>
-    <textarea id="txt" data-tp="ask_placeholder"></textarea>
-    <label class="chip" style="padding:.6em .8em;margin:0;font-size:1.2em" title="photo">📷<input id="photo" type="file" accept="image/*" capture="environment" hidden></label>
-    <button class="primary" id="send">➤</button>
-  </div>
-</div></div>
+  </div></footer>
 </div>
 
-<div id="modal" class="modal hidden"><div class="head"><button id="mClose">✕</button><b id="mTitle" class="grow"></b><a id="mPdf" class="chip" target="_blank">PDF</a></div><div class="body" id="mBody"></div></div>
+<div id="viewer" class="viewer hidden" role="dialog" aria-modal="true">
+  <div class="vhd"><button class="icon-btn" id="mClose" data-t-aria="close" data-icon="arrow-left"></button><div class="t"><b id="mTitle"></b><span id="mSub"></span></div>
+    <a class="icon-btn hidden" id="mPdf" target="_blank" data-t-aria="open_pdf" data-icon="external-link"></a></div>
+  <div class="vbd"><div class="wrap" id="mBody"></div></div>
+</div>
+
+<div id="voice" class="voice hidden" role="dialog" aria-modal="true">
+  <div class="vtop"><span class="vstate" id="vState"></span><button class="icon-btn" id="vClose" data-t-aria="close" data-icon="x"></button></div>
+  <div class="stage">
+    <div class="said" id="vSaid"></div>
+    <button class="orb" id="vOrb" data-state="idle" data-t-aria="voice_mode"><span id="vOrbIc"></span></button>
+    <div class="reply" id="vReply"></div>
+    <div class="hint" id="vHint"></div>
+  </div>
+  <div class="vbottom"><button class="btn ghost" id="vExit" data-t="voice_exit">Завершить разговор</button></div>
+</div>
+
+<div id="caption" class="caption hidden" aria-live="polite"></div>
+<div id="layer"></div>
 <script src="/static/app.js"></script>
 </body></html>

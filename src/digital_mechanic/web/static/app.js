@@ -1,544 +1,713 @@
 "use strict";
+// Mechanic app. Vanilla JS, no build step. Sections: core · i18n · audio player · rendering · vehicle · chat · citation viewer · voice mode · sheets · settings · login.
 const $ = s => document.querySelector(s);
-let I18N = {}, ME = null, VID = localStorage.getItem("vid") || "", VEH = null, BUSY = false;
-const SPEECH_LANG = {ru:"ru-RU",uz:"uz-UZ",tg:"tg-TJ",kk:"kk-KZ",hi:"hi-IN",vi:"vi-VN"};
+const $$ = s => [...document.querySelectorAll(s)];
+let I18N = {}, ME = null, VID = localStorage.getItem("vid") || "", VEH = null, VLIST = [], BUSY = false, LAST_Q = "", HYP = false;
+const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN"};
+const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt"};
 const t = k => (I18N[(ME && ME.lang) || $("#l_lang")?.value || "ru"] || I18N.ru || {})[k] || (I18N.ru || {})[k] || k;
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const ALANG = () => (ME && ME.answer_lang) || (ME && ME.lang) || "ru";
 
 async function api(path, opts = {}) {
   const o = {credentials: "same-origin", ...opts};
   if (o.json) { o.method = o.method || "POST"; o.headers = {"Content-Type": "application/json"}; o.body = JSON.stringify(o.json); delete o.json; }
   const r = await fetch(path, o);
-  if (!r.ok) { const e = new Error((await r.text()).slice(0, 300)); e.status = r.status; throw e; }
+  if (!r.ok) {
+    let msg = await r.text();
+    try { msg = JSON.parse(msg).detail || msg; } catch (_) {}
+    const e = new Error(String(msg).slice(0, 300)); e.status = r.status; throw e;
+  }
   return r.headers.get("content-type")?.includes("json") ? r.json() : r;
 }
 
+function hydrateIcons(root = document) {
+  root.querySelectorAll("[data-icon]").forEach(el => { if (!el.dataset.iconDone) { el.insertAdjacentHTML("afterbegin", icon(el.dataset.icon, +(el.dataset.size || 22))); el.dataset.iconDone = 1; } });
+}
 function applyI18n() {
-  document.querySelectorAll("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
-  document.querySelectorAll("[data-tp]").forEach(el => el.placeholder = t(el.dataset.tp));
+  $$("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
+  $$("[data-tp]").forEach(el => el.placeholder = t(el.dataset.tp));
+  $$("[data-t-aria]").forEach(el => { el.setAttribute("aria-label", t(el.dataset.tAria)); el.title = t(el.dataset.tAria); });
   document.documentElement.lang = (ME && ME.lang) || "ru";
-  loadChips();
+}
+function toast(text, ms = 3500) {
+  const el = document.createElement("div"); el.className = "toast"; el.textContent = text; document.body.appendChild(el);
+  setTimeout(() => el.remove(), ms);
+}
+function langOptions(sel, cur, withSame = false) {
+  sel.innerHTML = (withSame ? `<option value="">${esc(t("same_as_ui"))}</option>` : "") +
+    Object.entries(LANG_NAMES).map(([k, v]) => `<option value="${k}" ${k === cur ? "selected" : ""}>${v}</option>`).join("");
 }
 
-// Adaptive chips: built on the server from this vehicle, its current check, history and repair step.
+// ---------------------------------------------------------------- audio player: one at a time, every message has play/stop
+const Player = {
+  audio: null, btn: null, seq: 0, onend: null,
+  stop() {
+    this.seq++;
+    try { if (this.audio) { this.audio.pause(); this.audio = null; } } catch (_) {}
+    try { window.speechSynthesis && speechSynthesis.cancel(); } catch (_) {}
+    if (this.btn) { this.btn.innerHTML = icon("play", 18); this.btn.classList.remove("on"); this.btn.setAttribute("aria-label", t("play")); this.btn = null; }
+    caption("");
+  },
+  playing() { return !!this.btn || !!this.audio || (window.speechSynthesis && speechSynthesis.speaking); },
+  async play(text, btn = null, {onend = null, onlevel = null} = {}) {
+    this.stop();
+    const p = plain(text); if (!p) return onend && onend();
+    const seq = this.seq;
+    if (btn) { this.btn = btn; btn.innerHTML = icon("square", 16); btn.classList.add("on"); btn.setAttribute("aria-label", t("stop")); }
+    const done = () => { if (seq !== this.seq) return; if (this.btn) { this.btn.innerHTML = icon("play", 18); this.btn.classList.remove("on"); this.btn = null; } this.audio = null; caption(""); onend && onend(); };
+    if (ALANG() === "ru" && SERVER_TTS) {
+      try {
+        const r = await fetch("/api/tts", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: p})});
+        if (seq !== this.seq) return;
+        if (r.ok) {
+          const a = new Audio(URL.createObjectURL(await r.blob())); this.audio = a;
+          a.ontimeupdate = () => { if (a.duration) captionFollow(p, a.currentTime / a.duration); };
+          a.onended = done; a.onerror = done; await a.play().catch(done); return;
+        }
+        SERVER_TTS = false;
+      } catch (_) { SERVER_TTS = false; }
+    }
+    if (!window.speechSynthesis) return done();
+    const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[ALANG()] || "ru-RU";
+    u.onboundary = e => captionFollow(p, (e.charIndex || 0) / p.length); u.onend = done; u.onerror = done;
+    speechSynthesis.speak(u);
+  },
+};
+let SERVER_TTS = true;
+function plain(text) { return String(text || "").replace(/\[[^\]]*\b(S|X)\d+\b[^\]]*\]/g, "").replace(/<[^>]+>/g, " ").replace(/[*#•_]/g, "").replace(/\s+/g, " ").trim().slice(0, 1200); }
+function caption(text, ms = 0) {
+  const el = $("#caption"); if (!el) return;
+  if (!text || !A11Y.captions() || !$("#voice").classList.contains("hidden")) { el.classList.add("hidden"); return; }
+  el.textContent = text; el.classList.remove("hidden");
+  clearTimeout(caption.tm); if (ms) caption.tm = setTimeout(() => el.classList.add("hidden"), ms);
+}
+function captionFollow(p, frac) {
+  const ss = p.match(/[^.!?;]+[.!?;]*/g) || [p]; let acc = 0; const pos = frac * p.length;
+  for (const x of ss) { acc += x.length; if (acc >= pos) { caption(x.trim()); if (VOICE.on) $("#vReply").dataset.cur = x.trim(); return; } }
+}
+
+// ---------------------------------------------------------------- markdown-lite with citation chips
+function inline(h, src) {
+  h = h.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  return h.replace(/\[([^\]]{1,80})\]/g, (m, grp, off, whole) => {
+    const labs = grp.match(/\b(?:S|X)\d+\b/g); if (!labs) return m;
+    const ctx = whole.slice(Math.max(0, off - 240), off).replace(/<[^>]+>/g, "").split(/\n|[.!?]\s|•/).filter(x => x.trim().length > 6).pop() || "";
+    return labs.map(l => src[l] ? `<button class="cite ${src[l].extra ? "x" : ""}" data-doc="${esc(src[l].doc_id)}" data-page="${src[l].page}" data-q="${esc(ctx.trim().slice(0, 200))}" title="${esc(src[l].document)}">${t("page_short")} ${src[l].page}</button>` : "").join("");
+  });
+}
+function md(text, sources) {
+  const src = Object.fromEntries((sources || []).map(s => [s.label, s]));
+  const lines = esc(text || "").replace(/\r/g, "").replace(/[ \t]+([.,;:!?)])/g, "$1").replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?\s?/gu, "").split("\n");
+  let out = "", list = null, para = [];
+  const flushP = () => { if (para.length) { out += `<p>${inline(para.join("<br>"), src)}</p>`; para = []; } };
+  const flushL = () => { if (list) { out += `<${list.tag}>${list.items.map(i => `<li>${inline(i, src)}</li>`).join("")}</${list.tag}>`; list = null; } };
+  for (const raw of lines) {
+    const l = raw.trim();
+    let m;
+    if (!l) { flushP(); flushL(); continue; }
+    if ((m = l.match(/^#{1,4}\s*(.+)$/))) { flushP(); flushL(); out += `<h3>${inline(m[1], src)}</h3>`; continue; }
+    if ((m = l.match(/^(\d{1,2})[.)]\s+(.+)$/))) { flushP(); if (!list || list.tag !== "ol") { flushL(); list = {tag: "ol", items: []}; } list.items.push(m[2]); continue; }
+    if ((m = l.match(/^[-•*]\s+(.+)$/))) { flushP(); if (!list || list.tag !== "ul") { flushL(); list = {tag: "ul", items: []}; } list.items.push(m[1]); continue; }
+    flushL(); para.push(l);
+  }
+  flushP(); flushL();
+  return out;
+}
+function sourcesHtml(sources) {
+  if (!sources || !sources.length) return "";
+  const seen = new Set();
+  const rows = sources.filter(s => { const k = s.doc_id + "#" + s.page; if (seen.has(k)) return false; seen.add(k); return true; });
+  return `<div class="sources">` + rows.map(s => `<button class="src" data-doc="${esc(s.doc_id)}" data-page="${s.page}">${icon("book-open", 16)}<span>${esc(s.document)}${s.extra ? " *" : ""}</span><span class="pg">${t("page_short")} ${s.page}</span></button>`).join("") + `</div>`;
+}
+const FACT_ICON = {danger: "triangle-alert", tool: "wrench", torque: "wrench", value: "check"};
+function factsHtml(facts) {
+  if (!facts || !facts.length) return "";
+  return `<div class="keyfacts"><div class="h">${t("key_facts")}</div>` + facts.map(f => `<div class="f ${f.kind}">${icon(FACT_ICON[f.kind] || "check", 16)}<span>${esc(f.text)} ` +
+    `<button class="cite" data-doc="${esc(f.doc_id)}" data-page="${f.page}" data-q="${esc(f.text.slice(0, 200))}">${t("page_short")} ${f.page}</button></span></div>`).join("") + `</div>`;
+}
+
+// ---------------------------------------------------------------- messages
+function addMsg(role, html, {cls = "", speak = null, actions = []} = {}) {
+  const d = document.createElement("div"); d.className = `msg ${role}`;
+  d.innerHTML = `<div class="b ${cls}">${html}</div>`;
+  const acts = [...actions];
+  if (speak) acts.unshift({icon: "play", aria: t("play"), cls: "play", onclick: (ev, b) => (Player.btn === b ? Player.stop() : Player.play(speak, b))});
+  if (acts.length) {
+    const row = document.createElement("div"); row.className = "msg-actions";
+    acts.forEach(a => {
+      const b = document.createElement("button"); b.className = `act ${a.cls || ""}`; b.innerHTML = (a.icon ? icon(a.icon, 18) : "") + (a.label ? `<span>${esc(a.label)}</span>` : "");
+      if (a.aria) { b.setAttribute("aria-label", a.aria); b.title = a.aria; }
+      b.onclick = ev => { ev.stopPropagation(); a.onclick(ev, b); }; row.appendChild(b);
+    });
+    d.appendChild(row);
+  }
+  $("#chat").appendChild(d);
+  requestAnimationFrame(() => d.scrollIntoView({behavior: "smooth", block: "start"}));
+  return d;
+}
+function skeleton() {
+  const d = addMsg("bot", `<div class="progress">${icon("loader-circle", 16, "spin")}<span class="ptext">${esc(t("thinking"))}</span></div><div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div>`, {cls: "skeleton"});
+  d.dataset.busy = 1;
+  return d;
+}
+function errorMsg(e) { return addMsg("bot", `<span class="err">${esc(friendlyError(e))}</span>`); }
+function friendlyError(e) {
+  const m = String(e && e.message || e);
+  if (e && e.status === 502) return m.includes("ML") ? t("err_ml") : m.includes("ТОиР") ? t("err_toir") : m;
+  if (e && e.status === 401) return t("err_session");
+  return m || t("err_generic");
+}
+
+function renderTurn(turn, expanded = false) {
+  (turn.cards || []).forEach(renderCard);
+  if (turn.preface) { /* already part of text */ }
+  if (turn.text) {
+    const hasSrc = (turn.sources || []).length > 0;
+    const und = (turn.understood || []).length ? `<div class="understood">${t("understood")}: ${turn.understood.map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join(", ")}</div>` : "";
+    const actions = [];
+    if (hasSrc && !expanded && (ME.detail || "brief") === "brief") actions.push({label: t("expand"), onclick: (ev, b) => { b.remove(); eventTurn("expand", turn.text, null, true); }});
+    if (hasSrc && VID) actions.push({icon: "ellipsis", aria: t("more_actions"), onclick: () => turnMenu(turn)});
+    addMsg("bot", und + factsHtml(turn.facts) + md(turn.text, turn.sources) + sourcesHtml(turn.sources), {speak: turn.text, actions});
+  }
+  loadChips();
+  return turn;
+}
+function turnMenu(turn) {
+  sheet(t("more_actions"), `<div class="list">` +
+    `<button class="item" data-a="alt">${icon("shuffle")}<span class="t"><b>${t("alternatives")}</b></span></button>` +
+    `<button class="item" data-a="hyp">${icon("flask-conical")}<span class="t"><b>${t("hypothesis")}</b><span>${t("hypothesis_ph")}</span></span></button>` +
+    `<button class="item" data-a="prn">${icon("printer")}<span class="t"><b>${t("print")}</b></span></button></div>`, sh => {
+    sh.querySelector("[data-a=alt]").onclick = () => { closeSheet(); eventTurn("alternatives", "", t("alternatives")); };
+    sh.querySelector("[data-a=hyp]").onclick = () => { closeSheet(); HYP = true; $("#txt").placeholder = t("hypothesis_ph"); $("#txt").focus(); };
+    sh.querySelector("[data-a=prn]").onclick = () => { closeSheet(); printTurn(turn); };
+  });
+}
+
+// ---------------------------------------------------------------- cards
+function spark(trend) {
+  const pts = (trend || []).map(p => ({...p, date: p.checked_at && p.checked_at.slice(0, 10)}));
+  return tlSpark(pts);
+}
+const QUALITY = {good: "q_good", medium: "q_medium", bad: "q_bad"};
+const LIGHT_ICON = {go: "circle-check", watch: "circle-check", service: "triangle-alert", stop: "triangle-alert", repeat: "rotate-ccw"};
+function renderCard(c) {
+  if (c.kind === "verdict") {
+    const ch = c.check;
+    const head = c.status === "anomaly" ? `${ch.anomaly_type} · ${esc(ch.anomaly_title)}` : c.status === "normal" ? t("verdict_normal") : t("verdict_failed");
+    let h = `<div class="vh"><div class="vi">${icon(LIGHT_ICON[c.light] || "activity", 22)}</div><div><div class="vt">${head}</div>` +
+      (c.light_text && c.status === "anomaly" ? `<div class="vs">${esc(c.light_text)}</div>` : "") + `</div></div>`;
+    h += `<div class="kv"><span>${t("session")}</span><span class="mono">${esc(ch.session_id)}, ${esc((ch.checked_at || "").slice(0, 16).replace("T", " "))}</span>`;
+    if (ch.anomaly_score != null) h += `<span>${t("score")}</span><span class="mono">${ch.anomaly_score.toFixed(2)}</span>`;
+    if (ch.confidence != null) h += `<span>${t("confidence")}</span><span class="mono">${Math.round(ch.confidence * 100)}%</span>`;
+    h += `<span>${t("quality")}</span><span>${esc(t(QUALITY[ch.signal_quality] || ch.signal_quality))}</span>`;
+    if (ch.description) h += `<span>${t("ml_says")}</span><span>${esc(ch.description)}</span>`;
+    h += `</div>`;
+    if (c.doubt && c.doubt.length) h += `<p class="warn-text small" style="margin-top:12px">${t("doubt")}: ${c.doubt.map(esc).join("; ")}</p>`;
+    if (c.urgency_basis && c.urgency_basis.length) h += `<details class="more"><summary>${icon("chevron-right", 16)}${t("why_priority")} ${esc(t("urg_" + c.urgency))}</summary><div class="small muted">${c.urgency_basis.map(esc).join("<br>")}</div></details>`;
+    if (c.trend) h += `<div class="spark">${spark(c.trend)}</div>`;
+    const say = c.status === "anomaly" ? `${t("status_anomaly")}: ${ch.anomaly_title}. ${c.light_text || ""}` : head;
+    const vd = addMsg("bot", h, {cls: `verdict ${c.light}`, speak: say});
+    if (c.status === "anomaly" && ch.anomaly_type) loadProven(vd.querySelector(".b"), ch.anomaly_type);
+  } else if (c.kind === "ticket_draft") {
+    const r = c.request;
+    let h = `<div class="card-title">${icon("file-text", 20)}${t("create_ticket")}<span class="pill ${r.urgency === "high" ? "quarantine" : r.urgency === "medium" ? "attention" : "ready"}" style="margin-left:auto">${esc(t("urg_" + r.urgency))}</span></div>`;
+    h += `<p>${esc(r.conclusion)}</p><div class="label">${t("works")}</div><ol class="ops">` + c.operations.map((o, i) => `<li><span class="n">${i + 1}</span><span>${esc(o.text)} <button class="cite" data-doc="${esc(o.doc_id)}" data-page="${o.page}" data-q="${esc(o.quote)}">${t("page_short")} ${o.page}</button></span></li>`).join("") + "</ol>";
+    h += c.spare_parts.length ? `<div class="label">${t("parts")}</div><ul>` + c.spare_parts.map(o => `<li>${esc(o.text)} <button class="cite" data-doc="${esc(o.doc_id)}" data-page="${o.page}" data-q="${esc(o.quote)}">${t("page_short")} ${o.page}</button></li>`).join("") + "</ul>"
+      : `<p class="small muted">${t("parts_none")}</p>`;
+    if (c.labor) { const known = c.labor.filter(l => l.norm);
+      h += `<p class="small muted">${t("labor")}: ` + (known.length ? known.map(l => `${esc(l.norm)} <button class="cite" data-doc="${esc(l.doc_id)}" data-page="${l.page}">${t("page_short")} ${l.page}</button>`).join("; ") : t("labor_na")) + `</p>`; }
+    h += `<details class="more"><summary>${icon("chevron-right", 16)}${t("json_toir")}</summary><pre class="json">${esc(JSON.stringify(r, null, 1))}</pre></details><div class="card-actions"></div>`;
+    const d = addMsg("bot", h);
+    const row = d.querySelector(".card-actions");
+    const ok = document.createElement("button"); ok.className = "btn primary"; ok.textContent = c.requires_inspection ? t("inspection_ok") : t("confirm_send");
+    ok.onclick = () => confirmTicket(c.draft_id, true, row);
+    const no = document.createElement("button"); no.className = "btn ghost"; no.textContent = c.requires_inspection ? t("inspection_no") : t("cancel");
+    no.onclick = () => c.requires_inspection ? confirmTicket(c.draft_id, false, row) : (row.innerHTML = `<span class="muted small">${t("cancelled")}</span>`);
+    row.append(ok, no);
+  } else if (c.kind === "ticket_created") {
+    addMsg("bot", `<div class="vh"><div class="vi">${icon("circle-check", 22)}</div><div><div class="vt">${t("ticket_created")}: <span class="mono">${esc(c.ticket_id)}</span></div><div class="vs">${esc(c.request.conclusion)}</div></div></div>`, {cls: "verdict go", speak: `${t("ticket_created")} ${c.ticket_id}`});
+  } else if (c.kind === "repair") {
+    const n = c.steps.length, cur = c.current;
+    let h = `<div class="card-title">${icon("wrench", 20)}${esc(c.title)}</div><div class="small muted">${c.status === "done" ? t("repair_done") : `${t("step")} ${Math.min(cur + 1, n)} ${t("of")} ${n}`}</div><ol class="ops">` +
+      c.steps.map((s, i) => `<li class="${s.done ? "done" : i === cur ? "cur" : ""}"><span class="n">${s.done ? icon("check", 14) : i + 1}</span><span>${esc(s.text)} <button class="cite" data-doc="${esc(s.doc_id)}" data-page="${s.page}" data-q="${esc(s.quote)}">${t("page_short")} ${s.page}</button></span></li>`).join("") + "</ol>";
+    const curStep = c.steps[cur];
+    const d = addMsg("bot", h + (c.status === "done" ? "" : `<div class="card-actions"></div>`), {speak: curStep && c.status !== "done" ? `${t("step")} ${cur + 1}. ${curStep.text}` : t("repair_done")});
+    if (c.status !== "done") {
+      const row = d.querySelector(".card-actions");
+      const b1 = document.createElement("button"); b1.className = "btn primary"; b1.textContent = t("next_step"); b1.onclick = () => repairAction("done");
+      const b2 = document.createElement("button"); b2.className = "btn ghost"; b2.textContent = t("step_back"); b2.style.flex = "0 0 auto"; b2.onclick = () => repairAction("back");
+      row.append(b1, b2);
+    }
+  }
+}
+async function loadProven(box, code) {
+  try {
+    const r = await api(`/api/proven?vehicle_id=${encodeURIComponent(VID)}&code=${encodeURIComponent(code)}`);
+    if (!r.fixes.length) return;
+    const ver = f => f.verified === true ? `<span class="ok-text">${t("fix_verified")}</span>` : f.verified === false ? `<span class="warn-text">${t("fix_not_verified")}</span>` : "";
+    box.insertAdjacentHTML("beforeend", `<details class="more proven"><summary>${icon("chevron-right", 16)}${t("proven_fixes")}: ${r.fixes.length}</summary>` +
+      r.fixes.map(f => `<div class="fix"><div><b class="mono">${esc(f.vehicle_id)}</b> <span class="muted">${esc(f.date || "")}${f.ticket_id ? ", " + esc(f.ticket_id) : ""}</span></div><div class="small">${ver(f)}${f.source === "demo" ? ` <span class="muted">(${t("demo_hist")})</span>` : ""}</div><ol>` +
+        f.steps.map(st => `<li>${esc(st.text)}${st.page ? ` <button class="cite" data-doc="${esc(st.doc_id)}" data-page="${st.page}" data-q="${esc(st.text)}">${t("page_short")} ${st.page}</button>` : ""}</li>`).join("") + `</ol></div>`).join("") + `</details>`);
+  } catch (_) {}
+}
+async function confirmTicket(draftId, ok, row) {
+  row.innerHTML = `<span class="muted small">${icon("loader-circle", 16, "spin")}</span>`;
+  try {
+    const r = await api("/api/ticket/confirm", {json: {vehicle_id: VID, draft_id: draftId, inspection_ok: ok}});
+    row.innerHTML = "";
+    if (r.card) renderCard(r.card); else addMsg("bot", md(r.text || r.error || ""), {speak: r.text});
+    refreshVehicle();
+  } catch (e) { row.innerHTML = `<span class="err small">${esc(friendlyError(e))}</span>`; }
+}
+async function repairAction(a) {
+  try { const r = await api("/api/repair/action", {json: {vehicle_id: VID, action: a}}); if (r.card) { renderCard(r.card); loadChips(); } }
+  catch (e) { errorMsg(e); }
+}
+
+// ---------------------------------------------------------------- chips
 let CHIP_SEQ = 0;
 async function loadChips() {
-  const q = $("#quick"); if (!q || !ME || !VID) { if (q) q.innerHTML = ""; return; }
+  const q = $("#quick"); if (!q) return;
+  if (!ME || !VID) { q.innerHTML = ""; return; }
   const seq = ++CHIP_SEQ;
   try {
     const r = await api(`/api/suggest?vehicle_id=${encodeURIComponent(VID)}`);
     if (seq !== CHIP_SEQ) return;
     q.innerHTML = "";
-    (r.chips || []).forEach(ch => {
-      const b = document.createElement("button"); b.textContent = ch.text; b.className = `qc ${ch.kind}`;
-      if (ch.page) b.title = `${ch.doc} · ${t("page")} ${ch.page}`;
-      b.onclick = ch.kind === "triage" ? () => eventTurn("triage", "", ch.text) : ch.kind === "code" ? () => { $("#txt").value = "F0"; $("#txt").focus(); } : () => send(ch.text); q.appendChild(b);
+    (r.chips || []).slice(0, 6).forEach(ch => {
+      const b = document.createElement("button"); b.textContent = ch.text;
+      if (ch.page) b.title = `${ch.doc}, ${t("page_short")} ${ch.page}`;
+      b.onclick = ch.kind === "triage" ? () => eventTurn("triage", "", ch.text) : ch.kind === "code" ? () => { $("#txt").value = "F0"; autosize(); $("#txt").focus(); } : () => send(ch.text);
+      q.appendChild(b);
     });
-  } catch (_) { /* chips are optional */ }
-}
-
-function langOptions(sel, cur) {
-  sel.innerHTML = Object.entries({ru:"Русский",uz:"Oʻzbekcha",tg:"Тоҷикӣ",kk:"Қазақша",hi:"हिन्दी",vi:"Tiếng Việt"})
-    .map(([k, v]) => `<option value="${k}" ${k === cur ? "selected" : ""}>${v}</option>`).join("");
-}
-
-// ---------------------------------------------------------------- markdown-lite with source labels
-function md(text, sources) {
-  const src = Object.fromEntries((sources || []).map(s => [s.label, s]));
-  let h = esc(text);
-  h = h.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
-  h = h.replace(/^#{1,4}\s*(.+)$/gm, "<b>$1</b>");
-  h = h.replace(/^\s*[-•*]\s+/gm, "• ");
-  h = h.replace(/\[([^\]]{1,80})\]/g, (m, grp, off, whole) => { const labs = grp.match(/\b(?:S|X)\d+\b/g); if (!labs) return m;
-    const ctx = whole.slice(Math.max(0, off - 240), off).replace(/<[^>]+>/g, "").split(/\n|[.!?]\s|•/).filter(x => x.trim().length > 6).pop() || "";
-    return labs.map(l => src[l] ? `<span class="chip ${src[l].extra ? "x" : ""}" data-doc="${src[l].doc_id}" data-page="${src[l].page}" data-q="${ctx.trim().slice(0, 200)}">${esc(src[l].document.slice(0, 24))}, ${t("page")} ${src[l].page}</span>` : "").join(""); });
-  return h.replace(/\n/g, "<br>");
-}
-
-function addMsg(role, html, cls = "") {
-  const d = document.createElement("div"); d.className = `msg ${role}`;
-  d.innerHTML = `<div class="b ${cls}">${html}</div>`;
-  $("#chat").appendChild(d); d.scrollIntoView({behavior: "smooth", block: "end"});
-  return d;
-}
-
-function pagesHtml(pages) {
-  return pages && pages.length ? `<div class="muted" style="margin-top:.4em">` + pages.map(s => `<span class="chip ${s.extra ? "x" : ""}" data-doc="${s.doc_id}" data-page="${s.page}">${esc(s.document.slice(0, 30))}, ${t("page")} ${s.page}</span>`).join("") + "</div>" : "";
-}
-function sourcesHtml(sources) {
-  if (!sources || !sources.length) return "";
-  return `<div class="muted" style="margin-top:.4em">${t("source")}: ` + sources.map(s =>
-    `<span class="chip ${s.extra ? "x" : ""}" data-doc="${s.doc_id}" data-page="${s.page}">${esc(s.document.slice(0, 40))}, ${t("page")} ${s.page}${s.extra ? " *" : ""}</span>`).join("") + "</div>";
-}
-
-const FACT_ICON = {danger: "⚠️", tool: "🔧", torque: "🔩", value: "📏"};
-function factsHtml(facts) {  // verbatim lines from the cited pages: danger / tools / torques / control values
-  if (!facts || !facts.length) return "";
-  return `<div class="facts"><b>${t("key_facts")}</b>` + facts.map(f => `<div class="fact ${f.kind}">${FACT_ICON[f.kind] || "•"} ${esc(f.text)} ` +
-    `<span class="chip" data-doc="${esc(f.doc_id)}" data-page="${f.page}" data-q="${esc(f.text.slice(0, 200))}">${t("page")} ${f.page}</span></div>`).join("") + `</div>`;
-}
-
-function renderTurn(turn, expanded = false) {
-  (turn.cards || []).forEach(renderCard);
-  if (turn.text) {
-    const canExpand = !expanded && (turn.sources || []).length && (ME.detail || "brief") === "brief";
-    const canAlt = VID && (turn.sources || []).length;
-    const und = (turn.understood || []).length ? `<div class="muted understood">🔎 ${t("understood")}: ${turn.understood.map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join(", ")}</div>` : "";
-    const d = addMsg("bot", und + factsHtml(turn.facts) + md(turn.text, turn.sources) + sourcesHtml(turn.sources) +
-      `<div class="row acts">` + (canExpand ? `<button class="expand">${t("expand")} ▾</button>` : "") +
-      (canAlt ? `<button class="expand alt">🔀 ${t("alternatives")}</button><button class="expand hyp">🧪 ${t("hypothesis")}</button>` : "") +
-      ((turn.sources || []).length ? `<button class="expand prn">🖨 ${t("print")}</button>` : "") + `</div>`);
-    const prn = d.querySelector(".prn"); if (prn) prn.onclick = ev => { ev.stopPropagation(); printTurn(turn); };
-    if (canExpand) d.querySelector(".expand").onclick = ev => { ev.stopPropagation(); ev.target.remove(); expandAnswer(turn.text); };
-    if (canAlt) {
-      d.querySelector(".alt").onclick = ev => { ev.stopPropagation(); ev.target.remove(); eventTurn("alternatives", "", "🔀 " + t("alternatives")); };
-      d.querySelector(".hyp").onclick = ev => { ev.stopPropagation(); HYP = true; $("#txt").placeholder = t("hypothesis_ph"); $("#txt").focus(); };
-    }
-    speak(turn.text);
-  }
-  loadChips();
-}
-let HYP = false;
-// item 19: printable / Save-as-PDF procedure: answer + verbatim key facts + labor norms + the cited manual pages themselves
-async function printTurn(turn) {
-  const w = window.open("", "_blank"); if (!w) return;
-  w.document.write(`<p>${t("thinking")}</p>`);
-  const veh = $("#vehicle") && $("#vehicle").selectedOptions[0] ? $("#vehicle").selectedOptions[0].textContent : "";
-  const labor = (turn.cards || []).flatMap(c => c.labor || []);
-  const lab = labor.length ? `<p>⏱ ${t("labor")}: ` + (labor.some(l => l.norm) ? labor.filter(l => l.norm).map(l => `${esc(l.norm)} (${t("page")} ${l.page})`).join("; ") : t("labor_na")) + `</p>` : "";
-  const seen = new Set(), pages = [];
-  for (const s of (turn.sources || [])) { const k = s.doc_id + "#" + s.page; if (seen.has(k) || pages.length >= 6) continue; seen.add(k);
-    let info = {}; try { info = await api(`/api/page/${encodeURIComponent(s.doc_id)}/${s.page}`); } catch (e) {}
-    pages.push(`<section class="pg"><h3>${esc(s.label || "")} · ${esc(info.full_title || s.document)} — ${t("page")} ${s.page}${s.extra ? " *" : ""}</h3>` +
-      (info.has_image ? `<img src="/page/${encodeURIComponent(s.doc_id)}/${s.page}.png">` : `<pre>${esc((info.text || "").slice(0, 4000))}</pre>`) + `</section>`); }
-  const css = `body{font:13pt/1.45 system-ui,sans-serif;color:#000;margin:1.5cm}h1{font-size:16pt;margin:0}h3{font-size:11pt;margin:.6em 0 .3em}
-    .chip{font-size:.8em;color:#333}.chip:before{content:"["}.chip:after{content:"]"}.facts{border:1px solid #999;padding:.4em .7em;margin:.6em 0}
-    .fact{margin:.2em 0}img{max-width:100%;border:1px solid #ccc}pre{white-space:pre-wrap;font-size:9.5pt;border:1px solid #ccc;padding:.5em}
-    .pg{page-break-before:always}.muted{color:#444;font-size:.9em}@media print{.noprint{display:none}}`;
-  w.document.open();
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(t("app_title"))} — ${esc(veh)}</title><style>${css}</style></head><body>
-    <p class="noprint"><button onclick="print()">🖨 ${t("print")}</button></p>
-    <h1>${esc(t("app_title"))}</h1><p class="muted">${esc(veh)} · ${new Date().toLocaleString()} · ${esc((ME && ME.name) || "")}</p>
-    ${factsHtml(turn.facts)}<div>${md(turn.text, turn.sources)}</div>${lab}
-    <p class="muted">${t("print_note")}</p>${pages.join("")}</body></html>`);
-  w.document.close();
-  const imgs = [...w.document.images]; await Promise.all(imgs.map(i => i.complete ? 1 : new Promise(r => { i.onload = i.onerror = r; })));
-  w.focus(); w.print();
-}
-async function eventTurn(event, text, shown) {
-  stopSpeak();
-  if (shown) addMsg("user", esc(shown));
-  const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
-  try { const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event}}); th.remove(); renderTurn(r); }
-  catch (e) { th.innerHTML = `<div class="b" style="color:var(--stop)">${esc(e.message)}</div>`; }
-}
-async function expandAnswer(text) {
-  stopSpeak();
-  const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
-  try { const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event: "expand"}}); th.remove(); renderTurn(r, true); }
-  catch (e) { th.innerHTML = `<div class="b" style="color:var(--stop)">${esc(e.message)}</div>`; }
-}
-
-// ---------------------------------------------------------------- cards
-function spark(trend) {
-  const pts = (trend || []).filter(p => p.anomaly_score != null);
-  if (pts.length < 2) return "";
-  const W = 240, H = 60, n = trend.length;
-  const xy = trend.map((p, i) => [10 + i * (W - 20) / Math.max(n - 1, 1), p.anomaly_score == null ? null : H - 8 - p.anomaly_score * (H - 16)]);
-  const line = xy.filter(p => p[1] != null).map(p => p.join(",")).join(" ");
-  const col = s => s === "anomaly" ? "#e5484d" : s === "normal" ? "#2fbf71" : "#3d8bfd";
-  return `<svg width="${W}" height="${H}" style="background:#11181e;border-radius:8px"><line x1="0" x2="${W}" y1="${H - 8 - 0.5 * (H - 16)}" y2="${H - 8 - 0.5 * (H - 16)}" stroke="#555" stroke-dasharray="3"/><polyline fill="none" stroke="#ffb020" stroke-width="2" points="${line}"/>` +
-    xy.map((p, i) => `<circle cx="${p[0]}" cy="${p[1] ?? H - 8}" r="4" fill="${col(trend[i].status)}"><title>${trend[i].session_id} ${trend[i].status} ${trend[i].anomaly_score ?? "—"}</title></circle>`).join("") + "</svg>";
-}
-
-async function loadProven(box, code) {  // item 6: proven fixes for this engine + fault code in this fleet
-  try {
-    const r = await api(`/api/proven?vehicle_id=${encodeURIComponent(VID)}&code=${encodeURIComponent(code)}`);
-    if (!r.fixes.length) return;
-    const ver = f => f.verified === true ? `✅ ${t("fix_verified")}` : f.verified === false ? `⚠️ ${t("fix_not_verified")}` : "";
-    box.insertAdjacentHTML("beforeend", `<details class="proven"><summary>🛠 ${t("proven_fixes")} (${r.engine}, ${esc(code)}): ${r.fixes.length}</summary>` +
-      r.fixes.map(f => `<div class="fix"><b>${esc(f.vehicle_id)}</b> · ${esc(f.date || "")} · ${esc(f.ticket_id || "")} ${ver(f)}${f.source === "demo" ? ` <span class="muted">(${t("demo_hist")})</span>` : ""}<ol>` +
-        f.steps.map(st => `<li>${esc(st.text)}${st.page ? ` <span class="chip" data-doc="${esc(st.doc_id)}" data-page="${st.page}" data-q="${esc(st.text)}">${t("page")} ${st.page}</span>` : ""}</li>`).join("") + `</ol>` +
-        (f.parts && f.parts.length ? `<div class="muted">${t("parts")}: ${f.parts.map(esc).join(", ")}</div>` : "") + `</div>`).join("") + `</details>`);
+    layout();
   } catch (_) {}
 }
 
-function renderCard(c) {
-  if (c.kind === "verdict") {
-    const ch = c.check, st = {normal: t("status_normal"), anomaly: t("status_anomaly"), check_failed: t("status_failed")}[c.status];
-    const head = c.status === "anomaly" ? `${st}: ${esc(ch.anomaly_title)}` : c.status === "normal" ? t("verdict_normal") : t("verdict_failed");
-    let h = `<div class="big">${c.light === "stop" ? "⛔" : c.light === "service" ? "⚠️" : c.light === "repeat" ? "🔁" : "✅"} ${head}</div>`;
-    if (c.light_text) h += `<div style="margin:.3em 0 .5em;font-weight:600">${esc(c.light_text)}</div>`;
-    h += `<div class="kv"><span class="muted">${t("session")}</span><span>${esc(ch.session_id)} · ${esc((ch.checked_at || "").slice(0, 16).replace("T", " "))}</span>`;
-    if (ch.anomaly_score != null) h += `<span class="muted">${t("score")}</span><span>${ch.anomaly_score.toFixed(2)}</span>`;
-    if (ch.confidence != null) h += `<span class="muted">${t("confidence")}</span><span>${Math.round(ch.confidence * 100)}%</span>`;
-    h += `<span class="muted">${t("quality")}</span><span>${esc(ch.signal_quality)}</span><span class="muted">ML</span><span>${esc(ch.description)}</span></div>`;
-    if (c.doubt && c.doubt.length) h += `<div style="margin-top:.5em;color:var(--warn)">⚠️ ${t("doubt")}: ${c.doubt.map(esc).join("; ")}</div>`;
-    if (c.urgency_basis) h += `<details style="margin-top:.4em"><summary class="muted">Приоритет ${esc(c.urgency)} — почему</summary><div class="muted">${c.urgency_basis.map(esc).join("<br>")}</div></details>`;
-    if (c.trend) h += `<div style="margin-top:.5em" class="muted">${t("history")}:</div>${spark(c.trend)}`;
-    const vd = addMsg("bot", h, `card verdict ${c.light}`);
-    if (c.status === "anomaly" && ch.anomaly_type) loadProven(vd.querySelector(".b"), ch.anomaly_type);
-  } else if (c.kind === "ticket_draft") {
-    const r = c.request;
-    let h = `<b>📝 ${t("create_ticket")}</b> — <span class="badge b-${r.urgency === "high" ? "quarantine" : r.urgency === "medium" ? "attention" : "ready"}">${r.urgency}</span>`;
-    h += `<div style="margin:.4em 0">${esc(r.conclusion)}</div><b>Работы:</b><ol>` + c.operations.map(o => `<li>${esc(o.text)} <span class="chip" data-doc="${o.doc_id}" data-page="${o.page}" data-q="${esc(o.quote)}">${esc(o.document.slice(0, 22))}, ${t("page")} ${o.page}</span></li>`).join("") + "</ol>";
-    if (c.spare_parts.length) h += `<b>Запчасти:</b><ul>` + c.spare_parts.map(o => `<li>${esc(o.text)} <span class="chip" data-doc="${o.doc_id}" data-page="${o.page}" data-q="${esc(o.quote)}">${t("page")} ${o.page}</span></li>`).join("") + "</ul>";
-    else h += `<div class="muted">Запчасти: не требуются по найденной процедуре</div>`;
-    if (c.labor) { const known = c.labor.filter(l => l.norm);
-      h += `<div class="muted" style="margin-top:.3em">⏱ ${t("labor")}: ` + (known.length ? known.map(l => `${esc(l.norm)} <span class="chip" data-doc="${esc(l.doc_id)}" data-page="${l.page}" data-q="${esc(l.norm)}">${t("page")} ${l.page}</span>`).join("; ") +
-        (known.length < c.labor.length ? `; ${t("labor_na_some")}` : "") : t("labor_na")) + `</div>`; }
-    h += `<details><summary class="muted">JSON для ТОиР</summary><pre style="white-space:pre-wrap;font-size:.75em">${esc(JSON.stringify(r, null, 1))}</pre></details>`;
-    const d = addMsg("bot", h + `<div class="row" style="margin-top:.6em"></div>`, "card");
-    const row = d.querySelector(".row:last-child");
-    const ok = document.createElement("button"); ok.className = "go"; ok.textContent = c.requires_inspection ? t("inspection_ok") : t("confirm_send");
-    ok.onclick = () => confirmTicket(c.draft_id, true, row);
-    row.appendChild(ok);
-    const no = document.createElement("button"); no.textContent = c.requires_inspection ? t("inspection_no") : t("cancel");
-    no.onclick = () => c.requires_inspection ? confirmTicket(c.draft_id, false, row) : (row.innerHTML = `<span class="muted">${t("cancel")}</span>`, send(t("cancel")));
-    row.appendChild(no);
-  } else if (c.kind === "ticket_created") {
-    addMsg("bot", `<div class="big">✅ ${t("ticket_created")}: <b>${esc(c.ticket_id)}</b></div><div class="muted">${esc(c.request.conclusion)}</div>`, "card verdict go");
-  } else if (c.kind === "repair") {
-    const n = c.steps.length, cur = c.current;
-    let h = `<b>🛠 ${esc(c.title)}</b> — ${c.status === "done" ? t("repair_done") : `${t("step")} ${Math.min(cur + 1, n)} ${t("of")} ${n}`}<ol class="steps">` +
-      c.steps.map((s, i) => `<li class="${s.done ? "done" : i === cur ? "cur" : ""}">${esc(s.text)} <span class="chip" data-doc="${s.doc_id}" data-page="${s.page}" data-q="${esc(s.quote)}">${t("page")} ${s.page}</span></li>`).join("") + "</ol>";
-    const d = addMsg("bot", h + (c.status === "done" ? "" : `<div class="row"></div>`), "card");
-    if (c.status !== "done") {
-      const row = d.querySelector(".row");
-      const b1 = document.createElement("button"); b1.className = "go"; b1.style.flex = "1"; b1.textContent = "✔ " + t("next_step"); b1.onclick = () => repairAction("done");
-      const b2 = document.createElement("button"); b2.textContent = "↩"; b2.onclick = () => repairAction("back");
-      row.append(b1, b2);
-    }
-  }
-}
-
-async function confirmTicket(draftId, ok, row) {
-  row.innerHTML = `<span class="thinking">…</span>`;
-  try {
-    const r = await api("/api/ticket/confirm", {json: {vehicle_id: VID, draft_id: draftId, inspection_ok: ok}});
-    row.innerHTML = "";
-    if (r.card) renderCard(r.card);
-    else addMsg("bot", esc(r.text || r.error || ""));
-    speak(r.text || "");
-  } catch (e) { row.innerHTML = `<span style="color:var(--stop)">${esc(e.message)}</span>`; }
-}
-
-async function repairAction(a) {
-  const r = await api("/api/repair/action", {json: {vehicle_id: VID, action: a}});
-  if (r.card) { renderCard(r.card); loadChips(); const s = r.card.steps[r.card.current]; if (s && r.card.status !== "done") speak(`${t("step")} ${r.card.current + 1}. ${s.text}`); else speak(t("repair_done")); }
-}
-
-// ---------------------------------------------------------------- page viewer
-let LAST_Q = "";
-function hl(txt, q) {  // highlight the cited words in the section text
-  const words = [...new Set((q || "").toLowerCase().match(/[\p{L}\d]{5,}/gu) || [])].slice(0, 12);
-  if (!words.length) return txt;
-  const re = new RegExp(`(${words.map(w => w.slice(0, Math.max(5, w.length - 2)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[\\p{L}]*`, "giu");
-  return txt.replace(re, m => `<mark>${m}</mark>`);
-}
-document.addEventListener("click", async e => {
-  const ch = e.target.closest(".chip[data-doc]");
-  if (!ch) return;
-  const doc = ch.dataset.doc, page = +ch.dataset.page, q = ch.dataset.q || "";
-  $("#modal").classList.remove("hidden"); $("#mBody").innerHTML = "…";
-  try {
-    const s = await api(`/api/section/${encodeURIComponent(doc)}/${page}?q=${encodeURIComponent(q || LAST_Q)}`);
-    $("#mTitle").textContent = `${s.full_title}`;
-    $("#mPdf").href = s.pdf ? `/manuals/${encodeURIComponent(doc)}.pdf#page=${page}` : "#";
-    $("#mPdf").classList.toggle("hidden", !s.pdf);
-    const link = n => s.pdf ? `<a class="chip" target="_blank" href="/manuals/${encodeURIComponent(doc)}.pdf#page=${n}">${t("page")} ${n}</a>`
-      : `<span class="chip pg" data-img="${n}">${t("page")} ${n}</span>`;
-    const pages = s.pages.map(p => p.page);
-    $("#mBody").innerHTML = (s.extra ? `<div class="muted">* ${t("extra_src")}</div>` : "") +
-      `<div class="extract" id="mExtract"><span class="muted">⏳ ${t("extract")}…</span></div>` +
-      `<div class="sechead"><b>${esc(s.label || t("page") + " " + page)}</b><div class="muted">${t("pages")}: ${pages.map(link).join(" ")}</div></div>` +
-      `<details class="sec"><summary>${t("full_section")} (${t("page")} ${esc(s.span)})</summary>` +
-      s.pages.map(p => `<div class="muted">— ${t("page")} ${p.page} —</div><pre>${hl(esc(p.text), q)}</pre>`).join("") + `</details>` +
-      (s.has_image ? `<details class="sec" id="mImgBox"><summary>${t("page_image")} ${page}</summary><img id="mImg" loading="lazy" src="/page/${encodeURIComponent(doc)}/${page}.png" alt="page"></details>` : "");
-    $("#mBody").querySelectorAll(".chip.pg").forEach(c => c.onclick = ev => { ev.stopPropagation(); const n = c.dataset.img;
-      if ($("#mImg")) { $("#mImg").src = `/page/${encodeURIComponent(doc)}/${n}.png`; $("#mImgBox").open = true; $("#mImgBox summary").textContent = `${t("page_image")} ${n}`; } });
-    api("/api/extract", {json: {doc_id: doc, page, q, question: LAST_Q}}).then(x => {
-      const box = $("#mExtract"); if (!box) return;
-      box.innerHTML = x.ok ? `<b>${t("extract")}:</b> ${md(x.text)}` : `<span class="muted">${t("extract_na")}</span>`;
-    }).catch(() => { const box = $("#mExtract"); if (box) box.innerHTML = `<span class="muted">${t("extract_na")}</span>`; });
-  } catch (err) { $("#mBody").textContent = err.message; }
-});
-$("#mClose").onclick = () => $("#modal").classList.add("hidden");
-
-// ---------------------------------------------------------------- vehicles / diagnosis / chat
-// item 22: quick entry by plate or garage number — typed or dictated, Cyrillic/Latin look-alikes, spaces and dashes ignored
-let VLIST = [];
-const LAT = {"А":"A","В":"B","Е":"E","К":"K","М":"M","Н":"H","О":"O","Р":"P","С":"C","Т":"T","У":"Y","Х":"X"};
+// ---------------------------------------------------------------- vehicle
+const LAT = {"А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X"};
 const vnorm = s => (s || "").toUpperCase().replace(/[АВЕКМНОРСТУХ]/g, c => LAT[c]).replace(/[^A-ZА-ЯЁ0-9]/g, "");
 function findVehicles(q) {
   const n = vnorm(q); if (n.length < 2) return [];
   const dig = /^\d+$/.test(n);
   const exact = VLIST.filter(v => vnorm(v.vehicle_id) === n || vnorm(v.garage_no) === n || (dig && vnorm(v.garage_no).replace(/\D/g, "") === n));
   if (exact.length) return exact;
-  return VLIST.filter(v => vnorm(v.vehicle_id).includes(n) || vnorm(v.garage_no).includes(n)).slice(0, 6);
+  return VLIST.filter(v => vnorm(v.vehicle_id).includes(n) || vnorm(v.garage_no).includes(n) || vnorm(v.model).includes(n)).slice(0, 8);
 }
-function plateInText(text) {  // "В332ВР98", "в 332 вр 98", "Г-141" inside a free sentence
+function plateInText(text) {
   const m = vnorm(text).match(/[ABEKMHOPCTYX]\d{3}[ABEKMHOPCTYX]{2}\d{2,3}/);
   if (m) { const f = findVehicles(m[0]); if (f.length === 1) return f[0]; }
   const g = (text || "").match(/г(?:ар(?:аж(?:ный)?)?)?\.?\s*(?:№|n|номер)?\s*-?\s*(\d{2,4})/i);
   if (g) { const f = VLIST.filter(v => vnorm(v.garage_no).replace(/\D/g, "") === g[1]); if (f.length === 1) return f[0]; }
   return null;
 }
-$("#vfind").oninput = () => {
-  const f = findVehicles($("#vfind").value);
-  if (f.length === 1) { $("#vfind").value = ""; $("#vfindRes").innerHTML = ""; $("#vehicle").value = f[0].vehicle_id; return selectVehicle(f[0].vehicle_id); }
-  $("#vfindRes").innerHTML = f.map(v => `<button class="expand" data-v="${esc(v.vehicle_id)}">${esc(v.vehicle_id)} · ${esc(v.garage_no || "")} · ${esc(v.model || "")}</button>`).join("") ||
-    (vnorm($("#vfind").value).length >= 3 ? `<span class="muted">${t("not_found")}</span>` : "");
-  $("#vfindRes").querySelectorAll("button").forEach(b => b.onclick = () => { $("#vfind").value = ""; $("#vfindRes").innerHTML = ""; $("#vehicle").value = b.dataset.v; selectVehicle(b.dataset.v); });
-};
-
+const STATUS_ORDER = {quarantine: 0, attention: 1, ready: 2};
+const vStatus = v => v.in_repair ? "repair" : v.status;
+const vStatusText = v => v.in_repair ? t("in_repair") : t(v.status);
+function vehicleItem(v) {
+  return `<button class="item ${v.vehicle_id === VID ? "sel" : ""}" data-v="${esc(v.vehicle_id)}"><span class="dot ${vStatus(v)}"></span><span class="t"><b class="mono">${esc(v.vehicle_id)}</b><span>${esc(v.model || "")}, ${esc(v.engine_model)}, ${esc(v.garage_no || "")}</span></span><span class="small muted">${esc(vStatusText(v))}</span></button>`;
+}
+function vehiclePicker(box, onPick) {
+  box.innerHTML = `<div class="field" style="margin-bottom:8px"><label for="vfind" class="label">${t("find_vehicle")}</label><input id="vfind" class="input" type="search" autocomplete="off" placeholder="${esc(t("find_vehicle_ph"))}"></div><div class="list" id="vlist"></div>`;
+  const draw = () => {
+    const q = box.querySelector("#vfind").value;
+    const list = q.trim() ? findVehicles(q) : VLIST.slice().sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || a.vehicle_id.localeCompare(b.vehicle_id));
+    box.querySelector("#vlist").innerHTML = list.length ? list.map(vehicleItem).join("") : `<p class="muted">${t("not_found")}</p>`;
+    box.querySelectorAll("[data-v]").forEach(b => b.onclick = () => onPick(b.dataset.v));
+    if (q.trim() && list.length === 1 && vnorm(q).length >= 6) onPick(list[0].vehicle_id);
+  };
+  box.querySelector("#vfind").oninput = draw; draw();
+}
+function showEmpty() {
+  $("#empty").classList.remove("hidden"); $("#vehInfo").classList.add("hidden"); $("#composer").classList.add("hidden"); $("#btnMenu").classList.add("hidden");
+  $("#empty").innerHTML = `<div class="empty">${icon("truck", 40)}<h2>${t("choose_vehicle")}</h2><p>${t("choose_vehicle_text")}</p></div><div id="pick"></div>`;
+  vehiclePicker($("#pick"), vid => selectVehicle(vid));
+  $("#vehTitle").textContent = t("choose_vehicle"); $("#vehSub").textContent = ""; $("#vehDot").className = "dot";
+}
 async function loadVehicles() {
   const r = await api("/api/vehicles"); VLIST = r.vehicles;
-  const sel = $("#vehicle");
-  sel.innerHTML = `<option value="">${t("choose_vehicle")}</option>` + r.vehicles.map(v =>
-    `<option value="${v.vehicle_id}">${v.vehicle_id} · ${esc(v.model || "")} · ${esc(v.engine_model)}${v.in_repair ? " 🛠" : ""}</option>`).join("");
-  if (VID && r.vehicles.some(v => v.vehicle_id === VID)) sel.value = VID; else VID = "";
-  sel.onchange = () => selectVehicle(sel.value);
-  if (VID) selectVehicle(VID);
+  if (VID && VLIST.some(v => v.vehicle_id === VID)) await selectVehicle(VID); else { VID = ""; showEmpty(); }
 }
-
 async function selectVehicle(vid) {
-  VID = vid; localStorage.setItem("vid", vid); $("#chat").innerHTML = ""; loadChips();
-  if (!vid) { $("#vehInfo").classList.add("hidden"); return; }
-  const r = await api(`/api/vehicle/${encodeURIComponent(vid)}`);
+  closeSheet(); Player.stop();
+  VID = vid; localStorage.setItem("vid", vid); $("#chat").innerHTML = "";
+  if (!vid) return showEmpty();
+  $("#empty").classList.add("hidden"); $("#empty").innerHTML = ""; $("#composer").classList.remove("hidden"); $("#btnMenu").classList.remove("hidden");
+  const lv = VLIST.find(v => v.vehicle_id === vid) || {};
+  $("#vehTitle").textContent = vid; $("#vehSub").textContent = `${lv.model || ""} · ${lv.engine_model || ""}`; $("#vehDot").className = `dot ${vStatus(lv)}`;
+  $("#vehInfo").classList.remove("hidden"); $("#vehInfo").innerHTML = `<div class="skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div>`;
+  layout(); loadChips();
+  let r;
+  try { r = await api(`/api/vehicle/${encodeURIComponent(vid)}`); } catch (e) { $("#vehInfo").innerHTML = `<span class="err">${esc(friendlyError(e))}</span>`; return; }
+  if (VID !== vid) return;
   VEH = r;
-  const v = r.vehicle;
-  $("#vehInfo").classList.remove("hidden");
-  $("#vehInfo").innerHTML = `<b>${esc(v.vehicle_id)}</b> · ${esc(v.model && v.model.startsWith(v.make) ? v.model : v.make + " " + (v.model || ""))} · ${esc(v.vehicle_type)}<br>⚙️ <b>${esc(v.engine_model)}</b> (${esc(v.fuel)}) · гараж. ${esc(v.garage_no)}<div class="scope" title="${esc(r.manuals.map(m => m.title).join(" · "))}">🔎 ${t("scope_only")} <b>${esc(v.engine_model)}</b> · ${r.manuals.length} ${t("books")}</div><div class="muted">📚 ${r.manuals.map(m => esc(m.title)).join(" · ")}</div>` +
-    (r.tickets.length ? `<div class="muted">${t("tickets")}: ${r.tickets.slice(0, 3).map(x => esc(x.ticket_id)).join(", ")}</div>` : "") +
-    `<div class="row acts"><button id="btnHist" class="expand">🗂 ${t("history")}</button><button id="btnSum" class="expand">📝 ${t("summary")}</button><button id="btnHand" class="expand">🙋 ${t("handoff")}</button><button id="btnInsp" class="expand">🔍 ${t("inspection")}</button></div><div id="arrBox"></div><div id="histBox" class="hidden"></div>`;
-  api(`/api/history/${encodeURIComponent(vid)}`).then(tl => { if (VID === vid && $("#arrBox")) $("#arrBox").innerHTML = arrivalCard(tl, t); }).catch(() => {});
-  $("#btnSum").onclick = async () => {
-    const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
-    try { const s = await api("/api/summary", {json: {vehicle_id: VID}}); th.querySelector(".b").innerHTML = `<b>📝 ${t("summary")}</b><br>` + md(s.text) + pagesHtml(s.pages); }
-    catch (e) { th.querySelector(".b").textContent = e.message; }
-  };
-  $("#btnInsp").onclick = async () => {
-    const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
-    try {
-      const r = await api("/api/inspection/draft", {json: {vehicle_id: VID}}); const b = th.querySelector(".b");
-      if (!r.items.length) { b.textContent = r.note; return; }
-      const sev = {"норма": "🟢", "внимание": "🟡", "дефект": "🔴"};
-      b.innerHTML = `<b>🔍 ${t("inspection")}</b> <span class="muted">${t("insp_review")}</span>` + r.items.map((it, i) =>
-        `<div class="insp"><label><input type="checkbox" data-i="${i}" checked> ${sev[it.severity] || "🟡"} <b contenteditable="true" data-f="component">${esc(it.component)}</b>: <span contenteditable="true" data-f="finding">${esc(it.finding)}</span></label> <span class="muted">(${esc(it.source)})</span>` +
-        (it.page ? ` <span class="chip" data-doc="${esc(it.doc_id)}" data-page="${it.page}">${t("page")} ${it.page}</span>` : "") + `</div>`).join("") +
-        `<div class="row" style="margin-top:.5em"><button class="go" id="inspOk">✅ ${t("insp_confirm")}</button></div>`;
-      b.querySelector("#inspOk").onclick = async () => {
-        const items = r.items.map((it, i) => { const row = b.querySelectorAll(".insp")[i];
-          return {...it, component: row.querySelector('[data-f="component"]').textContent.trim(), finding: row.querySelector('[data-f="finding"]').textContent.trim(), confirmed: row.querySelector("input").checked}; });
-        try { const s = await api("/api/inspection/confirm", {json: {vehicle_id: VID, items}}); b.querySelector(".row").innerHTML = `✅ ${t("insp_saved")} №${s.id}`; }
-        catch (e) { alert(e.message); }
-      };
-    } catch (e) { th.querySelector(".b").textContent = e.message; }
-  };
-  $("#btnHand").onclick = async () => {
-    const note = prompt(t("handoff_note")); if (note === null) return;
-    const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
-    try { const s = await api("/api/handoff", {json: {vehicle_id: VID, note}}); th.querySelector(".b").innerHTML = `<b>🙋 ${t("handoff_done")} №${s.id}</b><br>` + md(s.summary) + pagesHtml(s.pages); }
-    catch (e) { th.querySelector(".b").textContent = e.message; }
-  };
-  $("#btnHist").onclick = async () => {
-    const box = $("#histBox");
-    if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
-    box.innerHTML = renderTimeline(await api(`/api/history/${encodeURIComponent(vid)}`)); box.classList.remove("hidden");
-  };
-  $("#sess").innerHTML = r.sessions.slice().reverse().map((s, i) => `<option value="${s.session_id}">${s.session_id}${i === 0 ? " (" + t("latest") + ")" : ""} · ${s.checked_at.slice(5, 10)}</option>`).join("");
+  drawVehicle(r, lv);
   for (const m of r.messages) {
     (m.meta.cards || []).forEach(renderCard);
-    if (m.text) addMsg(m.role === "user" ? "user" : "bot", m.role === "user" ? esc(m.text) : md(m.text, m.meta.sources) + sourcesHtml(m.meta.sources));
+    if (m.text) m.role === "user" ? addMsg("user", esc(m.text)) : addMsg("bot", md(m.text, m.meta.sources) + sourcesHtml(m.meta.sources), {speak: m.text});
   }
   if (r.draft && !r.messages.some(m => (m.meta.cards || []).some(c => c.kind === "ticket_draft"))) renderCard(r.draft);
   if (!r.messages.length && r.repair) renderCard({...r.repair, kind: "repair"});
+  window.scrollTo({top: 0});
+}
+function drawVehicle(r, lv) {
+  const v = r.vehicle;
+  const model = v.model && v.model.startsWith(v.make) ? v.model : `${v.make} ${v.model || ""}`;
+  $("#vehInfo").innerHTML = `<div class="top"><div><h2>${esc(v.vehicle_id)}</h2><div class="meta">${esc(model)}, ${esc(v.vehicle_type)}</div></div><span class="pill ${vStatus(lv)}">${esc(vStatusText(lv))}</span></div>` +
+    `<div class="facts-list"><div class="r">${icon("settings", 16)}<span><b>${esc(v.engine_model)}</b>, ${esc(v.fuel)}, ${t("garage")} ${esc(v.garage_no)}</span></div>` +
+    `<div class="r">${icon("book-open", 16)}<span>${t("scope_only")} ${esc(v.engine_model)}: ${r.manuals.map(m => esc(m.title)).join(", ")}</span></div></div>` +
+    `<div id="arrBox"></div>` +
+    `<div class="diag-row"><div class="sess"><label class="label" for="sess">${t("session")}</label><select id="sess" class="input">` +
+    r.sessions.slice().reverse().map((s, i) => `<option value="${esc(s.session_id)}">${esc(s.session_id)}, ${esc((s.checked_at || "").slice(0, 10))}${i === 0 ? ", " + t("latest") : ""}</option>`).join("") +
+    `</select></div><button class="btn primary" id="btnDiag">${icon("activity", 20)}<span>${t("get_result")}</span></button></div>`;
+  $("#btnDiag").onclick = diagnose;
+  api(`/api/history/${encodeURIComponent(v.vehicle_id)}`).then(tl => { if (VID === v.vehicle_id && $("#arrBox")) $("#arrBox").innerHTML = arrivalCard(tl, t); }).catch(() => {});
+}
+async function refreshVehicle() {
+  try { const r = await api("/api/vehicles"); VLIST = r.vehicles; const lv = VLIST.find(v => v.vehicle_id === VID); if (lv) { $("#vehDot").className = `dot ${vStatus(lv)}`; const p = $("#vehInfo .pill"); if (p) { p.className = `pill ${vStatus(lv)}`; p.textContent = vStatusText(lv); } } } catch (_) {}
+}
+function vehicleMenu() {
+  sheet(VID, `<div class="list">` +
+    `<button class="item" data-a="hist">${icon("history")}<span class="t"><b>${t("history")}</b></span></button>` +
+    `<button class="item" data-a="sum">${icon("file-text")}<span class="t"><b>${t("summary")}</b><span>${t("summary_sub")}</span></span></button>` +
+    `<button class="item" data-a="hand">${icon("forward")}<span class="t"><b>${t("handoff")}</b><span>${t("handoff_sub")}</span></span></button>` +
+    `<button class="item" data-a="insp">${icon("clipboard-check")}<span class="t"><b>${t("inspection")}</b><span>${t("inspection_sub")}</span></span></button>` +
+    `<div class="sep"></div><button class="item" data-a="other">${icon("truck")}<span class="t"><b>${t("other_vehicle")}</b></span></button></div>`, sh => {
+    sh.querySelector("[data-a=hist]").onclick = () => showHistory();
+    sh.querySelector("[data-a=sum]").onclick = () => { closeSheet(); doSummary(); };
+    sh.querySelector("[data-a=hand]").onclick = () => handoffSheet();
+    sh.querySelector("[data-a=insp]").onclick = () => { closeSheet(); doInspection(); };
+    sh.querySelector("[data-a=other]").onclick = () => pickVehicleSheet();
+  });
+}
+function pickVehicleSheet() { sheet(t("vehicle"), `<div id="pick2"></div>`, sh => { vehiclePicker(sh.querySelector("#pick2"), vid => selectVehicle(vid)); setTimeout(() => sh.querySelector("#vfind").focus(), 50); }); }
+async function showHistory() {
+  sheet(t("history"), `<div class="skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div>`, async sh => {
+    try { sh.querySelector(".sb").innerHTML = renderTimeline(await api(`/api/history/${encodeURIComponent(VID)}`)); }
+    catch (e) { sh.querySelector(".sb").innerHTML = `<span class="err">${esc(friendlyError(e))}</span>`; }
+  });
+}
+async function doSummary() {
+  const th = skeleton();
+  try { const s = await api("/api/summary", {json: {vehicle_id: VID}}); th.remove(); addMsg("bot", `<div class="card-title">${icon("file-text", 20)}${t("summary")}</div>` + md(s.text) + sourcesHtml(s.pages), {speak: s.text}); }
+  catch (e) { th.remove(); errorMsg(e); }
+}
+function handoffSheet() {
+  sheet(t("handoff"), `<div class="field"><label for="hNote" class="label">${t("handoff_note")}</label><textarea id="hNote" class="input" rows="3" style="padding:12px 16px"></textarea></div><button class="btn primary block" id="hGo">${t("handoff_send")}</button>`, sh => {
+    sh.querySelector("#hGo").onclick = async () => {
+      const note = sh.querySelector("#hNote").value; closeSheet();
+      const th = skeleton();
+      try { const s = await api("/api/handoff", {json: {vehicle_id: VID, note}}); th.remove();
+        addMsg("bot", `<div class="card-title">${icon("forward", 20)}${t("handoff_done")} №${s.id}</div>` + md(s.summary) + sourcesHtml(s.pages), {speak: s.summary}); }
+      catch (e) { th.remove(); errorMsg(e); }
+    };
+    setTimeout(() => sh.querySelector("#hNote").focus(), 50);
+  });
+}
+async function doInspection() {
+  const th = skeleton();
+  try {
+    const r = await api("/api/inspection/draft", {json: {vehicle_id: VID}}); th.remove();
+    if (!r.items.length) return addMsg("bot", `<p>${esc(r.note)}</p>`);
+    const sev = {"норма": "ready", "внимание": "attention", "дефект": "quarantine"};
+    const d = addMsg("bot", `<div class="card-title">${icon("clipboard-check", 20)}${t("inspection")}</div><p class="small muted">${t("insp_review")}</p>` + r.items.map((it, i) =>
+      `<label class="insp"><input type="checkbox" data-i="${i}" checked style="width:22px;height:22px;accent-color:var(--accent)"><span style="flex:1"><b contenteditable="true" data-f="component">${esc(it.component)}</b>: <span contenteditable="true" data-f="finding">${esc(it.finding)}</span>` +
+      `<span class="small muted" style="display:block">${esc(it.source)}</span></span><span class="pill ${sev[it.severity] || "attention"}">${esc(it.severity)}</span>` +
+      (it.page ? `<button class="cite" data-doc="${esc(it.doc_id)}" data-page="${it.page}">${t("page_short")} ${it.page}</button>` : "") + `</label>`).join("") +
+      `<div class="card-actions"><button class="btn primary" id="inspOk">${t("insp_confirm")}</button></div>`);
+    d.querySelector("#inspOk").onclick = async () => {
+      const items = r.items.map((it, i) => { const row = d.querySelectorAll(".insp")[i];
+        return {...it, component: row.querySelector('[data-f="component"]').textContent.trim(), finding: row.querySelector('[data-f="finding"]').textContent.trim(), confirmed: row.querySelector("input").checked}; });
+      try { const s = await api("/api/inspection/confirm", {json: {vehicle_id: VID, items}}); d.querySelector(".card-actions").innerHTML = `<span class="ok-text">${t("insp_saved")} №${s.id}</span>`; }
+      catch (e) { toast(friendlyError(e)); }
+    };
+  } catch (e) { th.remove(); errorMsg(e); }
 }
 
+// ---------------------------------------------------------------- chat
 async function diagnose() {
-  stopSpeak();
-  if (!VID) { const v = plateInText(text); if (!v) return alert(t("choose_vehicle"));
-    $("#vehicle").value = v.vehicle_id; return selectVehicle(v.vehicle_id).then(() => send(text)); }
+  Player.stop();
   if (BUSY) return; BUSY = true; $("#btnDiag").disabled = true;
   try {
     const r = await api("/api/diagnose", {json: {vehicle_id: VID, session_id: $("#sess").value || null}});
-    renderCard(r.card); loadChips();
-    const head = r.card.status === "anomaly" ? `${t("status_anomaly")}: ${r.card.check.anomaly_title}. ${r.card.light_text || ""}` : r.card.status === "normal" ? t("verdict_normal") : t("verdict_failed");
-    speak(head);
+    renderCard(r.card); loadChips(); refreshVehicle();
     BUSY = false;
     await ask("", "explain_diagnosis");
-  } catch (e) { addMsg("bot", `<span style="color:var(--stop)">${esc(e.message)}</span>`); }
-  finally { BUSY = false; $("#btnDiag").disabled = false; }
+  } catch (e) { errorMsg(e); }
+  finally { BUSY = false; const b = $("#btnDiag"); if (b) b.disabled = false; }
 }
-
 async function ask(text, event = null) {
-  if (BUSY) return; BUSY = true;
-  const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
-  const t0 = Date.now();
-  let steps = [];
+  if (BUSY) return null; BUSY = true;
+  const th = skeleton(), t0 = Date.now();
   const tick = setInterval(async () => {
     const sec = Math.round((Date.now() - t0) / 1000);
-    if (sec % 2 === 0) { try { steps = (await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`)).steps; } catch (_) {} }
-    const el = th.querySelector(".thinking"); if (el) el.innerHTML = `${t("thinking")} ${sec} c` + (steps.length ? "<br>" + steps.slice(-3).map(esc).join("<br>") : "");
+    let steps = [];
+    if (sec % 2 === 0) { try { steps = (await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`)).steps || []; } catch (_) {} }
+    const el = th.querySelector(".ptext"); if (el) { if (steps.length) el.dataset.step = steps[steps.length - 1]; el.textContent = `${el.dataset.step || t("thinking")} · ${sec} ${t("sec")}`; }
+    if (VOICE.on && steps.length) $("#vHint").textContent = steps[steps.length - 1];
   }, 1000);
-  try {
-    const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event}});
-    th.remove(); renderTurn(r);
-  } catch (e) { th.innerHTML = `<div class="b" style="color:var(--stop)">${esc(e.message)}</div>`; }
+  try { const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event}}); th.remove(); return renderTurn(r, event === "expand"); }
+  catch (e) { th.remove(); errorMsg(e); return null; }
   finally { clearInterval(tick); BUSY = false; }
 }
-
-function send(text) {
-  stopSpeak();
-  text = (text ?? $("#txt").value).trim();
-  if (text) LAST_Q = text;
-  if (HYP && text) { HYP = false; $("#txt").value = ""; $("#txt").placeholder = t("ask_placeholder"); return eventTurn("hypothesis", text, "🧪 " + text); }
-  if (!text) return;
-  if (!VID) return alert(t("choose_vehicle"));
-  $("#txt").value = "";
-  addMsg("user", esc(text));
-  ask(text);
+async function eventTurn(event, text, shown, expanded = false) {
+  Player.stop();
+  if (shown) addMsg("user", esc(shown));
+  return ask(text, event);
 }
+async function send(text) {
+  Player.stop();
+  text = (text ?? $("#txt").value).trim();
+  if (!text) return null;
+  if (!VID) {
+    const v = plateInText(text); if (!v) { toast(t("choose_vehicle")); return null; }
+    await selectVehicle(v.vehicle_id);
+  }
+  LAST_Q = text; $("#txt").value = ""; autosize();
+  if (HYP) { HYP = false; $("#txt").placeholder = t("ask_placeholder"); return eventTurn("hypothesis", text, text); }
+  addMsg("user", esc(text));
+  return ask(text);
+}
+function autosize() {
+  const ta = $("#txt"); ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+  const has = !!ta.value.trim(); $("#send").classList.toggle("hidden", !has); $("#mic").classList.toggle("hidden", has);
+  layout();
+}
+function layout() { const c = $("#composer"); if (c) document.documentElement.style.setProperty("--composer-h", (c.classList.contains("hidden") ? 0 : c.offsetHeight) + "px"); }
 
 // ---------------------------------------------------------------- photo
-$("#photo").onchange = async e => {
+async function onPhoto(e) {
   const f = e.target.files[0]; if (!f) return;
-  const url = URL.createObjectURL(f);
-  addMsg("user", `<img src="${url}" style="max-width:220px;border-radius:8px"><br>${esc($("#txt").value)}`);
-  const fd = new FormData(); fd.append("file", f); fd.append("vehicle_id", VID); fd.append("text", $("#txt").value); $("#txt").value = "";
-  const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
+  const url = URL.createObjectURL(f), note = $("#txt").value.trim();
+  addMsg("user", `<img src="${url}" alt="" style="max-width:240px;width:100%;border-radius:12px;display:block">${note ? `<div style="margin-top:8px">${esc(note)}</div>` : ""}`);
+  const fd = new FormData(); fd.append("file", f); fd.append("vehicle_id", VID); fd.append("text", note); $("#txt").value = ""; autosize();
+  const th = skeleton();
   try {
-    const r = await api("/api/photo", {method: "POST", body: fd});
-    th.remove();
-    if (r.description) addMsg("bot", `<span class="muted">📷 ${esc(r.description)}</span>`);
+    const r = await api("/api/photo", {method: "POST", body: fd}); th.remove();
+    if (r.description) addMsg("bot", `<p class="muted">${esc(r.description)}</p>`);
     if (r.plate && r.plate !== VID) {
-      const d = addMsg("bot", `🚚 ${t("vehicle")}: <b>${esc(r.plate)}</b>? <button class="go">OK</button>`);
-      d.querySelector("button").onclick = () => { $("#vehicle").value = r.plate; selectVehicle(r.plate); };
+      const d = addMsg("bot", `<p>${t("vehicle")}: <b class="mono">${esc(r.plate)}</b>?</p><div class="card-actions"><button class="btn primary">${t("open_vehicle")}</button></div>`);
+      d.querySelector("button").onclick = () => selectVehicle(r.plate);
     }
     if (r.turn) renderTurn(r.turn);
-  } catch (err) { th.innerHTML = `<div class="b" style="color:var(--stop)">${esc(err.message)}</div>`; }
+  } catch (err) { th.remove(); errorMsg(err); }
   e.target.value = "";
-};
-
-// ---------------------------------------------------------------- voice in (Deepgram/whisper via server, browser fallback)
-let rec = null, chunks = [], stream = null, vadTimer = null, SERVER_TTS = true, SPEAK_SEQ = 0;
-async function startRec() {
-  stopSpeak();
-  if (rec) return stopRec();
-  try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); }
-  catch (e) { return browserStt(); }
-  chunks = []; rec = new MediaRecorder(stream);
-  rec.ondataavailable = e => chunks.push(e.data);
-  rec.onstop = async () => {
-    stream.getTracks().forEach(tr => tr.stop()); clearInterval(vadTimer);
-    $("#mic").classList.remove("rec"); $("#txt").placeholder = t("ask_placeholder");
-    const blob = new Blob(chunks, {type: rec.mimeType || "audio/webm"}); rec = null;
-    if (blob.size < 2000) return;
-    const fd = new FormData(); fd.append("audio", blob, "voice.webm"); fd.append("lang", ME.lang || "ru");
-    caption("🎤 " + t("recognizing") + "…");
-    try { const r = await api("/api/stt", {method: "POST", body: fd}); if (r.text) { caption("🎤 " + r.text, 5000); send(r.text); } else caption(""); }
-    catch (e) { if (e.status === 503) browserStt(); else addMsg("bot", esc(e.message)); }
-  };
-  rec.start(); $("#mic").classList.add("rec"); $("#txt").placeholder = t("listening"); caption("🎤 " + t("listening"));
-  // simple VAD: stop after 1.6 s of silence once speech was heard, max 20 s
-  const ctx = new AudioContext(), an = ctx.createAnalyser(); ctx.createMediaStreamSource(stream).connect(an);
-  const buf = new Uint8Array(an.fftSize); let heard = false, quiet = 0; const t0 = Date.now();
-  vadTimer = setInterval(() => {
-    an.getByteTimeDomainData(buf); let s = 0; for (const v of buf) s += (v - 128) ** 2; const rms = Math.sqrt(s / buf.length);
-    if (rms > 6) { heard = true; quiet = 0; } else if (heard) quiet += 100;
-    if ((heard && quiet > 1600) || Date.now() - t0 > 20000) { stopRec(); ctx.close(); }
-  }, 100);
-}
-function stopRec() { if (rec && rec.state !== "inactive") rec.stop(); }
-function browserStt() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) return alert("Voice input is not available");
-  const r = new SR(); r.lang = SPEECH_LANG[ME.lang] || "ru-RU"; r.interimResults = true;
-  r.onresult = e => { const res = e.results[e.results.length - 1]; caption("🎤 " + res[0].transcript, res.isFinal ? 5000 : 0); if (res.isFinal) send(res[0].transcript); };
-  caption("🎤 " + t("listening")); r.start();
-}
-$("#mic").onclick = startRec;
-
-// ---------------------------------------------------------------- live captions (item 16)
-const CC = { on: () => localStorage.getItem("cc") !== "0", timer: null };
-function caption(text, ms = 0) {
-  const el = $("#caption"); if (!el) return;
-  if (!text || !CC.on()) { el.classList.add("hidden"); return; }
-  el.textContent = text; el.classList.remove("hidden");
-  clearTimeout(CC.timer); if (ms) CC.timer = setTimeout(() => el.classList.add("hidden"), ms);
-}
-function sentencesOf(p) { return p.match(/[^.!?;:]+[.!?;:]*/g) || [p]; }
-function captionFollow(p, frac) {  // show the sentence at the given fraction of the spoken text
-  const ss = sentencesOf(p); let acc = 0; const pos = frac * p.length;
-  for (const x of ss) { acc += x.length; if (acc >= pos) return caption(x.trim()); }
 }
 
-// ---------------------------------------------------------------- voice out
-function plain(text) { return String(text).replace(/\[[^\]]*\b(S|X)\d+\b[^\]]*\]/g, "").replace(/[*#•]/g, "").replace(/\s+/g, " ").slice(0, 900); }
-async function speak(text) {
-  if (!ME || !A11Y.ttsOn() || !text) return;
-  A11Y.stop();
-  const p = plain(text), token = ++SPEAK_SEQ;
-  const after = () => { if (token === SPEAK_SEQ && $("#s_hands").checked) setTimeout(startRec, 300); };
-  const al = ALANG();
-  if (al === "ru" && SERVER_TTS) {  // local Silero on the stand; 404 -> browser speech from now on
-    try { const r = await fetch("/api/tts", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: p})});
-      if (token !== SPEAK_SEQ) return;  // a newer message or a tap arrived while synthesizing
-      if (r.ok) { const a = new Audio(URL.createObjectURL(await r.blob())); A11Y.audio = a;
-        a.ontimeupdate = () => { if (a.duration) captionFollow(p, a.currentTime / a.duration); };
-        a.onended = () => { caption(""); after(); }; a.play(); return; } SERVER_TTS = false; } catch (_) { SERVER_TTS = false; }
+// ---------------------------------------------------------------- citation viewer: extract → full section (collapsed) → page links and image
+function hl(txt, q) {
+  const words = [...new Set((q || "").toLowerCase().match(/[\p{L}\d]{5,}/gu) || [])].slice(0, 12);
+  if (!words.length) return txt;
+  const re = new RegExp(`(${words.map(w => w.slice(0, Math.max(5, w.length - 2)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[\\p{L}]*`, "giu");
+  return txt.replace(re, m => `<mark>${m}</mark>`);
+}
+async function openCitation(doc, page, q) {
+  Player.stop();
+  $("#viewer").classList.remove("hidden"); document.body.style.overflow = "hidden";
+  $("#mTitle").textContent = `${t("page")} ${page}`; $("#mSub").textContent = ""; $("#mPdf").classList.add("hidden");
+  $("#mBody").innerHTML = `<div class="extract skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div>`;
+  try {
+    const s = await api(`/api/section/${encodeURIComponent(doc)}/${page}?q=${encodeURIComponent(q || LAST_Q)}`);
+    $("#mTitle").textContent = s.label || `${t("page")} ${page}`; $("#mSub").textContent = s.full_title;
+    if (s.pdf) { $("#mPdf").href = `/manuals/${encodeURIComponent(doc)}.pdf#page=${page}`; $("#mPdf").classList.remove("hidden"); }
+    const pages = s.pages.map(p => p.page);
+    const link = n => s.pdf ? `<a target="_blank" href="/manuals/${encodeURIComponent(doc)}.pdf#page=${n}" class="${n === page ? "on" : ""}">${t("page_short")} ${n} ${icon("external-link", 14)}</a>`
+      : `<button data-img="${n}" class="${n === page ? "on" : ""}">${t("page_short")} ${n}</button>`;
+    $("#mBody").innerHTML = (s.extra ? `<p class="small muted">* ${t("extra_src")}</p>` : "") +
+      `<div class="extract" id="mExtract"><div class="h">${t("extract")}</div><div class="skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div></div>` +
+      `<div class="label">${t("pages")}</div><div class="pages">${pages.map(link).join("")}</div>` +
+      `<details class="sec"><summary>${icon("chevron-right", 18)}<span>${t("full_section")}, ${t("page_short")} ${esc(s.span)}</span></summary><div class="in">` +
+      s.pages.map(p => `<div class="pagehead">${t("page")} ${p.page}</div><div class="pagetext">${hl(esc(p.text), q)}</div>`).join("") + `</div></details>` +
+      (s.has_image ? `<details class="sec" id="mImgBox"><summary>${icon("chevron-right", 18)}<span id="mImgT">${t("page_image")} ${page}</span></summary><div class="in"><img id="mImg" class="pageimg" loading="lazy" src="/page/${encodeURIComponent(doc)}/${page}.png" alt="${esc(t("page"))} ${page}"></div></details>` : "");
+    $("#mBody").querySelectorAll("[data-img]").forEach(c => c.onclick = () => { const n = c.dataset.img;
+      if ($("#mImg")) { $("#mImg").src = `/page/${encodeURIComponent(doc)}/${n}.png`; $("#mImgBox").open = true; $("#mImgT").textContent = `${t("page_image")} ${n}`; } });
+    api("/api/extract", {json: {doc_id: doc, page, q, question: LAST_Q}}).then(x => {
+      const box = $("#mExtract"); if (!box) return;
+      box.innerHTML = `<div class="h">${t("extract")}</div>` + (x.ok ? md(x.text) : `<p class="muted">${t("extract_na")}</p>`);
+    }).catch(() => { const box = $("#mExtract"); if (box) box.innerHTML = `<div class="h">${t("extract")}</div><p class="muted">${t("extract_na")}</p>`; });
+  } catch (err) { $("#mBody").innerHTML = `<p class="err">${esc(friendlyError(err))}</p>`; }
+}
+function closeViewer() { $("#viewer").classList.add("hidden"); document.body.style.overflow = ""; }
+
+// ---------------------------------------------------------------- print / PDF of the current procedure
+async function printTurn(turn) {
+  const w = window.open("", "_blank"); if (!w) return toast(t("popup_blocked"));
+  w.document.write(`<p style="font-family:sans-serif">${esc(t("thinking"))}</p>`);
+  const veh = VEH ? `${VEH.vehicle.vehicle_id}, ${VEH.vehicle.model || ""}, ${VEH.vehicle.engine_model}` : "";
+  const labor = (turn.cards || []).flatMap(c => c.labor || []);
+  const lab = labor.length ? `<p>${t("labor")}: ` + (labor.some(l => l.norm) ? labor.filter(l => l.norm).map(l => `${esc(l.norm)} (${t("page_short")} ${l.page})`).join("; ") : t("labor_na")) + `</p>` : "";
+  const seen = new Set(), pages = [];
+  for (const s of (turn.sources || [])) { const k = s.doc_id + "#" + s.page; if (seen.has(k) || pages.length >= 6) continue; seen.add(k);
+    let info = {}; try { info = await api(`/api/page/${encodeURIComponent(s.doc_id)}/${s.page}`); } catch (e) {}
+    pages.push(`<section class="pg"><h3>${esc(info.full_title || s.document)}, ${t("page_short")} ${s.page}</h3>` +
+      (info.has_image ? `<img src="/page/${encodeURIComponent(s.doc_id)}/${s.page}.png">` : `<pre>${esc((info.text || "").slice(0, 4000))}</pre>`) + `</section>`); }
+  const css = `body{font:12pt/1.5 Inter,system-ui,sans-serif;color:#111;margin:1.6cm}h1{font-size:16pt;margin:0 0 4pt}h3{font-size:11pt;margin:0 0 6pt}
+    .cite{font-size:.8em;color:#444;border:0;background:none;padding:0}.cite:before{content:"["}.cite:after{content:"]"}.keyfacts{border:1px solid #bbb;border-radius:6px;padding:6pt 10pt;margin:10pt 0}
+    .keyfacts .h{font-weight:600}.keyfacts .f{margin:4pt 0}.ic{display:none}.sources{display:none}img{max-width:100%;border:1px solid #ccc}pre{white-space:pre-wrap;font-size:9.5pt;border:1px solid #ccc;padding:8pt}
+    .pg{page-break-before:always}.muted{color:#555;font-size:.9em}.noprint{font:600 11pt Inter,system-ui,sans-serif;background:#2f6fe0;color:#fff;border:0;border-radius:8px;padding:10px 18px;cursor:pointer;margin-bottom:12pt}@media print{.noprint{display:none}}`;
+  w.document.open();
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(t("app_title"))}, ${esc(veh)}</title><link rel="stylesheet" href="/static/fonts/fonts.css"><style>${css}</style></head><body>
+    <p class="noprint"><button onclick="print()">${t("print")}</button></p><h1>${esc(t("app_title"))}</h1><p class="muted">${esc(veh)}, ${new Date().toLocaleString()}, ${esc((ME && ME.name) || "")}</p>
+    ${factsHtml(turn.facts)}<div>${md(turn.text, turn.sources)}</div>${lab}<p class="muted">${t("print_note")}</p>${pages.join("")}</body></html>`);
+  w.document.close();
+  await Promise.all([...w.document.images].map(i => i.complete ? 1 : new Promise(r => { i.onload = i.onerror = r; })));
+  w.focus(); w.print();
+}
+
+// ---------------------------------------------------------------- voice dialog mode: listen → VAD → STT → answer → speak → listen again; barge-in stops speech
+const VOICE = {on: false, state: "idle", stream: null, ctx: null, an: null, rec: null, chunks: [], raf: 0, heard: false, quietMs: 0, speechMs: 0, t0: 0, last: 0};
+const V_ICON = {listening: "mic", transcribing: "loader-circle", thinking: "loader-circle", speaking: "square", idle: "mic"};
+function vSet(state, hint = "") {
+  VOICE.state = state;
+  $("#vOrb").dataset.state = state;
+  $("#vOrbIc").innerHTML = icon(V_ICON[state], 56, state === "thinking" || state === "transcribing" ? "spin" : "");
+  $("#vState").textContent = t("v_" + state);
+  $("#vHint").textContent = hint || t("vh_" + state);
+}
+async function voiceOpen() {
+  if (!VID) return toast(t("choose_vehicle"));
+  Player.stop();
+  $("#voice").classList.remove("hidden"); $("#vSaid").textContent = ""; $("#vReply").textContent = ""; VOICE.on = true;
+  try {
+    VOICE.stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}});
+  } catch (e) { vSet("idle", t("v_no_mic")); return; }
+  VOICE.ctx = new (window.AudioContext || window.webkitAudioContext)();
+  VOICE.an = VOICE.ctx.createAnalyser(); VOICE.an.fftSize = 1024;
+  VOICE.ctx.createMediaStreamSource(VOICE.stream).connect(VOICE.an);
+  meter(); vListen();
+}
+function rms() { const buf = new Uint8Array(VOICE.an.fftSize); VOICE.an.getByteTimeDomainData(buf); let s = 0; for (const v of buf) s += (v - 128) ** 2; return Math.sqrt(s / buf.length); }
+function meter() {
+  if (!VOICE.on) return;
+  const now = performance.now(), dt = VOICE.last ? now - VOICE.last : 16; VOICE.last = now;
+  const r = rms(); $("#vOrb").style.setProperty("--lvl", Math.min(1, r / 30).toFixed(2));
+  if (VOICE.state === "listening") {
+    if (r > 7) { VOICE.speechMs += dt; if (VOICE.speechMs > 150) VOICE.heard = true; VOICE.quietMs = 0; } else if (VOICE.heard) VOICE.quietMs += dt;
+    const long = now - VOICE.t0;
+    if ((VOICE.heard && VOICE.quietMs > 1300) || long > 30000) vStopRec();
+    else if (!VOICE.heard && long > 12000) { vSet("idle", t("v_tap_to_talk")); stopRecorder(); }
+  } else if (VOICE.state === "speaking") {  // barge-in: the mechanic starts talking over the answer
+    if (r > 16) { VOICE.speechMs += dt; if (VOICE.speechMs > 350) { Player.stop(); vListen(); } } else VOICE.speechMs = 0;
   }
-  if (!window.speechSynthesis) return;
-  const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[al] || "ru-RU";
-  u.onboundary = e => captionFollow(p, (e.charIndex || 0) / p.length); captionFollow(p, 0);
-  u.onend = () => { caption(""); after(); }; speechSynthesis.speak(u);
+  VOICE.raf = requestAnimationFrame(meter);
 }
-const ALANG = () => (ME && ME.answer_lang) || (ME && ME.lang) || "ru";  // item 20: answers may use another language
-function stopSpeak() { SPEAK_SEQ++; A11Y.stop(); caption(""); }
-$("#chat").addEventListener("click", stopSpeak);  // tap on the chat stops reading
+function vListen() {
+  if (!VOICE.on || !VOICE.stream) return;
+  Player.stop();
+  VOICE.chunks = []; VOICE.heard = false; VOICE.quietMs = 0; VOICE.speechMs = 0; VOICE.t0 = performance.now();
+  VOICE.rec = new MediaRecorder(VOICE.stream);
+  VOICE.rec.ondataavailable = e => e.data.size && VOICE.chunks.push(e.data);
+  VOICE.rec.onstop = vOnRecorded;
+  VOICE.rec.start(250); vSet("listening");
+}
+function stopRecorder() { if (VOICE.rec && VOICE.rec.state !== "inactive") { VOICE.rec.onstop = null; VOICE.rec.stop(); } VOICE.rec = null; }
+function vStopRec() { if (VOICE.rec && VOICE.rec.state !== "inactive") { vSet("transcribing"); VOICE.rec.stop(); } }
+async function vOnRecorded() {
+  const blob = new Blob(VOICE.chunks, {type: (VOICE.rec && VOICE.rec.mimeType) || "audio/webm"}); VOICE.rec = null;
+  if (!VOICE.on) return;
+  if (blob.size < 1500) return vListen();
+  const fd = new FormData(); fd.append("audio", blob, "voice.webm"); fd.append("lang", ME.lang || "ru");
+  let text = "";
+  try { text = ((await api("/api/stt", {method: "POST", body: fd})).text || "").trim(); }
+  catch (e) { if (!VOICE.on) return; vSet("idle", friendlyError(e)); return; }
+  if (!VOICE.on) return;
+  if (!text) { vSet("listening", t("v_didnt_hear")); return vListen(); }
+  $("#vSaid").textContent = text; $("#vReply").textContent = "";
+  vSet("thinking");
+  const turn = await send(text);
+  if (!VOICE.on) return;
+  const reply = turn && (turn.text || (turn.cards || []).map(c => c.light_text || "").join(" "));
+  if (!reply) { vSet("idle", t("v_no_answer")); return; }
+  $("#vReply").textContent = plain(reply).slice(0, 400) + (plain(reply).length > 400 ? "…" : "");
+  if (!A11Y.voiceSpeaks()) return vListen();
+  vSet("speaking"); VOICE.speechMs = 0;
+  Player.play(reply, null, {onend: () => { if (VOICE.on && VOICE.state === "speaking") vListen(); }});
+}
+function voiceClose() {
+  VOICE.on = false; cancelAnimationFrame(VOICE.raf); stopRecorder(); Player.stop();
+  try { VOICE.stream && VOICE.stream.getTracks().forEach(tr => tr.stop()); } catch (_) {}
+  try { VOICE.ctx && VOICE.ctx.close(); } catch (_) {}
+  VOICE.stream = VOICE.ctx = VOICE.an = null; VOICE.last = 0;
+  $("#voice").classList.add("hidden");
+}
+function orbTap() {
+  if (VOICE.state === "listening") vStopRec();
+  else if (VOICE.state === "speaking") { Player.stop(); vListen(); }
+  else if (VOICE.state === "idle") vListen();
+}
 
-// ---------------------------------------------------------------- settings / login
-function applyProfile() {
-  langOptions($("#s_lang"), ME.lang);
-  langOptions($("#s_alang"), ME.answer_lang || "");
-  $("#s_alang").insertAdjacentHTML("afterbegin", `<option value="" ${ME.answer_lang ? "" : "selected"}>${t("same_as_ui")}</option>`);
-  document.querySelectorAll("input[name=s_exp]").forEach(r => r.checked = r.value === ME.experience);
-  document.querySelectorAll("input[name=s_detail]").forEach(r => r.checked = r.value === (ME.detail || "brief"));
-  if (localStorage.getItem("tts") === null) A11Y.setTts(!!ME.voice_out);  // first run: take the old profile flag
-  applyI18n();
+// ---------------------------------------------------------------- sheets
+function sheet(title, body, init) {
+  closeSheet();
+  $("#layer").innerHTML = `<div class="scrim" id="scrim"></div><div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}"><div class="grab"></div><div class="sh"><h2>${esc(title)}</h2><button class="icon-btn" id="shClose" aria-label="${esc(t("close"))}">${icon("x")}</button></div><div class="sb">${body}</div></div>`;
+  $("#scrim").onclick = closeSheet; $("#shClose").onclick = closeSheet;
+  init && init($("#layer .sheet"));
 }
-async function saveProfile(patch) { ME = (await api("/api/me", {json: patch})).user; applyProfile(); }
-$("#btnSettings").onclick = () => $("#settings").classList.toggle("hidden");
-$("#s_lang").onchange = e => saveProfile({lang: e.target.value}).then(loadVehicles);
-$("#s_alang").onchange = e => saveProfile({answer_lang: e.target.value});
-document.querySelectorAll("input[name=s_exp]").forEach(r => r.onchange = () => saveProfile({experience: r.value}));
-document.querySelectorAll("input[name=s_detail]").forEach(r => r.onchange = () => saveProfile({detail: r.value}));
-$("#s_logout").onclick = async () => { await api("/api/logout", {method: "POST"}); location.reload(); };
-$("#s_delete").onclick = async () => { if (confirm("Удалить ваши данные и историю запросов?")) { await api("/api/me", {method: "DELETE"}); location.reload(); } };
-$("#btnDiag").onclick = diagnose;
+function closeSheet() { $("#layer").innerHTML = ""; }
+const short = s => String(s).split(/\s[—–-]\s|\s\(/)[0];
+function segHtml(id, opts, cur) { return `<div class="seg" id="${id}">${opts.map(([v, l]) => `<button data-v="${v}" class="${v === cur ? "on" : ""}">${esc(l)}</button>`).join("")}</div>`; }
+function bindSeg(root, id, fn) { root.querySelectorAll(`#${id} button`).forEach(b => b.onclick = () => { root.querySelectorAll(`#${id} button`).forEach(x => x.classList.toggle("on", x === b)); fn(b.dataset.v); }); }
+function settingsSheet() {
+  sheet(t("settings"),
+    `<div class="field"><label class="label" for="s_lang">${t("language")}</label><select id="s_lang" class="input"></select></div>` +
+    `<div class="field"><label class="label" for="s_alang">${t("answer_lang")}</label><select id="s_alang" class="input"></select></div>` +
+    `<div class="field"><span class="label">${t("level")}</span>${segHtml("s_exp", [["novice", short(t("exp_novice"))], ["experienced", short(t("exp_expert"))], ["expert", short(t("exp_pro"))]], ME.experience || "experienced")}</div>` +
+    `<div class="field"><span class="label">${t("detail")}</span>${segHtml("s_detail", [["brief", t("detail_brief")], ["detailed", t("detail_detailed")]], ME.detail || "brief")}</div>` +
+    `<div class="field"><span class="label">${t("font_size")}</span>${segHtml("s_fs", [["n", "A"], ["l", "A+"], ["xl", "A++"]], A11Y.size())}</div>` +
+    `<div class="field"><span class="label">${t("theme")}</span>${segHtml("s_theme", [["dark", t("theme_dark")], ["light", t("theme_light")], ["contrast", t("theme_contrast")]], A11Y.theme())}</div>` +
+    `<label class="switch"><span>${t("voice_speaks")}</span><input type="checkbox" id="s_vtts" ${A11Y.voiceSpeaks() ? "checked" : ""}></label>` +
+    `<label class="switch"><span>${t("captions")}</span><input type="checkbox" id="s_cc" ${A11Y.captions() ? "checked" : ""}></label>` +
+    `<div class="sep"></div><p class="small muted">${t("privacy_note")} <a href="/privacy" target="_blank">${t("policy")}</a></p>` +
+    `<div class="card-actions"><button class="btn ghost" id="s_logout">${icon("log-out", 18)}<span>${t("logout")}</span></button><button class="btn danger" id="s_delete">${t("delete_data")}</button></div>`, sh => {
+    langOptions(sh.querySelector("#s_lang"), ME.lang); langOptions(sh.querySelector("#s_alang"), ME.answer_lang || "", true);
+    sh.querySelector("#s_lang").onchange = async e => { await saveProfile({lang: e.target.value}); settingsSheet(); if (VID) loadChips(); else showEmpty(); };
+    sh.querySelector("#s_alang").onchange = e => saveProfile({answer_lang: e.target.value});
+    bindSeg(sh, "s_exp", v => saveProfile({experience: v}));
+    bindSeg(sh, "s_detail", v => saveProfile({detail: v}));
+    bindSeg(sh, "s_fs", v => { A11Y.setSize(v); layout(); });
+    bindSeg(sh, "s_theme", v => A11Y.setTheme(v));
+    sh.querySelector("#s_vtts").onchange = e => A11Y.setVoiceSpeaks(e.target.checked);
+    sh.querySelector("#s_cc").onchange = e => A11Y.setCaptions(e.target.checked);
+    sh.querySelector("#s_logout").onclick = async () => { await api("/api/logout", {method: "POST"}); location.reload(); };
+    sh.querySelector("#s_delete").onclick = async () => { if (confirm(t("delete_confirm"))) { await api("/api/me", {method: "DELETE"}); location.reload(); } };
+  });
+}
+async function saveProfile(patch) { try { ME = (await api("/api/me", {json: patch})).user; applyI18n(); } catch (e) { toast(friendlyError(e)); } }
+
+// ---------------------------------------------------------------- wiring
+document.addEventListener("click", e => {
+  const ch = e.target.closest("[data-doc][data-page]");
+  if (ch) { e.preventDefault(); openCitation(ch.dataset.doc, +ch.dataset.page, ch.dataset.q || ""); }
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("#viewer").classList.contains("hidden")) closeViewer(); else if ($("#layer").innerHTML) closeSheet(); else if (VOICE.on) voiceClose(); } });
+$("#mClose").onclick = closeViewer;
+$("#btnSettings").onclick = settingsSheet;
+$("#btnMenu").onclick = vehicleMenu;
+$("#vehBtn").onclick = pickVehicleSheet;
 $("#send").onclick = () => send();
+$("#txt").addEventListener("input", autosize);
 $("#txt").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
+$("#photo").onchange = onPhoto;
+$("#mic").onclick = voiceOpen;
+$("#vClose").onclick = voiceClose; $("#vExit").onclick = voiceClose; $("#vOrb").onclick = orbTap;
+window.addEventListener("resize", layout);
 
+let ROLE = "mechanic";
+$$("#l_role button").forEach(b => b.onclick = () => { ROLE = b.dataset.v; $$("#l_role button").forEach(x => x.classList.toggle("on", x === b)); });
 $("#l_go").onclick = async () => {
-  const body = {name: $("#l_name").value || "—", role: document.querySelector("input[name=role]:checked").value, lang: $("#l_lang").value,
-    experience: document.querySelector("input[name=exp]:checked").value, consent: $("#l_consent").checked};
-  if (!body.consent) return alert(t("consent"));
-  try { ME = (await api("/api/login", {json: body})).user; } catch (e) { return alert(e.message); }
+  const body = {name: $("#l_name").value.trim() || "—", role: ROLE, lang: $("#l_lang").value, experience: "experienced", consent: $("#l_consent").checked};
+  if (!body.consent) return toast(t("consent_needed"));
+  try { ME = (await api("/api/login", {json: body})).user; } catch (e) { return toast(friendlyError(e)); }
   if (ME.role === "manager") location.href = "/manager"; else start();
 };
-
 async function start() {
   $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
-  applyProfile(); await loadVehicles();
+  applyI18n(); await loadVehicles(); autosize();
 }
-
 (async () => {
+  hydrateIcons();
   I18N = await (await fetch("/static/i18n.json")).json();
-  try { ME = (await api("/api/me")).user; start(); }
+  try { ME = (await api("/api/me")).user; if (ME.role === "manager" && !location.search.includes("mechanic")) { /* chief can use the mechanic view too */ } start(); }
   catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = applyI18n; applyI18n(); $("#login").classList.remove("hidden"); }
 })();
-
-// captions toggle (persisted; on by default)
-(() => { const cb = document.getElementById("s_cc"); if (!cb) return; cb.checked = CC.on();
-  cb.onchange = () => { localStorage.setItem("cc", cb.checked ? "1" : "0"); if (!cb.checked) caption(""); }; })();

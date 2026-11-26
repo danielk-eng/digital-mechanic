@@ -1,168 +1,173 @@
 "use strict";
 const $ = s => document.querySelector(s);
-const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let I18N = {}, ME = null, FLEET = null, FILTER = null;
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+let I18N = {}, ME = null, FLEET = null, FILTER = null, STATUS = null;
 const t = k => (I18N[(ME && ME.lang) || "ru"] || I18N.ru)[k] || I18N.ru[k] || k;
-async function api(p, o = {}) { if (o.json) { o.method = "POST"; o.headers = {"Content-Type": "application/json"}; o.body = JSON.stringify(o.json); }
-  const r = await fetch(p, {credentials: "same-origin", ...o}); if (r.status === 401 || r.status === 403) { location.href = "/"; throw new Error("auth"); } if (!r.ok) throw new Error(await r.text()); return r.json(); }
-const ST = {ready: "ready", attention: "attention", quarantine: "quarantine"};
-const badge = (st, rep) => `<span class="badge b-${st}">${t(st)}</span>` + (rep ? ` <span class="badge b-repair">🛠 ${t("in_repair")}</span>` : "");
-const fmt = ts => new Date(ts * 1000).toLocaleString("ru-RU", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"});
-
-function chart(checks) {
-  const W = 520, H = 160, n = checks.length; if (!n) return "";
-  const x = i => 40 + i * (W - 60) / Math.max(n - 1, 1), y = v => H - 25 - v * (H - 45);
-  const col = s => s === "anomaly" ? "#e5484d" : s === "normal" ? "#2fbf71" : "#3d8bfd";
-  const pts = checks.map((c, i) => c.anomaly_score == null ? null : `${x(i)},${y(c.anomaly_score)}`).filter(Boolean).join(" ");
-  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;background:#11181e;border-radius:10px">
-    <line x1="35" x2="${W - 10}" y1="${y(0.5)}" y2="${y(0.5)}" stroke="#666" stroke-dasharray="4"/><text x="4" y="${y(0.5) + 4}" fill="#888" font-size="11">0.5</text>
-    <text x="4" y="${y(1) + 4}" fill="#888" font-size="11">1.0</text><text x="4" y="${y(0) + 4}" fill="#888" font-size="11">0</text>
-    <polyline fill="none" stroke="#ffb020" stroke-width="2.5" points="${pts}"/>` +
-    checks.map((c, i) => `<circle cx="${x(i)}" cy="${c.anomaly_score == null ? y(0) : y(c.anomaly_score)}" r="6" fill="${col(c.status)}"><title>${c.session_id}: ${c.status} ${c.anomaly_title || ""} ${c.anomaly_score ?? "сбой записи"}</title></circle>
-    <text x="${x(i) - 18}" y="${H - 6}" fill="#aaa" font-size="11">${(c.checked_at || "").slice(5, 10)}</text>`).join("") + "</svg>";
+async function api(p, o = {}) {
+  if (o.json) { o.method = "POST"; o.headers = {"Content-Type": "application/json"}; o.body = JSON.stringify(o.json); }
+  const r = await fetch(p, {credentials: "same-origin", ...o});
+  if (r.status === 401 || r.status === 403) { location.href = "/"; throw new Error("auth"); }
+  if (!r.ok) throw new Error(await r.text()); return r.json();
 }
+const fmt = ts => new Date(ts * 1000).toLocaleString("ru-RU", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"});
+const vSt = v => v.in_repair ? "repair" : v.status;
+const pill = v => `<span class="pill ${vSt(v)}">${esc(v.in_repair ? t("in_repair") : t(v.status))}</span>`;
+const URG = {high: "quarantine", medium: "attention", low: "ready"};
 
 function spark(scores) {
   if (!scores || scores.length < 2) return "";
-  const W = 90, H = 24, n = scores.length;
-  return `<svg width="${W}" height="${H}"><polyline fill="none" stroke="#ffb020" stroke-width="2" points="${scores.map((s, i) => `${4 + i * (W - 8) / (n - 1)},${H - 3 - s * (H - 6)}`).join(" ")}"/></svg>`;
+  const W = 96, H = 28, n = scores.length;
+  return `<svg width="${W}" height="${H}" aria-hidden="true"><polyline fill="none" stroke="var(--text-3)" stroke-width="1.5" points="${scores.map((s, i) => `${4 + i * (W - 8) / (n - 1)},${H - 4 - s * (H - 8)}`).join(" ")}"/>` +
+    `<circle cx="${W - 4}" cy="${H - 4 - scores[n - 1] * (H - 8)}" r="3" fill="${scores[n - 1] >= 0.8 ? "var(--danger)" : scores[n - 1] >= 0.5 ? "var(--warn)" : "var(--ok)"}"/></svg>`;
 }
 
 async function loadFleet() {
   FLEET = await api("/api/fleet");
-  const c = FLEET.counts, o = FLEET.ops || {};
-  // item 21: operational picture first — in repair / waiting for approval / on the line / idle (quarantine, no repair started)
+  const o = FLEET.ops || {}, c = FLEET.counts;
   const idleMax = Math.max(0, ...FLEET.vehicles.filter(v => v.ops === "idle").map(v => v.idle_days || 0));
-  $("#opsTiles").innerHTML = [["op_in_repair", "🛠", o.in_repair], ["op_awaiting", "⏳", o.awaiting], ["op_on_line", "🚚", o.on_line], ["op_idle", "⛔", o.idle, idleMax ? `${t("idle_max")} ${idleMax} ${t("days")}` : ""]].map(([k, ic, n, sub]) =>
-    `<div class="tile ${FILTER === k ? "on" : ""}" data-k="${k}"><div class="muted">${ic} ${t(k)}</div><div class="n">${n ?? 0}</div>${sub ? `<div class="muted">${sub}</div>` : ""}</div>`).join("");
-  $("#tiles").innerHTML = [["ready", "🟢"], ["attention", "🟡"], ["quarantine", "🔴"], ["in_repair", "🛠"], ["tickets", "📝"]].map(([k, ic]) =>
-    `<div class="tile ${FILTER === k ? "on" : ""}" data-k="${k}"><div class="muted">${ic} ${t(k)}</div><div class="n">${c[k]}</div></div>`).join("");
-  document.querySelectorAll(".tile").forEach(el => el.onclick = () => { FILTER = FILTER === el.dataset.k ? null : el.dataset.k; if (el.dataset.k === "tickets") return tab("tickets"); tab("fleet"); renderFleet(); loadFleetTiles(); });
-  renderFleet();
+  $("#kpis").innerHTML = [["op_in_repair", o.in_repair, ""], ["op_awaiting", o.awaiting, ""], ["op_on_line", o.on_line, ""], ["op_idle", o.idle, idleMax ? `${t("idle_max")} ${idleMax} ${t("days")}` : ""]]
+    .map(([k, n, s]) => `<button class="kpi ${FILTER === k ? "on" : ""}" data-k="${k}"><div class="l">${t(k)}</div><div class="n">${n ?? 0}</div>${s ? `<div class="s">${s}</div>` : `<div class="s">&nbsp;</div>`}</button>`).join("");
+  $$(".kpi").forEach(el => el.onclick = () => { FILTER = FILTER === el.dataset.k ? null : el.dataset.k; tab("fleet"); loadFleetUI(); });
+  window.__counts = c;
+  if (!$("#tab-fleet").classList.contains("hidden")) renderFleet();
 }
-function loadFleetTiles() { document.querySelectorAll(".tile").forEach(el => el.classList.toggle("on", el.dataset.k === FILTER)); }
-
+function loadFleetUI() { $$(".kpi").forEach(el => el.classList.toggle("on", el.dataset.k === FILTER)); renderFleet(); }
 function renderFleet() {
+  const c = FLEET.counts;
   const OPF = {op_in_repair: v => v.ops === "in_repair", op_awaiting: v => v.awaiting, op_on_line: v => v.ops === "on_line", op_idle: v => v.ops === "idle"};
-  const rows = FLEET.vehicles.filter(v => !FILTER || (OPF[FILTER] ? OPF[FILTER](v) : FILTER === "in_repair" ? v.in_repair : v.status === FILTER));
-  $("#tab-fleet").innerHTML = `<div class="muted">${rows.length} / ${FLEET.counts.total} · сортировка: карантин → внимание → норма, затем по оценке отклонения</div><table><tr><th>ТС</th><th>Модель / двигатель</th><th>Статус</th><th>Последняя проверка</th><th>Динамика</th><th>Приоритет</th><th>Заявки</th></tr>` +
-    rows.map(v => { const l = v.last || {}; return `<tr class="click" data-v="${v.vehicle_id}"><td><b>${esc(v.vehicle_id)}</b><br><span class="muted">${esc(v.garage_no)}</span></td><td>${esc(v.model)}<br><span class="muted">${esc(v.engine_model)}</span></td><td>${badge(v.status, v.in_repair)}${v.awaiting ? `<br><span class="muted">⏳ ${t("op_awaiting")}</span>` : ""}${v.idle_days != null ? `<br><span class="muted">⛔ ${t("op_idle")} ${v.idle_days} ${t("days")}</span>` : ""}</td>
-      <td>${esc(l.session_id)} · ${esc((l.checked_at || "").slice(0, 10))}<br><span class="muted">${l.status === "anomaly" ? esc(l.anomaly_type + " " + l.anomaly_title) + " · " + l.anomaly_score : l.status === "check_failed" ? "сбой записи — повторить" : "норма"}</span></td>
-      <td>${spark(v.scores)}</td><td>${v.urgency ? `<span class="badge b-${v.urgency === "high" ? "quarantine" : v.urgency === "medium" ? "attention" : "ready"}">${t("urg_" + v.urgency)}</span>` : ""}</td><td>${v.tickets || ""}</td></tr>`; }).join("") + "</table>";
-  document.querySelectorAll("tr[data-v]").forEach(tr => tr.onclick = () => openVehicle(tr.dataset.v));
+  const rows = FLEET.vehicles.filter(v => (!FILTER || OPF[FILTER](v)) && (!STATUS || v.status === STATUS));
+  const fchip = (k, n) => `<button class="fchip ${STATUS === k ? "on" : ""}" data-s="${k}">${t(k)} <span class="c">${n}</span></button>`;
+  $("#tab-fleet").innerHTML = `<div class="filters"><button class="fchip ${!STATUS ? "on" : ""}" data-s="">${t("all")} <span class="c">${c.total}</span></button>${fchip("quarantine", c.quarantine)}${fchip("attention", c.attention)}${fchip("ready", c.ready)}</div>` +
+    `<div class="panel"><table class="tbl"><thead><tr><th>${t("vehicle")}</th><th class="hide-m">${t("model_engine")}</th><th>${t("status")}</th><th class="hide-m">${t("last_check")}</th><th class="hide-m">${t("trend")}</th><th>${t("priority")}</th></tr></thead><tbody>` +
+    (rows.length ? rows.map(v => { const l = v.last || {};
+      const lastTxt = l.status === "anomaly" ? `${esc(l.anomaly_type)} ${esc(l.anomaly_title)}` : l.status === "check_failed" ? t("check_failed_short") : t("status_normal");
+      const extra = [v.awaiting ? t("op_awaiting") : "", v.idle_days != null ? `${t("op_idle")} ${v.idle_days} ${t("days")}` : ""].filter(Boolean).join(", ");
+      return `<tr class="click" data-v="${esc(v.vehicle_id)}"><td><b class="mono">${esc(v.vehicle_id)}</b><div class="sub">${esc(v.garage_no)}</div></td>` +
+        `<td class="hide-m">${esc(v.model)}<div class="sub">${esc(v.engine_model)}</div></td><td>${pill(v)}${extra ? `<div class="sub" style="margin-top:4px">${extra}</div>` : ""}</td>` +
+        `<td class="hide-m">${lastTxt}<div class="sub">${esc((l.checked_at || "").slice(0, 10))}${l.anomaly_score != null ? `, ${l.anomaly_score}` : ""}</div></td><td class="hide-m">${spark(v.scores)}</td>` +
+        `<td>${v.urgency ? `<span class="pill ${URG[v.urgency]}">${t("urg_" + v.urgency)}</span>` : ""}</td></tr>`; }).join("")
+      : `<tr><td colspan="6" class="muted">${t("no_vehicles")}</td></tr>`) + `</tbody></table></div>`;
+  $$("#tab-fleet [data-s]").forEach(b => b.onclick = () => { STATUS = b.dataset.s || null; renderFleet(); });
+  $$("#tab-fleet tr[data-v]").forEach(tr => tr.onclick = () => openVehicle(tr.dataset.v));
 }
 
+function side(title, html) {
+  $("#layer").innerHTML = `<div class="scrim" id="scrim"></div><aside class="side" role="dialog" aria-modal="true"><div class="vhd"><b>${esc(title)}</b><button class="icon-btn" id="sClose" aria-label="close">${icon("x")}</button></div><div class="vbd">${html}</div></aside>`;
+  $("#scrim").onclick = closeSide; $("#sClose").onclick = closeSide;
+}
+function closeSide() { $("#layer").innerHTML = ""; }
 async function openVehicle(vid) {
+  side(vid, `<div class="skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div>`);
   const h = await api(`/api/fleet/${encodeURIComponent(vid)}`);
   const v = h.vehicle, row = FLEET.vehicles.find(r => r.vehicle_id === vid) || {};
-  $("#dTitle").textContent = `${v.vehicle_id} · ${v.model && v.model.startsWith(v.make) ? v.model : (v.make + " " + (v.model || ""))} · ${v.engine_model}`;
-  let b = `<div class="card">${badge(row.status, row.in_repair)} · тренд anomaly_score: <b>${esc(h.anomaly_score_trend)}</b>${row.urgency_basis && row.urgency_basis.length ? `<div class="muted">Приоритет ${row.urgency}: ${row.urgency_basis.map(esc).join("; ")}</div>` : ""}</div>`;
-  try { const tl = await api(`/api/history/${encodeURIComponent(vid)}`); b += arrivalCard(tl, t) + `<div class="card"><b>${t("history")}</b>${renderTimeline(tl)}</div>`; }
-  catch (_) { b += `<div class="card"><b>${t("history")}</b><br>${chart(h.checks)}</div>`; }
-  b += `<div class="card"><b>${t("tickets")}</b>` + (h.tickets.length ? "<ul>" + h.tickets.map(x => `<li><b>${esc(x.ticket_id)}</b> ${esc(x.urgency)} · ${esc(x.at)} — ${esc(x.conclusion)}</li>`).join("") + "</ul>" : `<div class="muted">нет</div>`) + "</div>";
-  if (h.repair) b += `<div class="card"><b>🛠 ${esc(h.repair.title)}</b> — ${h.repair.status === "done" ? t("repair_done") : `${t("step")} ${h.repair.current + 1} ${t("of")} ${h.repair.steps.length}`}<ol class="steps">${h.repair.steps.map((s, i) => `<li class="${s.done ? "done" : i === h.repair.current ? "cur" : ""}">${esc(s.text)}</li>`).join("")}</ol></div>`;
-  $("#dBody").innerHTML = b; $("#drawer").classList.remove("hidden");
+  let b = `<div class="top" style="display:flex;justify-content:space-between;gap:12px"><div><div style="font-weight:600">${esc(v.model && v.model.startsWith(v.make) ? v.model : v.make + " " + (v.model || ""))}</div><div class="small muted">${esc(v.engine_model)}, ${esc(v.garage_no)}</div></div>${pill(row)}</div>`;
+  if (row.urgency_basis && row.urgency_basis.length) b += `<p class="small muted">${t("priority")} ${t("urg_" + row.urgency)}: ${row.urgency_basis.map(esc).join("; ")}</p>`;
+  try { const tl = await api(`/api/history/${encodeURIComponent(vid)}`); b += arrivalCard(tl, t) + `<div class="section-label">${t("history")}</div>${renderTimeline(tl)}`; } catch (_) {}
+  b += `<div class="section-label">${t("tickets")}</div>` + (h.tickets.length ? `<div class="list">` + h.tickets.map(x => `<div class="item" style="cursor:default"><span class="t"><b class="mono">${esc(x.ticket_id)}</b><span>${esc(x.at)}. ${esc(x.conclusion)}</span></span><span class="pill ${URG[x.urgency] || ""}">${t("urg_" + x.urgency)}</span></div>`).join("") + `</div>` : `<p class="muted small">${t("none")}</p>`);
+  if (h.repair) b += `<div class="section-label">${esc(h.repair.title)}</div><ol class="ops">${h.repair.steps.map((s, i) => `<li class="${s.done ? "done" : i === h.repair.current ? "cur" : ""}"><span class="n">${s.done ? icon("check", 14) : i + 1}</span><span>${esc(s.text)}</span></li>`).join("")}</ol>`;
+  const body = $("#layer .vbd"); if (body) body.innerHTML = b;
 }
-$("#dClose").onclick = () => $("#drawer").classList.add("hidden");
 
 function pageLink(x) {
-  return x.extra ? `<a class="chip" target="_blank" href="/page/${encodeURIComponent(x.doc_id)}/${x.page}.png">${esc(x.document.slice(0, 26))}, стр. ${x.page}</a>`
-    : `<a class="chip" target="_blank" href="/manuals/${encodeURIComponent(x.doc_id)}.pdf#page=${x.page}">${esc(x.document.slice(0, 26))}, стр. ${x.page}</a>`;
+  const href = x.extra ? `/page/${encodeURIComponent(x.doc_id)}/${x.page}.png` : `/manuals/${encodeURIComponent(x.doc_id)}.pdf#page=${x.page}`;
+  return `<a class="cite" target="_blank" href="${href}" title="${esc(x.document)}">${t("page_short")} ${x.page}</a>`;
 }
 function mdl(s) { return esc(s || "").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>"); }
-function attHtml(a) {  // ticket package: summary, last answer, pages, photos
-  if (!a) return `<div class="muted">Вложений нет (заявка создана до версии с пакетом)</div>`;
-  return `<div class="att"><div>${mdl(a.summary)}</div>` + (a.answer ? `<details><summary>Ответ агента</summary><div>${mdl(a.answer)}</div></details>` : "") +
-    (a.pages && a.pages.length ? `<div>📄 ${a.pages.map(pageLink).join(" ")}</div>` : "") +
-    (a.inspection && a.inspection.length ? `<div>🔍 Осмотр: ${a.inspection.map(it => `${esc(it.component)} — ${esc(it.finding)}`).join("; ")}</div>` : "") +
-    (a.photos && a.photos.length ? `<div>${a.photos.map(n => `<a target="_blank" href="/api/photo/${encodeURIComponent(n)}"><img class="thumb" src="/api/photo/${encodeURIComponent(n)}"></a>`).join("")}</div>` : "") + `</div>`;
+function attHtml(a) {
+  if (!a) return `<p class="muted small">${t("no_attachments")}</p>`;
+  return `<div>${mdl(a.summary)}</div>` + (a.answer ? `<details class="more"><summary>${icon("chevron-right", 16)}${t("agent_answer")}</summary><div class="small">${mdl(a.answer)}</div></details>` : "") +
+    (a.pages && a.pages.length ? `<div style="margin-top:8px">${a.pages.map(pageLink).join(" ")}</div>` : "") +
+    (a.inspection && a.inspection.length ? `<p class="small">${t("inspection")}: ${a.inspection.map(it => `${esc(it.component)}: ${esc(it.finding)}`).join("; ")}</p>` : "") +
+    (a.photos && a.photos.length ? `<div style="display:flex;gap:8px;margin-top:8px">${a.photos.map(n => `<a target="_blank" href="/api/photo/${encodeURIComponent(n)}"><img src="/api/photo/${encodeURIComponent(n)}" alt="" style="height:72px;border-radius:8px"></a>`).join("")}</div>` : "");
 }
+const TSTATUS = {created: "t_created", approved: "t_approved", returned: "t_returned"};
 async function loadTickets() {
-  const r = await api("/api/tickets"); const rows = r.tickets;
-  $("#tab-tickets").innerHTML = rows.length ? `<table><tr><th>№</th><th>ТС</th><th>Приоритет</th><th>Тип</th><th>Создана</th><th>Диагноз</th><th>Статус</th></tr>` + rows.map((x, i) =>
-    `<tr class="click" data-i="${i}"><td><b>${esc(x.ticket_id)}</b> ${x.attachments ? "📎" : ""}</td><td>${esc(x.vehicle_id)}</td><td>${esc(x.urgency)}</td><td>${esc(x.anomaly_type)}</td><td>${esc(x.at)}</td><td>${esc(x.conclusion)}</td><td>${esc(TSTATUS[x.status] || x.status || "")}</td></tr>` +
-    `<tr class="hidden det" id="tk${i}"><td colspan="7">${attHtml(x.attachments)}<div class="row" style="margin-top:.4em"><button onclick="openVehicle('${x.vehicle_id}')">🗂 Машина</button>${reviewHtml(x)}</div></td></tr>`).join("") + "</table>" : `<div class="muted">Заявок пока нет</div>`;
-  document.querySelectorAll("#tab-tickets tr[data-i]").forEach(tr => tr.onclick = () => $("#tk" + tr.dataset.i).classList.toggle("hidden"));
-  bindReview();
-}
-const TSTATUS = {created: "создана", approved: "утверждена", returned: "возвращена"};
-function reviewHtml(x) {
-  const rv = x.review ? `<span class="muted">${x.review.decision === "approved" ? "✅ утверждена" : "↩️ возвращена"} ${esc(x.review.by || "")}${x.review.comment ? ": " + esc(x.review.comment) : ""}</span>` : "";
-  return rv + (x.status === "created" || x.status === "returned" ? `<button class="go" data-rv="${esc(x.ticket_id)}" data-d="approved">✅ Утвердить</button><button data-rv="${esc(x.ticket_id)}" data-d="returned">↩️ Вернуть с комментарием</button>` : "");
-}
-function bindReview() {
-  document.querySelectorAll("#tab-tickets button[data-rv]").forEach(b => b.onclick = async ev => {
+  const r = await api("/api/tickets"), rows = r.tickets;
+  $("#tab-tickets").innerHTML = `<div class="panel">` + (rows.length ? `<table class="tbl"><thead><tr><th>№</th><th>${t("vehicle")}</th><th>${t("priority")}</th><th class="hide-m">${t("diagnosis")}</th><th class="hide-m">${t("created")}</th><th>${t("status")}</th></tr></thead><tbody>` + rows.map((x, i) =>
+    `<tr class="click" data-i="${i}"><td><b class="mono">${esc(x.ticket_id)}</b></td><td class="mono">${esc(x.vehicle_id)}</td><td><span class="pill ${URG[x.urgency] || ""}">${t("urg_" + x.urgency)}</span></td><td class="hide-m">${esc(x.anomaly_type)}. ${esc(x.conclusion)}</td><td class="hide-m sub">${esc(x.at)}</td><td>${esc(t(TSTATUS[x.status] || x.status || ""))}</td></tr>` +
+    `<tr class="hidden" id="tk${i}"><td colspan="6" style="background:var(--surface-2)">${attHtml(x.attachments)}<div class="card-actions" style="justify-content:flex-start">${reviewHtml(x)}<button class="btn ghost sm" data-veh="${esc(x.vehicle_id)}">${t("vehicle_card")}</button></div></td></tr>`).join("") + `</tbody></table>`
+    : `<div class="pad muted">${t("no_tickets")}</div>`) + `</div>`;
+  $$("#tab-tickets tr[data-i]").forEach(tr => tr.onclick = () => $("#tk" + tr.dataset.i).classList.toggle("hidden"));
+  $$("#tab-tickets [data-veh]").forEach(b => b.onclick = ev => { ev.stopPropagation(); openVehicle(b.dataset.veh); });
+  $$("#tab-tickets button[data-rv]").forEach(b => b.onclick = async ev => {
     ev.stopPropagation();
-    const comment = b.dataset.d === "returned" ? prompt("Что исправить механику?") : "";
+    const comment = b.dataset.d === "returned" ? prompt(t("return_what")) : "";
     if (comment === null) return;
-    await api(`/api/ticket/${encodeURIComponent(b.dataset.rv)}/review`, {json: {decision: b.dataset.d, comment}}); loadTickets(); loadFleetTiles && loadFleetTiles();
+    await api(`/api/ticket/${encodeURIComponent(b.dataset.rv)}/review`, {json: {decision: b.dataset.d, comment}}); loadTickets(); loadFleet();
   });
+}
+function reviewHtml(x) {
+  const rv = x.review ? `<span class="small muted">${x.review.decision === "approved" ? t("t_approved") : t("t_returned")}${x.review.by ? ", " + esc(x.review.by) : ""}${x.review.comment ? ": " + esc(x.review.comment) : ""}</span>` : "";
+  return rv + (x.status === "created" || x.status === "returned" ? `<button class="btn primary sm" data-rv="${esc(x.ticket_id)}" data-d="approved">${t("approve")}</button><button class="btn ghost sm" data-rv="${esc(x.ticket_id)}" data-d="returned">${t("return")}</button>` : "");
 }
 async function loadHandoffs() {
   const r = await api("/api/handoffs");
-  const st = {open: "🟠 новая", taken: "🔵 в работе у главного", closed: "✅ закрыта"};
+  const st = {open: "h_open", taken: "h_taken", closed: "h_closed"}, stc = {open: "attention", taken: "repair", closed: "ready"};
   r.handoffs.forEach(h => { h.payload = Object.assign({pages: [], photos: [], dialog: [], items: []}, h.payload); });
-  const sev = {"норма": "🟢", "внимание": "🟡", "дефект": "🔴"};
-  $("#tab-handoffs").innerHTML = r.handoffs.length ? r.handoffs.map(h => `<div class="card">${h.kind === "inspection" ? "<b>🔍 Акт осмотра</b> " : ""}<div class="row"><b>${esc(h.vehicle_id)}</b><span class="muted">${new Date(h.ts * 1000).toLocaleString("ru-RU")} · ${esc(h.user_name)}</span><span>${st[h.status] || h.status}</span></div>` +
-    (h.note ? `<div>💬 ${esc(h.note)}</div>` : "") + `<div style="margin:.4em 0">${mdl(h.summary)}</div>` +
-    (h.payload.items.length ? `<ul>${h.payload.items.map(it => `<li>${sev[it.severity] || "🟡"} <b>${esc(it.component)}</b>: ${esc(it.finding)} <span class="muted">(${esc(it.source)})</span>${it.page ? " " + pageLink(it) : ""}</li>`).join("")}</ul>` : "") +
-    (h.payload.check ? `<div class="muted">ML: ${esc(h.payload.check.status)} ${esc(h.payload.check.anomaly_type || "")} · score ${h.payload.check.anomaly_score ?? "—"} · conf ${h.payload.check.confidence ?? "—"}</div>` : "") +
-    (h.payload.pages.length ? `<div>📄 ${h.payload.pages.map(pageLink).join(" ")}</div>` : "") +
-    (h.payload.photos.length ? `<div>${h.payload.photos.map(n => `<a target="_blank" href="/api/photo/${encodeURIComponent(n)}"><img class="thumb" src="/api/photo/${encodeURIComponent(n)}"></a>`).join("")}</div>` : "") +
-    (h.payload.dialog.length ? `<details><summary>Диалог (${h.payload.dialog.length})</summary>` : "<span>") + `${h.payload.dialog.map(d => `<div class="msg ${d.role === "user" ? "user" : "bot"}"><div class="b">${mdl(d.text)}</div></div>`).join("")}` + (h.payload.dialog.length ? "</details>" : "</span>") +
-    `<div class="row">${h.status === "open" ? `<button data-h="${h.id}" data-s="taken">Взять в работу</button>` : ""}${h.status !== "closed" ? `<button data-h="${h.id}" data-s="closed">Закрыть</button>` : ""}<button onclick="openVehicle('${h.vehicle_id}')">🗂 Машина</button></div></div>`).join("")
-    : `<div class="muted">Пока никто не передавал случаи главному</div>`;
-  document.querySelectorAll("#tab-handoffs button[data-h]").forEach(b => b.onclick = async () => {
-    const comment = b.dataset.s === "closed" ? (prompt("Комментарий (необязательно)") || "") : "";
-    await api(`/api/handoff/${b.dataset.h}`, {json: {status: b.dataset.s, comment}}); loadHandoffs(); });
+  $("#tab-handoffs").innerHTML = r.handoffs.length ? r.handoffs.map(h => `<div class="panel"><div class="pad">` +
+    `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><b class="mono">${esc(h.vehicle_id)}</b><span class="small muted">${h.kind === "inspection" ? t("inspection") + ", " : ""}${new Date(h.ts * 1000).toLocaleString("ru-RU")}, ${esc(h.user_name)}</span><span class="pill ${stc[h.status]}" style="margin-left:auto">${t(st[h.status] || h.status)}</span></div>` +
+    (h.note ? `<p><b>${esc(h.note)}</b></p>` : "") + `<div class="small" style="margin-top:8px">${mdl(h.summary)}</div>` +
+    (h.payload.items.length ? `<ul class="small">${h.payload.items.map(it => `<li><b>${esc(it.component)}</b>: ${esc(it.finding)} <span class="muted">(${esc(it.severity)})</span>${it.page ? " " + pageLink(it) : ""}</li>`).join("")}</ul>` : "") +
+    (h.payload.pages.length ? `<div style="margin-top:8px">${h.payload.pages.map(pageLink).join(" ")}</div>` : "") +
+    (h.payload.dialog.length ? `<details class="more"><summary>${icon("chevron-right", 16)}${t("dialog")} (${h.payload.dialog.length})</summary>${h.payload.dialog.map(d => `<div class="msg ${d.role === "user" ? "user" : "bot"}" style="margin:8px 0"><div class="b small">${mdl(d.text)}</div></div>`).join("")}</details>` : "") +
+    `<div class="card-actions" style="justify-content:flex-start">${h.status === "open" ? `<button class="btn primary sm" data-h="${h.id}" data-s="taken">${t("take")}</button>` : ""}${h.status !== "closed" ? `<button class="btn ghost sm" data-h="${h.id}" data-s="closed">${t("close_case")}</button>` : ""}<button class="btn ghost sm" data-veh="${esc(h.vehicle_id)}">${t("vehicle_card")}</button></div></div></div>`).join("")
+    : `<div class="panel"><div class="pad muted">${t("no_handoffs")}</div></div>`;
+  $$("#tab-handoffs button[data-h]").forEach(b => b.onclick = async () => {
+    const comment = b.dataset.s === "closed" ? (prompt(t("comment_opt")) || "") : "";
+    await api(`/api/handoff/${b.dataset.h}`, {json: {status: b.dataset.s, comment}}); loadHandoffs(); loadFleet(); });
+  $$("#tab-handoffs [data-veh]").forEach(b => b.onclick = () => openVehicle(b.dataset.veh));
 }
 async function loadRepairs() {
   const vs = FLEET.vehicles.filter(v => v.in_repair);
-  let h = vs.length ? "" : `<div class="muted">Сейчас нет машин в ремонте</div>`;
+  if (!vs.length) { $("#tab-repairs").innerHTML = `<div class="panel"><div class="pad muted">${t("no_repairs")}</div></div>`; return; }
+  let h = `<div class="panel"><table class="tbl"><thead><tr><th>${t("vehicle")}</th><th>${t("works")}</th><th>${t("progress")}</th><th class="hide-m">${t("in_work")}</th></tr></thead><tbody>`;
   for (const v of vs) { const d = await api(`/api/fleet/${encodeURIComponent(v.vehicle_id)}`); const r = d.repair; if (!r) continue;
-    const done = r.steps.filter(s => s.done).length; const mins = Math.round((Date.now() / 1000 - r.started) / 60);
-    h += `<div class="card click" onclick="openVehicle('${v.vehicle_id}')"><b>${esc(v.vehicle_id)}</b> · ${esc(r.title)} · ${done}/${r.steps.length} шагов · ${mins} мин в работе<div style="background:#26333d;border-radius:6px;height:10px;margin-top:.4em"><div style="background:var(--go);height:10px;border-radius:6px;width:${100 * done / r.steps.length}%"></div></div></div>`; }
-  $("#tab-repairs").innerHTML = h;
+    const done = r.steps.filter(s => s.done).length, mins = Math.round((Date.now() / 1000 - r.started) / 60);
+    h += `<tr class="click" data-v="${esc(v.vehicle_id)}"><td class="mono"><b>${esc(v.vehicle_id)}</b></td><td>${esc(r.title)}</td><td class="num">${done}/${r.steps.length}<div style="background:var(--surface-3);border-radius:3px;height:6px;margin-top:6px;width:120px"><div style="background:var(--accent);height:6px;border-radius:3px;width:${100 * done / r.steps.length}%"></div></div></td><td class="hide-m num">${mins} ${t("min")}</td></tr>`; }
+  $("#tab-repairs").innerHTML = h + `</tbody></table></div>`;
+  $$("#tab-repairs tr[data-v]").forEach(tr => tr.onclick = () => openVehicle(tr.dataset.v));
 }
 async function loadAudit() {
   const r = await api("/api/audit?limit=300");
-  $("#tab-audit").innerHTML = `<div class="row"><a class="chip" href="/api/audit.csv">⬇ CSV</a><span class="muted">ПДн маскируются до записи; срок хранения ограничен (AUDIT_RETENTION_DAYS)</span></div><table><tr><th>Время</th><th>Кто</th><th>ТС</th><th>Действие</th><th>Запрос</th><th>Ответ</th><th>Инструменты</th><th>Источники</th><th>мс</th></tr>` +
-    r.rows.map(a => `<tr><td>${fmt(a.ts)}</td><td>${esc(a.user_name || a.user_id)}<br><span class="muted">${esc(a.role)}</span></td><td>${esc(a.vehicle_id)}</td><td>${esc(a.action)}${a.ok ? "" : " ⚠️"}</td><td>${esc((a.input || "").slice(0, 120))}</td><td>${esc((a.output || "").slice(0, 160))}</td><td class="muted">${Array.isArray(a.tools) ? a.tools.map(x => esc(x.tool)).join(", ") : ""}</td><td class="muted">${Array.isArray(a.sources) ? a.sources.map(esc).join("; ") : ""}</td><td>${a.latency_ms ?? ""}</td></tr>`).join("") + "</table>";
+  $("#tab-audit").innerHTML = `<div class="filters"><a class="btn ghost sm" href="/api/audit.csv">CSV</a><span class="small muted" style="align-self:center">${t("audit_note")}</span></div><div class="panel" style="overflow:auto"><table class="tbl"><thead><tr><th>${t("time")}</th><th>${t("who")}</th><th>${t("vehicle")}</th><th>${t("action")}</th><th>${t("request")}</th><th class="hide-m">${t("answer")}</th><th class="hide-m">${t("sources_h")}</th><th>${t("ms")}</th></tr></thead><tbody>` +
+    r.rows.map(a => `<tr><td class="sub">${fmt(a.ts)}</td><td>${esc(a.user_name || a.user_id)}<div class="sub">${esc(a.role)}</div></td><td class="mono">${esc(a.vehicle_id)}</td><td>${esc(a.action)}${a.ok ? "" : ` <span class="err">!</span>`}</td><td class="small">${esc((a.input || "").slice(0, 120))}</td><td class="hide-m small">${esc((a.output || "").slice(0, 160))}</td><td class="hide-m sub">${Array.isArray(a.sources) ? a.sources.map(esc).join("; ") : ""}</td><td class="num">${a.latency_ms ?? ""}</td></tr>`).join("") + `</tbody></table></div>`;
 }
 async function loadEcon() {
-  const u = await api("/api/usage");
-  const per = u.calls ? (u.prompt_tokens + u.completion_tokens) / u.calls : 0;
-  $("#tab-econ").innerHTML = `<b>Расход LLM с момента запуска</b><div class="kv"><span class="muted">Вызовов LLM</span><span>${u.calls}</span><span class="muted">Токены вход/выход</span><span>${u.prompt_tokens} / ${u.completion_tokens}</span><span class="muted">Среднее время вызова</span><span>${u.avg_seconds} с</span><span class="muted">Токенов на вызов</span><span>${Math.round(per)}</span></div><p class="muted">Методика расчёта стоимости — в docs/ЭКОНОМИКА.md.</p>`;
+  const u = await api("/api/usage"), per = u.calls ? (u.prompt_tokens + u.completion_tokens) / u.calls : 0;
+  $("#tab-econ").innerHTML = `<div class="kpis" style="margin-top:16px">` + [[t("llm_calls"), u.calls], [t("tokens_io"), `${u.prompt_tokens} / ${u.completion_tokens}`], [t("avg_call"), `${u.avg_seconds} ${t("sec")}`], [t("tokens_per_call"), Math.round(per)]]
+    .map(([l, n]) => `<div class="kpi" style="cursor:default"><div class="l">${l}</div><div class="n" style="font-size:1.5rem">${n}</div></div>`).join("") + `</div><p class="small muted">${t("econ_note")}</p>`;
 }
-
 function tab(name) {
-  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
-  document.querySelectorAll("section[id^=tab-]").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
-  ({tickets: loadTickets, repairs: loadRepairs, audit: loadAudit, econ: loadEcon, handoffs: loadHandoffs}[name] || (() => {}))();
+  $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
+  $$("section[id^=tab-]").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
+  ({fleet: renderFleet, tickets: loadTickets, repairs: loadRepairs, audit: loadAudit, econ: loadEcon, handoffs: loadHandoffs}[name] || (() => {}))();
 }
-document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => tab(b.dataset.tab));
-
-async function mask() {
+$$("#tabs button").forEach(b => b.onclick = () => tab(b.dataset.tab));
+async function ask() {
   const txt = $("#mtxt").value.trim(); if (!txt) return; $("#mtxt").value = "";
   const add = (h, me) => { const d = document.createElement("div"); d.className = "msg " + (me ? "user" : "bot"); d.innerHTML = `<div class="b">${h}</div>`; $("#mchat").appendChild(d); return d; };
-  add(esc(txt), true); const th = add(`<span class="thinking">${t("thinking")}</span>`);
-  try { const r = await api("/api/chat", {json: {text: txt}}); th.querySelector(".b").innerHTML = esc(r.text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>"); }
-  catch (e) { th.querySelector(".b").textContent = e.message; }
+  add(esc(txt), true); const th = add(`<div class="skeleton"><div class="line"></div><div class="line"></div></div>`); th.dataset.busy = 1;
+  try { const r = await api("/api/chat", {json: {text: txt}}); th.querySelector(".b").innerHTML = mdl(r.text); delete th.dataset.busy; }
+  catch (e) { th.querySelector(".b").textContent = e.message; delete th.dataset.busy; }
 }
-$("#msend").onclick = mask; $("#mtxt").onkeydown = e => { if (e.key === "Enter") mask(); };
+$("#msend").onclick = ask; $("#mtxt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } };
 $("#logout").onclick = async () => { await fetch("/api/logout", {method: "POST"}); location.href = "/"; };
-
+const TH_IC = {dark: "moon", light: "sun", contrast: "contrast"};
+function themeIcon() { $("#theme").innerHTML = icon(TH_IC[A11Y.theme()]); }
+$("#theme").onclick = () => { const th = A11Y.THEMES; A11Y.setTheme(th[(th.indexOf(A11Y.theme()) + 1) % th.length]); themeIcon(); };
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSide(); });
+document.addEventListener("click", e => {
+  const ch = e.target.closest("button.cite[data-doc]"); if (!ch) return;
+  window.open(`/page/${encodeURIComponent(ch.dataset.doc)}/${ch.dataset.page}.png`, "_blank");
+});
 (async () => {
+  document.querySelectorAll("[data-icon]").forEach(el => el.innerHTML = icon(el.dataset.icon));
   I18N = await (await fetch("/static/i18n.json")).json();
   ME = (await api("/api/me")).user;
   if (ME.role !== "manager") { location.href = "/"; return; }
-  document.querySelectorAll("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
-  await loadFleet();
+  $$("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
+  themeIcon();
+  await loadFleet(); renderFleet();
   setInterval(loadFleet, 30000);
 })();
-
-// manual page links inside the timeline: open the page image (or the manual text page) in a new tab
-document.addEventListener("click", e => {
-  const ch = e.target.closest(".chip[data-doc]"); if (!ch) return;
-  window.open(`/page/${encodeURIComponent(ch.dataset.doc)}/${ch.dataset.page}.png`, "_blank");
-});
