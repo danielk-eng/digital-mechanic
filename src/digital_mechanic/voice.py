@@ -147,6 +147,7 @@ def postprocess(text: str, lang: str) -> str:
 
 
 CLOUDRU_STT = {"ru": "GigaChat/GigaASR"}  # other languages: openai/whisper-large-v3
+CLOUDRU_STT_SKIP = {"uz"}  # measured worse than the stand's own fine-tune (docs/STT_ЗАМЕРЫ.md)
 
 
 def cloudru_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
@@ -180,7 +181,8 @@ def transcribe(audio: bytes, mime: str, lang: str, s: Settings, local_first: boo
     errors = []
     chain = [] if lang in NO_WHISPER else [("whisper-local", lambda: speech_stt(audio, mime, lang, s))]
     ru_region = {x.strip().upper() for x in s.cloudru_countries.split(",") if x.strip()}
-    if s.cloudru_api_key and s.cloudru_stt and (country or "RU").upper() in ru_region:
+    # uz: Cloud.ru whisper-large-v3 WER 0.96 on audit/asr_uz (navai on the stand 0.17, Deepgram 0.13) -> not used for uz
+    if s.cloudru_api_key and s.cloudru_stt and lang not in CLOUDRU_STT_SKIP and (country or "RU").upper() in ru_region:
         cr = ("cloudru", lambda: cloudru_stt(audio, mime, lang, s))
         chain.insert(0 if (not local_first or (country or "RU").upper() == "RU") else len(chain), cr)
     if lang in DEEPGRAM_LANGS:

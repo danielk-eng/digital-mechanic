@@ -11,7 +11,8 @@ def _s(**kw):
 
 
 def test_order_by_country():
-    l = Llm(_s())
+    assert Llm(_s()).order("RU") == ["tokenrouter", "cloudru"]  # default after the bake-off
+    l = Llm(_s(llm_primary="auto"))
     assert l.order("RU") == ["cloudru", "tokenrouter"] and l.order("UZ")[0] == "cloudru"
     assert l.order("IN") == ["tokenrouter", "cloudru"] and l.order("VN")[0] == "tokenrouter"
     tok = REQUEST_COUNTRY.set("RU"); assert l.order()[0] == "cloudru"; REQUEST_COUNTRY.reset(tok)
@@ -20,7 +21,7 @@ def test_order_by_country():
 
 
 def test_fallback_and_reasoning_stripped(monkeypatch):
-    l = Llm(_s(llm_stream=False, llm_hedge_s=0))
+    l = Llm(_s(llm_stream=False, llm_hedge_s=0, llm_primary="cloudru"))
     calls = []
 
     def create(kw, prov):
@@ -43,4 +44,6 @@ def test_stt_chain(monkeypatch):
     assert voice.transcribe(b"a", "audio/wav", "ru", s, local_first=True, country="RU") == ("текст", "cloudru")
     seen.clear()
     assert voice.transcribe(b"a", "audio/wav", "uz", s, local_first=True, country="UZ")[1] == "whisper-local"  # UZ law: stand first
+    seen.clear(); voice.transcribe(b"a", "audio/wav", "uz", s, local_first=False, country="RU"); assert seen == ["local"]  # uz never via Cloud.ru
+    assert voice.transcribe(b"a", "audio/wav", "kk", s, local_first=True, country="KZ")[1] == "whisper-local"
     assert voice.transcribe(b"a", "audio/wav", "hi", s, local_first=False, country="IN")[1] == "whisper-local"  # not RU region

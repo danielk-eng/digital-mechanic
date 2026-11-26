@@ -47,3 +47,8 @@ tg проверить живым голосом.
 Решение: локальный путь для uz переключён на navai (WER 0.94 → 0.17 при той же задержке): `WHISPER_MODEL_UZ=/models/uz/navai-ct2` в `.env` стенда, сервис speech держит обе модели (`services/speech/server.py`, `LANG_MODELS`). Abduqayum точнее turbo, но 45–100 с на фразу — неприемлемо. Deepgram остаётся первым для uz при `cloud-first` (точнее и в 3 раза быстрее); при `local-first` (строгий режим, голос не уходит со стенда) и при недоступности облака uz распознаёт navai. Известный дефект navai: иногда теряет первый слог («enerator», «larning»).
 
 Модели: `stand/data/models/uz/{navai,abduqayum}-ct2` (по ~740 МБ, конвертация ct2-transformers-converter int8 с transformers ≥ 4.56); исходные HF-веса удалены после конвертации, чтобы не съедать диск (свободно 16 ГБ).
+
+
+## Cloud.ru (26.11)
+
+ru: GigaASR WER 0.00 за 1.1 с; whisper-large-v3: kk 0.00, hi 0.00, vi 0.00 (около 1 с), uz 0.956 (хуже navai 0.171). Порядок: Cloud.ru первым для РФ-региона, кроме uz. Подробнее в docs/MODEL_BAKEOFF.md.
