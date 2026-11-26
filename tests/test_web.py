@@ -66,3 +66,22 @@ def test_fleet_ops_tiles(client):
     o = f["ops"]
     assert o["in_repair"] + o["on_line"] + o["idle"] == f["counts"]["total"]
     assert o["idle"] == sum(v["ops"] == "idle" for v in f["vehicles"]) and o["awaiting"] >= 0
+
+
+def test_manager_dashboard_translated_to_all_languages():
+    import json, re
+    from pathlib import Path
+    st = Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static"
+    d = json.loads((st / "i18n.json").read_text(encoding="utf-8"))
+    keys = set(re.findall(r't\("([a-z_0-9]+)"', (st / "manager.js").read_text(encoding="utf-8"))) | \
+        set(re.findall(r'data-t="([a-z_0-9]+)"', (st / "manager.html").read_text(encoding="utf-8")))
+    keys = {k for k in keys if k in d["ru"]}
+    for lang in d:
+        assert not [k for k in keys if k not in d[lang]], lang
+
+
+def test_session_endpoint_no_401():
+    from fastapi.testclient import TestClient
+    from digital_mechanic.web.app import app
+    r = TestClient(app).get("/api/session")
+    assert r.status_code == 200 and r.json()["user"] is None
