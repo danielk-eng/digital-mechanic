@@ -719,6 +719,7 @@ class ChatIn(BaseModel):
     text: str = ""
     event: str | None = None
     sources: list[dict] | None = None  # «Подробнее»: the brief answer's sources (labels -> pages), see Agent.rehydrate_frags
+    session_id: str | None = None  # the check last diagnosed in this dialog (another instance may not have it), see Agent.restore_check
 
 
 @app.post("/api/chat")
@@ -738,7 +739,7 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
     level = u.get("experience") or "experienced"
     mem, recalled = ("", []) if c.recalled else umemory.hint(STORE, DEMO, u, c.vehicle.vehicle_id if c.vehicle else None, prof.get("memory", True), question=None if body.event else body.text)
     turn = AGENT.handle(c, {**u, "_vocab_hint": uprofile.prompt_hint(prof, level), "_style": ustyle.prompt(prof, u), "_memory": mem},
-                        body.text[:4000], event=body.event, sources=body.sources if body.event == "expand" else None)
+                        body.text[:4000], event=body.event, sources=body.sources if body.event == "expand" else None, session_id=body.session_id)
     if recalled:
         c.recalled = True
         turn.tools.append({"tool": "memory.recent_work", "ok": True, "items": [w.get("ref") or w["what"] for w in recalled]})

@@ -132,6 +132,24 @@ def _same(a: str, b: str) -> bool:
     return difflib.SequenceMatcher(None, a[:1500], b[:1500]).ratio() > 0.9
 
 
+_ABSENT_RE = re.compile(r"(не|нигде не) (упомина\w*|указ\w*|привод\w*|опис\w*|рассматрива\w*|встреча\w*)|в (этом |данном )?разделе нет|отсутству\w* в разделе|нет (информации|сведений|данных)", re.I)
+
+
+def _drop_absence_claims(text: str) -> str:
+    """The extract must not say what the section lacks («код F08 не упоминается»): drop such sentences, keep the rest
+    (a bullet list keeps its lines)."""
+    if not text or not _ABSENT_RE.search(text):
+        return text
+    lines = []
+    for line in text.split("\n"):
+        parts = re.split(r"(?<=[.!?])\s+", line)
+        kept = [x for x in parts if not _ABSENT_RE.search(x)]
+        if kept or not line.strip():
+            lines.append(" ".join(kept))
+    out = "\n".join(lines).strip()
+    return out or text
+
+
 class Agent:
     def __init__(self, fleet: Fleet, ml: MlClient, toir: ToirClient, index: ManualIndex, extra: ExtraIndex | None,
                  llm: Llm, store: Store, engine_docs: dict, max_rounds: int = 5, pii_masking: bool = True):
@@ -189,7 +207,9 @@ class Agent:
             msg, _ = self.llm.chat("section_extract", [
                 {"role": "system", "content": "Ты помогаешь механику. Перескажи раздел руководства коротко (2–4 предложения или 3–5 пунктов) "
                  f"на {lang} языке, только по тексту раздела, ничего не добавляя. Если задан вопрос — выжимка отвечает на него. "
-                 "Если прямого ответа (например, кода ошибки) в разделе нет — не пиши, что его нет: перескажи то, что в разделе "
+                 "Начни с того, что сказано в строке цитаты и рядом с ней на стр. " + str(page) + ", затем — только то из раздела, что "
+                 "относится к этому же вопросу; другие темы раздела не пересказывай. "
+                 "Никогда не пиши, что чего-то (например, кода ошибки) в разделе нет или оно не упоминается: перескажи то, что в разделе "
                  "относится к теме вопроса и цитате (причины, проверки, способы устранения). "
                  "Числа, моменты, зазоры, давления переписывай ТОЛЬКО если они есть в тексте, без изменений. Без вступлений."},
                 {"role": "user", "content": f"Вопрос механика: {question or '-'}\nЦитата: {hint[:300]}\nРаздел «{sec.label}» (стр. {sec.span}):\n{body}"}],
@@ -201,6 +221,7 @@ class Agent:
         if bad:  # drop sentences carrying numbers not found in the section
             parts = re.split(r"(?<=[.!?])\s+|\n", text)
             text = " ".join(x for x in parts if not any(b in x or b.replace(".", ",") in x for b in bad)).strip()
+        text = _drop_absence_claims(text)
         out = {"text": text, "ok": bool(text), "dropped_numbers": bad}
         self._extracts[key] = out
         return out
@@ -279,6 +300,28 @@ class Agent:
         u, why = policy.urgency(check) if check.status == CheckStatus.anomaly else (None, [])
         self.store.add_diagnosis(c.uid, check.model_dump(mode="json"), c.decision.value, u.value if u else None)
         return self.verdict_card(check, c.decision, u, why)
+
+    def restore_check(self, c: Conv, session_id: str | None) -> bool:
+        """Another instance ran /api/diagnose (Vercel: requests of one dialog land on different instances, the
+        conversation there has no check): re-read the same ML result so «explain», the ticket and the repair see it.
+        No diagnosis record is added (it was stored when the check was run)."""
+        if not c.vehicle or (c.check is not None and (not session_id or c.check.session_id == session_id)):
+            return False
+        if c.check is not None:  # a newer check on this instance wins over what the client remembers
+            return False
+        try:
+            sid = session_id or self.fleet.latest_session_id(c.vehicle.vehicle_id)
+            check = self.ml.diagnose(c.vehicle.vehicle_id, sid)
+        except Exception:
+            return False
+        if check.vehicle_id != c.vehicle.vehicle_id:
+            return False
+        for s in self.fleet.sessions(c.vehicle.vehicle_id):
+            if s.session_id == sid:
+                check.checked_at = s.checked_at
+        c.check = check
+        c.decision = policy.decide(check)
+        return True
 
     def verdict_card(self, check: CheckResult, decision: PolicyDecision, u: Urgency | None, why: list[str]) -> dict:
         card = {"kind": "verdict", "status": check.status.value, "decision": decision.value, "check": check.model_dump(mode="json"),
@@ -649,9 +692,11 @@ class Agent:
 
     # ------------------------------------------------------------------ chat turn
     def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None,
-               sources: list[dict] | None = None) -> Turn:
+               sources: list[dict] | None = None, session_id: str | None = None) -> Turn:
         with c.lock:
             c.lang = answer_lang(user)  # translated manual index (if imported) is searched in this language too
+            if c.check is None and (session_id or event == "explain_diagnosis"):
+                self.restore_check(c, session_id)
             if event == "expand" and sources:
                 self.rehydrate_frags(c, sources)
             turn = self._handle(c, user, text, image_note, event)

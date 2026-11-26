@@ -2,6 +2,7 @@
 // Mechanic app. Vanilla JS, no build step. Sections: core · i18n · audio player · rendering · vehicle · chat · citation viewer · voice mode · sheets · settings · login.
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
+let LAST_CHECK = null;  // {vid, sid} of the check diagnosed in this dialog: sent with chat (Vercel instances do not share it)
 let I18N = {}, ME = null, VID = new URLSearchParams(location.search).get("v") || localStorage.getItem("vid") || "", VEH = null, VLIST = [], BUSY = false, LAST_Q = "", HYP = false;
 const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG", be: "be-BY"};
 // Browser TTS: a phone often has no voice for ky/be/tg; read with the closest one that knows the script.
@@ -235,7 +236,7 @@ function renderCard(c) {
     const head = c.status === "anomaly" ? `${ch.anomaly_type} · ${esc(ch.anomaly_title)}` : c.status === "normal" ? t("verdict_normal") : t("verdict_failed");
     let h = `<div class="vh"><div class="vi">${icon(LIGHT_ICON[c.light] || "activity", 22)}</div><div><div class="vt">${head}</div>` +
       (c.light_text && c.status === "anomaly" ? `<div class="vs">${esc(c.light_text)}</div>` : "") + `</div></div>`;
-    h += `<div class="kv"><span>${t("session")}</span><span class="mono">${esc(ch.session_id)}, ${esc((ch.checked_at || "").slice(0, 16).replace("T", " "))}</span>`;
+    h += `<div class="kv"><span>${t("session")}</span><span class="mono">${esc(ch.session_id)}, ${esc(typeof fmtDate === "function" ? fmtDate(ch.checked_at, true) : (ch.checked_at || "").slice(0, 16).replace("T", " "))}</span>`;
     if (ch.anomaly_score != null) h += `<span>${t("score")}</span><span class="mono">${ch.anomaly_score.toFixed(2)}</span>`;
     if (ch.confidence != null) h += `<span>${t("confidence")}</span><span class="mono">${Math.round(ch.confidence * 100)}%</span>`;
     h += `<span>${t("quality")}</span><span>${esc(t(QUALITY[ch.signal_quality] || ch.signal_quality))}</span>`;
@@ -397,7 +398,7 @@ function drawVehicle(r, lv) {
     `<div class="r">${icon("book-open", 16)}<span>${t("scope_only")} ${esc(v.engine_model)}: ${r.manuals.map(m => esc(m.title)).join(", ")}</span></div></div>` +
     `<div id="arrBox"></div>` +
     `<div class="diag-row"><div class="sess"><label class="label" for="sess">${t("session")}</label><select id="sess" class="input">` +
-    r.sessions.slice().reverse().map((s, i) => `<option value="${esc(s.session_id)}">${esc(s.session_id)}, ${esc((s.checked_at || "").slice(0, 10))}${i === 0 ? ", " + t("latest") : ""}</option>`).join("") +
+    r.sessions.slice().reverse().map((s, i) => `<option value="${esc(s.session_id)}">${esc(s.session_id)}, ${esc(typeof fmtDate === "function" ? fmtDate(s.checked_at) : (s.checked_at || "").slice(0, 10))}${i === 0 ? ", " + t("latest") : ""}</option>`).join("") +
     `</select></div><button class="btn primary" id="btnDiag">${icon("activity", 20)}<span>${t("get_result")}</span></button></div>`;
   $("#btnDiag").onclick = diagnose;
   api(`/api/history/${encodeURIComponent(v.vehicle_id)}`).then(tl => { if (VID === v.vehicle_id && $("#arrBox")) $("#arrBox").innerHTML = arrivalCard(tl, t); }).catch(() => {});
@@ -469,6 +470,7 @@ async function diagnose() {
   if (BUSY) return; BUSY = true; $("#btnDiag").disabled = true;
   try {
     const r = await api("/api/diagnose", {json: {vehicle_id: VID, session_id: $("#sess").value || null}});
+    LAST_CHECK = r.card && r.card.check ? {vid: VID, sid: r.card.check.session_id} : null;
     renderCard(r.card); loadChips(); refreshVehicle();
     BUSY = false;
     await ask("", "explain_diagnosis");
@@ -516,7 +518,7 @@ async function ask(text, event = null, sources = null) {
     showDraft(draft);
     if (VOICE.on && steps.length) $("#vHint").textContent = steps[steps.length - 1];
   }, 1000);
-  const payload = {vehicle_id: VID || null, text, event, ...(sources ? {sources: sources.map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))} : {})};
+  const payload = {vehicle_id: VID || null, text, event, ...(LAST_CHECK && LAST_CHECK.vid === VID ? {session_id: LAST_CHECK.sid} : {}), ...(sources ? {sources: sources.map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))} : {})};
   try {
     let r = null;
     if (streamIt) {

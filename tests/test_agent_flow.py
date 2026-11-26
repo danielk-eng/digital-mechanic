@@ -366,3 +366,34 @@ def test_llm_stream_race_hedges_on_first_token():
     assert time.time() - t < 1.8 and len(calls) == 2 and calls[0]["stream"] is True
     assert m.content == "быстро" and m.tool_calls[0].function.name == "search_manual" and m.tool_calls[0].function.arguments == '{"query": "x"}'
     assert texts and texts[-1] == "быстро"
+
+
+def test_explain_on_another_instance_restores_the_check(make_agent):
+    """Vercel: /api/diagnose ran on instance A, «explain» lands on B whose conversation has no check.
+    B re-reads the check the client names (session_id) instead of answering «данных не нашёл»."""
+    a = make_agent([msg("Вердикт: отклонение [S1]")])
+    v = next(v for v in a.fleet.all() if any(s.status.value == "anomaly" for s in a.fleet.sessions(v.vehicle_id)))
+    sid = next(s.session_id for s in a.fleet.sessions(v.vehicle_id) if s.status.value == "anomaly")
+    c = a.conv("u-other-instance", v.vehicle_id)
+    assert c.check is None
+    turn = a.handle(c, {"lang": "ru"}, "", event="explain_diagnosis", session_id=sid)
+    assert c.check is not None and c.check.session_id == sid
+    assert "данных не нашёл" not in turn.text
+    sent = a.llm.calls[0]
+    assert "результат текущей проверки" in str(sent)
+
+
+def test_restore_check_keeps_a_newer_local_check(make_agent):
+    a = make_agent([])
+    vid, sid = first_failed(a)
+    c = a.conv("u2", vid)
+    a.diagnose(c, sid)
+    assert a.restore_check(c, "S-OTHER") is False and c.check.session_id == sid
+
+
+def test_citation_extract_drops_absence_claims():
+    from digital_mechanic.agent.core import _drop_absence_claims as d
+    out = d("В разделе коды ошибок, включая F08, не упоминаются. При воздухе в системе — прокачать систему [с. 52].")
+    assert "не упоминаются" not in out and "прокачать систему" in out
+    assert d("- прокачать систему\n- код F08 в разделе не упоминается\n- заменить насос") == "- прокачать систему\n- заменить насос"
+    assert d("Момент затяжки указан только для стартера.") == "Момент затяжки указан только для стартера."
