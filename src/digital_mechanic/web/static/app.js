@@ -523,7 +523,7 @@ async function ask(text, event = null, sources = null) {
       try {
         r = await chatStream(payload, m => {
           live = true; const el = th.querySelector(".ptext");
-          if (m.step && el && m.step !== EXPAND_STAGES[0][1]) { th.dataset.sstep = 1; el.dataset.step = trStep(m.step); }
+          if (m.step && el && !m.step.startsWith("📖")) { th.dataset.sstep = 1; el.dataset.step = trStep(m.step); }  // «re-reading the pages» steps: keep the timed stages going
           if (m.draft) showDraft(m.draft);
         });
       } catch (e) { if (!e.stream) throw e; r = null; }  // the stream itself failed (proxy, old server): ask the plain way
