@@ -597,7 +597,7 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
     if u["role"] == "mechanic":
         uprofile.update_from_message(prof, body.text or "", body.event)
     level = u.get("experience") or "experienced"
-    mem, recalled = ("", []) if c.recalled else umemory.hint(STORE, DEMO, u, c.vehicle.vehicle_id if c.vehicle else None, prof.get("memory", True))
+    mem, recalled = ("", []) if c.recalled else umemory.hint(STORE, DEMO, u, c.vehicle.vehicle_id if c.vehicle else None, prof.get("memory", True), question=None if body.event else body.text)
     turn = AGENT.handle(c, {**u, "_vocab_hint": uprofile.prompt_hint(prof, level), "_style": ustyle.prompt(prof, u), "_memory": mem},
                         body.text[:4000], event=body.event)
     if recalled:

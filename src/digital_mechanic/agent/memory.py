@@ -3,9 +3,30 @@ M333 — как она?"). Rules: only work the person did himself, only on the 
 at most once per conversation, and never when the person switched memory off in settings."""
 from __future__ import annotations
 
+import re
 import time
 
 WINDOW_DAYS = 14
+# engine systems: the callback is offered only when the question is about the same system as the recent work
+# (or about the truck in general). «Зазоры клапанов» after «менял форсунку» is not the moment to ask about it.
+SYSTEMS = {
+    "fuel": r"форсун|форс\b|форсы|тнвд|топлив|впрыск|распылит",
+    "valves": r"клапан|зазор|коромысл|грм|распредвал",
+    "belts": r"ремн|ремень|генератор|натяж|шкив",
+    "oil": r"масл|смазк|давлени\w* масл",
+    "cooling": r"охлажд|антифриз|перегр|радиатор|термостат",
+    "start": r"пуск|завод|стартер|аккумулятор",
+}
+
+
+def systems(text: str) -> set[str]:
+    low = (text or "").lower()
+    return {k for k, rx in SYSTEMS.items() if re.search(rx, low)}
+
+
+def related(question: str | None, what: str) -> bool:
+    q = systems(question or "")
+    return not q or bool(q & systems(what))
 
 
 def _when(days: float) -> str:
@@ -25,15 +46,15 @@ def recent_work(store, cfg: dict, user: dict, vehicle_id: str, now: float | None
     return sorted([o for o in out if o["days"] <= WINDOW_DAYS], key=lambda o: o["days"])[:2]
 
 
-def hint(store, cfg: dict, user: dict, vehicle_id: str | None, enabled: bool = True) -> tuple[str, list[dict]]:
+def hint(store, cfg: dict, user: dict, vehicle_id: str | None, enabled: bool = True, question: str | None = None) -> tuple[str, list[dict]]:
     if not enabled or not vehicle_id or user.get("role") != "mechanic":
         return "", []
-    work = recent_work(store, cfg, user, vehicle_id)
+    work = [w for w in recent_work(store, cfg, user, vehicle_id) if related(question, w["what"])]
     if not work:
         return "", []
     w = work[0]
     line = (f"ПАМЯТЬ О СОБСТВЕННОЙ РАБОТЕ ЭТОГО МЕХАНИКА: {_when(w['days'])} он на этой машине {w['what']}"
-            + (f" ({w['ref']})" if w.get("ref") else "") + ". Если это связано с вопросом или с машиной сейчас — одной короткой "
+            + (f" ({w['ref']})" if w.get("ref") else "") + ". Одной короткой "
             "фразой в начале ответа по-дружески спроси, как машина после этого (пример: «Вчера ты менял форсунку на M333 — как она?»). "
-            "Один раз за разговор, без подробностей о человеке, без оценок его работы. Если не связано — не упоминай.")
+            "Один раз за разговор, без подробностей о человеке, без оценок его работы.")
     return line, work

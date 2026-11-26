@@ -110,4 +110,6 @@ def test_persona_styles_differ_and_memory_callback(app_mod):
     assert work and "вчера" in line and "форсунк" in line
     assert memory.hint(m.STORE, m.DEMO, stud, "M333YK47", enabled=False) == ("", [])
     assert memory.hint(m.STORE, m.DEMO, stud, "P456AT178")[0] == ""  # only the truck in front of him
+    assert memory.hint(m.STORE, m.DEMO, stud, "M333YK47", question="Как проверить форсунку?")[0]  # same system: injectors
+    assert memory.hint(m.STORE, m.DEMO, stud, "M333YK47", question="Какие зазоры клапанов?")[0] == ""  # other system: not now
     assert memory.hint(m.STORE, m.DEMO, m.STORE.user("demo-chief"), "M333YK47")[0] == ""

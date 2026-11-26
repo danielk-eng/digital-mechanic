@@ -24,7 +24,8 @@ FACTS_SYSTEM = """Ты извлекаешь факты из фрагментов
 Верни JSON: {{"answerable": true|false, "facts": [{{"src": "S1", "text": "..."}}]}}.
 Правила:
 - Только то, что прямо написано во фрагментах и отвечает на вопрос. Ничего не додумывай.
-- Каждый факт — одна короткая законченная мысль (до 160 знаков): норматив, проверка, действие, причина или предупреждение.
+- Каждый факт — одна короткая законченная мысль (до 120 знаков): норматив, проверка, действие, причина или предупреждение.
+- Без перечислений моделей и модификаций двигателей, без номеров рисунков; одинаковое не повторяй.
 - Числа, диапазоны и единицы — ровно как во фрагменте (0,25–0,30 мм; 118–147 Н·м). Не пересчитывай, не округляй.
 - src — метка фрагмента, где написан факт.
 - {limit}. Сначала главное: прямой ответ (норматив), потом как проверить, потом что сделать.
@@ -38,23 +39,29 @@ RENDER_SYSTEM = """Ты «Цифровой механик», помощник м
 - Можно объединять факты в одну строку, менять порядок слов, говорить своими словами.
 - {length}
 - Без вступлений, без пересказа вопроса, без списка источников и без предложений «создать заявку» — кнопки покажет интерфейс.
+- Указания о стиле ниже — для тебя, не пересказывай их человеку.
 КАК ГОВОРИТЬ С ЭТИМ ЧЕЛОВЕКОМ:
 {style}"""
 
-LIMITS = {"brief": "Не больше 5 фактов", "detailed": "Не больше 10 фактов"}
+LIMITS = {"brief": "Не больше 4 фактов — только самые нужные для ответа", "detailed": "Не больше 10 фактов"}
+FACTS_V = "v3"  # bump when the extraction rules change: old cache entries are not reused
 # lines per persona for the brief answer (the veteran asked for at most 4 short lines)
 MAX_LINES = {"veteran": 4, "selftaught": 6, "student": 7, "manager": 5, "engineer": 6}
 LEN_RULE = {
-    "veteran": "Не больше 4 коротких строк (до 90 знаков каждая), можно через «;». Без пояснений терминов.",
-    "selftaught": "До 6 строк. Нормативы и моменты обязательно с цифрами.",
-    "student": "До 7 строк: по одному действию в строке, глагол в начале, новый термин поясни в скобках двумя-тремя словами.",
+    "veteran": ("Не больше 4 строк, каждая до 110 знаков: сначала цифра или действие, потом метка. Каждая строка с новой строки. "
+                "Его словами (клапана, форсы, коленвал), без вводных слов, без пояснений и без техники безопасности."),
+    "selftaught": ("До 6 строк, каждая с новой строки. Нормативы, допуски и моменты — с цифрами. Подача: «по книге так-то» — уважительно, "
+                   "как опытному: он руками это делал, ему нужна точная цифра и страница."),
+    "student": ("До 7 строк, каждая с новой строки и с глагола (Проверь, Сними, Затяни). Первая строка — коротко про безопасность "
+                "(заглуши, дай остыть). Новый термин поясни в скобках двумя-тремя словами. Последняя строка — как понять, что всё получилось, "
+                "или ободрение. Спокойно и по-доброму."),
 }
 LABEL = re.compile(r"\[(S\d+)\]")
 
 
 def _key(vehicle_id: str, question: str, detail: str) -> str:
     q = re.sub(r"[^\w]+", " ", (question or "").lower()).strip()
-    return hashlib.sha1(f"{vehicle_id}|{detail}|{q}".encode()).hexdigest()
+    return hashlib.sha1(f"{FACTS_V}|{vehicle_id}|{detail}|{q}".encode()).hexdigest()
 
 
 def _nums(text: str) -> set[str]:
@@ -105,6 +112,9 @@ class FactPipeline:
                 dropped.append(t[:60]); continue
             if not _nums(t) <= numbers(fr["text"]):  # a figure that is not on its page
                 dropped.append(t[:60]); continue
+            ns = _nums(t)
+            if ns and any(ns == _nums(x["text"]) for x in facts):  # the same figure from another page: once is enough
+                dropped.append(t[:60]); continue
             facts.append({"doc_id": fr["doc_id"], "page": fr["page"], "text": t})
         self.a.store.x("INSERT OR REPLACE INTO facts_cache(k, vehicle_id, question, facts, ts) VALUES (?,?,?,?,?)",
                        (k, vid, question[:300], json.dumps(facts, ensure_ascii=False), time.time()))
@@ -139,8 +149,13 @@ class FactPipeline:
                 problems.append(f"факт {i} [{f['label']}] потерян" + (f" (нет чисел {', '.join(miss)})" if miss else " (нет метки)"))
         lines = [ln for ln in answer.splitlines() if ln.strip()]
         lim = MAX_LINES.get(persona) if detail == "brief" else None
-        if lim and len(lines) > lim + (1 if lines and "?" in lines[0] and not LABEL.search(lines[0]) else 0):
-            problems.append(f"строк {len(lines)}, можно не больше {lim}")
+        body = lines[1:] if lines and "?" in lines[0] and not LABEL.search(lines[0]) else lines  # memory callback line
+        if lim and len(body) > lim:
+            problems.append(f"строк {len(body)}, можно не больше {lim}")
+        if persona == "veteran" and detail == "brief":
+            long = [i + 1 for i, ln in enumerate(body) if len(LABEL.sub("", ln).strip()) > 120]
+            if long:
+                problems.append("слишком длинные строки " + ", ".join(map(str, long)) + " (до 110 знаков, разбей или сожми)")
         return problems
 
     def render(self, c, user: dict, question: str, facts: list[dict], persona: str, detail: str, lang: str, turn) -> str:

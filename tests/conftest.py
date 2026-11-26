@@ -22,7 +22,7 @@ from digital_mechanic import adapters  # noqa: E402
 # The manual indexes are not in the public repo (OEM texts, no redistribution right). Without them only the tests
 # that do not need manual pages run; build the index from the task PDFs (docs/ПУБЛИКАЦИЯ.md) to run everything.
 INDEX_OK = (ROOT / "data/index/pages.jsonl.gz").is_file()
-NO_INDEX_OK = {"test_answer_post", "test_grounding", "test_policy", "test_expand_maint", "test_import_translations"}
+NO_INDEX_OK = {"test_answer_post", "test_grounding", "test_policy", "test_expand_maint", "test_import_translations", "test_grounded"}
 
 
 def pytest_collection_modifyitems(config, items):
