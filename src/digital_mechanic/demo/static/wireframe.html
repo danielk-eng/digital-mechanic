@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Цифровой механик — макет интерфейса</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; background: #f4f4f0; color: #1a1a1a; }
+    main { max-width: 40rem; margin: 0 auto; padding: 1rem; }
+    h1 { font-size: 1.2rem; }
+    label, select, button, textarea { display: block; width: 100%; box-sizing: border-box; margin: 0.35rem 0; }
+    .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 0.8rem; margin: 0.8rem 0; }
+    .chat { min-height: 12rem; background: #fafafa; }
+    .warn { color: #8a4b00; font-size: 0.9rem; }
+    .note { font-size: 0.8rem; color: #555; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Цифровой механик — макет (не продукт)</h1>
+    <p class="note">Проектирование до спринта. Кнопки не вызывают сервисы.</p>
+    <div class="card">
+      <label for="vehicle">Машина</label>
+      <select id="vehicle" disabled>
+        <option>vehicle_id — двигатель (официальный список 26.11)</option>
+      </select>
+      <label for="session">Проверка из истории</label>
+      <select id="session" disabled>
+        <option>session_id — дата и время</option>
+      </select>
+      <button type="button" disabled>Получить результат диагностики</button>
+    </div>
+    <div class="card">
+      <strong>Результат проверки</strong>
+      <p>статус · код Fxx · качество записи · уверенность · признаки</p>
+      <p class="warn">При сбое записи или плохом качестве: не ставить диагноз, просить повтор, заявку не создавать.</p>
+    </div>
+    <div class="card chat">
+      <strong>Диалог с агентом</strong>
+      <p>Цитаты только из руководства этого двигателя, с номером страницы PDF.</p>
+    </div>
+    <div class="card">
+      <strong>Черновик заявки в ТОиР</strong>
+      <p>Работы, запчасти (могут быть пустыми), ссылки документ+страница, приоритет и его основание.</p>
+      <button type="button" disabled>Подтвердить и отправить</button>
+      <p class="warn">Без страницы из руководства этой машины кнопка неактивна.</p>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,10 @@
+[project]
+name = "digital-mechanic"
+version = "0.0.0"
+description = "Pre-sprint contract skeleton for IIKuznitsa Digital Mechanic. Not the contest product."
+requires-python = ">=3.10"
+readme = "README.md"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

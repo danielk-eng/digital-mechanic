@@ -1,0 +1,7 @@
+# Official document titles come from TZ section 3 on 2026-11-26.
+# Until then these slugs are placeholders only.
+# ЯМЗ-236М2: operation + repair
+# ЯМЗ-536: operation + repair
+# ЗМЗ-5234.10: repair
+# ЗМЗ-40904.10 and ЗМЗ-40905.10: one shared manual
+engines: {}
