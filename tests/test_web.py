@@ -139,7 +139,7 @@ def test_session_restored_from_signed_cookie_on_another_instance():
 def test_country_consent_and_privacy_page(client):
     from digital_mechanic import privacy_laws
     cs = client.get("/api/countries?lang=uz").json()
-    assert cs["default"] == "RU" and {c["code"] for c in cs["countries"]} == {"RU", "UZ", "KZ", "TJ", "IN", "VN"}
+    assert cs["default"] == "RU" and {c["code"] for c in cs["countries"]} == {"RU", "UZ", "KZ", "KG", "BY", "TJ", "IN", "VN"}
     assert next(c for c in cs["countries"] if c["code"] == "UZ")["name"] == "Oʻzbekiston"
     r = client.post("/api/login", json={"name": "A", "consent": False, "country": "KZ"})
     assert r.status_code == 400 and "94-V" in r.json()["detail"]

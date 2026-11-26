@@ -3,7 +3,14 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let I18N = {}, ME = null, VID = new URLSearchParams(location.search).get("v") || localStorage.getItem("vid") || "", VEH = null, VLIST = [], BUSY = false, LAST_Q = "", HYP = false;
-const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN"};
+const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG", be: "be-BY"};
+// Browser TTS: a phone often has no voice for ky/be/tg; read with the closest one that knows the script.
+const TTS_FALLBACK = {ky: ["ky", "kk", "ru"], be: ["be", "ru"], tg: ["tg", "ru"], kk: ["kk", "ru"], uz: ["uz", "tr"], bn: ["bn"], hi: ["hi"], vi: ["vi"], ru: ["ru"]};
+function ttsVoice(lang) {
+  const vs = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
+  for (const p of TTS_FALLBACK[lang] || [lang]) { const v = vs.find(x => (x.lang || "").toLowerCase().startsWith(p)); if (v) return v; }
+  return null;
+}
 const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt"};
 const t = k => (I18N[(ME && ME.lang) || $("#l_lang")?.value || "ru"] || I18N.ru || {})[k] || (I18N.ru || {})[k] || k;
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
@@ -82,6 +89,7 @@ const Player = {
     }
     if (!window.speechSynthesis) return done();
     const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[ALANG()] || "ru-RU";
+    const vv = ttsVoice(ALANG()); if (vv) { u.voice = vv; u.lang = vv.lang; }
     u.onboundary = e => captionFollow(p, (e.charIndex || 0) / p.length); u.onend = done; u.onerror = done;
     speechSynthesis.speak(u);
   },
@@ -129,7 +137,7 @@ function md(text, sources) {
 const ACT_ICON = {create_ticket: "file-text", confirm_ticket: "check", next_step: "check", start_repair: "wrench", show_section: "book-open", handoff: "forward"};
 function answerActionsHtml(actions) {
   if (!actions || !actions.length) return "";
-  return `<div class="answer-actions">` + actions.map((a, i) => `<button class="btn sm ${i === 0 && a.kind === "send" ? "primary" : "ghost"}" data-ai="${i}">${icon(ACT_ICON[a.id] || "chevron-right", 16)}<span>${esc(a.label)}</span></button>`).join("") + `</div>`;
+  return `<div class="answer-actions">` + actions.map((a, i) => `<button class="btn sm ${i === 0 && a.kind === "send" ? "primary" : "ghost"}" data-ai="${i}">${icon(ACT_ICON[a.id] || "chevron-right", 16)}<span>${esc(t("act_" + a.id) !== "act_" + a.id ? t("act_" + a.id) : a.label)}</span></button>`).join("") + `</div>`;
 }
 function bindAnswerActions(d, actions) {
   (actions || []).forEach((a, i) => { const b = d.querySelector(`[data-ai="${i}"]`); if (!b) return;
@@ -171,7 +179,7 @@ function addMsg(role, html, {cls = "", speak = null, actions = []} = {}) {
   return d;
 }
 function skeleton(text) {
-  const d = addMsg("bot", `<div class="progress">${icon("loader-circle", 16, "spin")}<span class="ptext">${esc(text || t("thinking"))}</span></div><div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div>`, {cls: "skeleton"});
+  const d = addMsg("bot", `<div class="progress" data-notr>${icon("loader-circle", 16, "spin")}<span class="ptext">${esc(text || t("thinking"))}</span></div><div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div>`, {cls: "skeleton"});
   d.dataset.busy = 1;
   return d;
 }
@@ -470,7 +478,7 @@ async function ask(text, event = null) {
     let steps = [], draft = "";
     try { const p = await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`); steps = p.steps || []; draft = p.draft || ""; } catch (_) {}
     if (!th.isConnected) return;
-    const el = th.querySelector(".ptext"); if (el) { if (steps.length) el.dataset.step = steps[steps.length - 1]; el.textContent = `${draft ? t("writing") : (el.dataset.step || t("thinking"))} · ${sec} ${t("sec")}`; }
+    const el = th.querySelector(".ptext"); if (el) { if (steps.length) el.dataset.step = trStep(steps[steps.length - 1]); el.textContent = `${draft ? t("writing") : (el.dataset.step || t("thinking"))} · ${sec} ${t("sec")}`; }
     if (draft && draft !== th.dataset.draft) {  // live lines already checked against the manual (numbers), replaced by the final answer
       th.dataset.draft = draft; th.classList.add("has-draft");
       let box = th.querySelector(".draft"); if (!box) { box = document.createElement("div"); box.className = "draft"; th.querySelector(".progress").after(box); }
@@ -636,6 +644,57 @@ async function startRec(sh) {
 }
 function stopRec() { if (REC && REC.mr.state !== "inactive") REC.mr.stop(); }
 
+// ---------------------------------------------------------------- content in the interface language
+// Manuals, tickets, chips and history are Russian until people translate the databases. Every Russian text node that
+// appears in the chat, a sheet or the viewer is translated via /api/translate (imported translation -> cache -> LLM);
+// a translation that loses a number keeps the Russian original. Page text has an «original» toggle.
+const OWN = {kk: "әғқңөұүһі", ky: "ңөү", tg: "ғӣқӯҳҷ", be: "ўі", uz: "ўқғҳ"};
+const needsTr = () => !!(ME && ME.lang && ME.lang !== "ru");
+// model names alone (МАЗ-5337, ЯМЗ-236М2) stay as they are
+function isRu(x) { if (!/[а-яё]{3,}/.test(String(x))) return false; const own = OWN[ME && ME.lang]; return !(own && [...String(x).toLowerCase()].some(ch => own.includes(ch))); }
+const TRC = new Map();
+async function trTexts(texts, refs) {
+  const lang = ME.lang, need = [...new Set(texts.filter(x => !TRC.has(lang + "\n" + x)))];
+  if (need.length) {
+    for (let i = 0; i < need.length; i += 40) {
+      const part = need.slice(i, i + 40), r = await api("/api/translate", {json: {texts: part, lang, refs: refs && texts.length === 1 ? refs : null}});
+      r.items.forEach((it, j) => TRC.set(lang + "\n" + part[j], it));
+    }
+  }
+  return texts.map(x => TRC.get(lang + "\n" + x) || {text: x, src: "failed"});
+}
+const TR_ASK = new Set();
+function trStep(x) {  // progress line: one translation per step text, shown when ready (never blocks the ticker)
+  if (!needsTr() || !isRu(x)) return x;
+  const hit = TRC.get(ME.lang + "\n" + x); if (hit) return hit.text;
+  if (!TR_ASK.has(x)) { TR_ASK.add(x); trTexts([x]).catch(() => {}); }
+  return x;
+}
+let TR_Q = new Set(), TR_T = 0; window.__trBusy = 0;
+function trQueue(el) { if (!needsTr() || !el || el.nodeType !== 1) return; TR_Q.add(el); clearTimeout(TR_T); TR_T = setTimeout(trFlush, 120); }
+async function trFlush() {
+  const roots = [...TR_Q]; TR_Q = new Set();
+  const nodes = [];
+  for (const root of roots) {
+    if (!root.isConnected) continue;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: n => {
+      const pe = n.parentElement; if (!pe || pe.closest("[data-notr],textarea,input,script,style,code,.mono,[data-tr-done]")) return 3;
+      return n.nodeValue.trim().length > 1 && isRu(n.nodeValue) && !n.__ru ? 1 : 3; }});
+    for (let n; (n = w.nextNode());) nodes.push(n);
+  }
+  if (!nodes.length) return;
+  const core = nodes.map(n => n.nodeValue.trim());
+  nodes.forEach(n => n.__ru = n.nodeValue);
+  window.__trBusy++;
+  try {
+    const tr = await trTexts(core);
+    nodes.forEach((n, i) => { const it = tr[i]; if (it && it.src !== "same" && it.src !== "failed") { const m = n.__ru.match(/^(\s*)[\s\S]*?(\s*)$/); n.nodeValue = m[1] + it.text + m[2]; n.parentElement && n.parentElement.setAttribute("title", n.__ru.trim().slice(0, 300)); } });
+  } catch (_) { nodes.forEach(n => delete n.__ru); }
+  finally { window.__trBusy--; }
+}
+const TR_OBS = new MutationObserver(ms => { if (!needsTr()) return; for (const m of ms) m.addedNodes.forEach(n => trQueue(n.nodeType === 1 ? n : n.parentElement)); });
+["#chat", "#layer", "#viewer", "#quick", "#vehBtn", "#vehInfo", "#empty"].forEach(sel => { const el = $(sel); if (el) TR_OBS.observe(el, {childList: true, subtree: true}); });
+
 // ---------------------------------------------------------------- citation viewer: extract → full section (collapsed) → page links and image
 function hl(txt, q) {
   const words = [...new Set((q || "").toLowerCase().match(/[\p{L}\d]{5,}/gu) || [])].slice(0, 12);
@@ -690,10 +749,25 @@ async function showPage(n, scroll) {
   let txt = VIEW.texts[n], img = s.has_image;
   if (txt == null) { try { const p = await api(`/api/page/${encodeURIComponent(doc)}/${n}`); txt = VIEW.texts[n] = p.text; img = p.has_image; } catch (_) { txt = ""; } }
   if (VIEW.cur !== n) return;
-  box.innerHTML = `<div class="pv-head">${t("page")} ${n}<span class="muted"> · ${i + 1} / ${pages.length}</span></div>` +
-    `<div class="pagetext">${txt ? hl(esc(reflow(txt)), q) : `<span class="muted">${t("page_no_text")}</span>`}</div>` +
+  const trOn = needsTr() && txt && isRu(txt);
+  box.innerHTML = `<div class="pv-head">${t("page")} ${n}<span class="muted"> · ${i + 1} / ${pages.length}</span>` +
+    (trOn ? `<button class="origbtn" id="mOrig" aria-pressed="false">${t("show_original")}</button>` : "") + `</div>` +
+    `<div class="pagetext" data-notr>${txt ? hl(esc(reflow(txt)), q) : `<span class="muted">${t("page_no_text")}</span>`}</div>` +
     (img ? `<img class="pageimg" id="mImg" loading="lazy" src="/page/${encodeURIComponent(doc)}/${n}.png" alt="${esc(t("page_image"))} ${n}">` : "");
   const a = $("#mPdfLink"); if (a) a.href = `/manuals/${encodeURIComponent(doc)}.pdf#page=${n}`;
+  if (trOn) {
+    const el = box.querySelector(".pagetext"), orig = el.innerHTML, ob = $("#mOrig");
+    el.classList.add("tr-wait");
+    const tr = await trTexts([reflow(txt)], [{doc_id: doc, page: n}]).catch(() => null);
+    if (VIEW.cur !== n) return;
+    el.classList.remove("tr-wait");
+    if (!tr || tr[0].src === "same" || tr[0].src === "failed") { ob.remove(); return; }
+    const trHtml = hl(esc(tr[0].text), q);
+    let showOrig = !!VIEW.orig;
+    const paint = () => { el.innerHTML = showOrig ? orig : trHtml; el.lang = showOrig ? "ru" : ME.lang; ob.setAttribute("aria-pressed", showOrig); ob.textContent = showOrig ? t("show_translation") : t("show_original"); };
+    ob.onclick = () => { showOrig = VIEW.orig = !showOrig; paint(); };
+    paint();
+  }
 }
 function closeViewer() { $("#viewer").classList.add("hidden"); document.body.style.overflow = ""; }
 
@@ -911,6 +985,7 @@ $("#l_go").onclick = async () => {
 async function start() {
   $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
   applyI18n(); await loadVehicles(); autosize();
+  ["#chat", "#quick", "#vehBtn", "#vehInfo"].forEach(sel => trQueue($(sel)));
 }
 (async () => {
   hydrateIcons();

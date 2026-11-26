@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .. import media as umedia, pii, privacy_laws, voice
+from ..translate import Translator
 from ..agent import profile as uprofile
 from ..agent.llm import LlmUnavailable
 from ..agent.prompts import VISION_PROMPT
@@ -34,6 +35,9 @@ from ..i18n import LANGS, answer_lang, lang_or_default
 
 S = get_settings()
 AGENT = build_agent(S)
+TR = Translator(AGENT.llm, AGENT.store, os.environ.get("I18N_DIR", "data/i18n"))
+for _lang, _pages in TR.pages.items():  # human translations of the manuals: search in the user's language, cite the original page
+    AGENT.index.add_translations(_lang, _pages)
 STORE = AGENT.store
 STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="Цифровой механик", version="1.0")
@@ -664,6 +668,31 @@ async def media_upload(kind: str = Form(...), vehicle_id: str = Form(...), text:
     plate = find_plate(" ".join(descs)) if any(descs) else None
     return {"media_id": mid, "kind": kind, "files": files, "description": note, "features": feats, "speech": speech,
             "plate": plate, "turn": turn.as_dict()}
+
+
+class TranslateIn(BaseModel):
+    texts: list[str]
+    lang: str | None = None
+    refs: list[dict | None] | None = None
+
+
+@app.post("/api/translate")
+def translate_texts(body: TranslateIn, uid: str | None = Cookie(None)) -> dict:
+    """Russian content (manual pages, tickets, chips, history) in the interface language until people translate the
+    databases: imported translation -> cache -> LLM. A result that lost a number keeps the Russian original."""
+    u = user_of(uid, manager=False)
+    lang = body.lang if body.lang in LANGS else lang_or_default(u.get("lang"))
+    texts = [t[:6000] for t in body.texts[:80]]
+    if sum(map(len, texts)) > 60000:
+        raise HTTPException(413, "too much text")
+    res = TR.translate(texts, lang, body.refs)
+    return {"lang": lang, "items": res}
+
+
+@app.get("/api/translate/stats")
+def translate_stats(uid: str | None = Cookie(None)) -> dict:
+    user_of(uid)
+    return TR.stats()
 
 
 @app.post("/api/stt")

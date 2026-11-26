@@ -70,7 +70,9 @@ def whisper_stt(audio: bytes, lang: str, s: Settings) -> str:
 
 # Deepgram nova-3 languages used here. Measured on the stand (audit/asr2): uz WER 0.00 (2.9 s) vs Whisper 0.86+
 # (Cyrillic or prompt echo); kk 0.14 (2.3 s) vs Whisper with a Kazakh prompt 0.00 (11 s) -> kk keeps Whisper first.
-DEEPGRAM_LANGS = {"ru", "hi", "vi", "uz", "kk"}
+DEEPGRAM_LANGS = {"ru", "hi", "vi", "uz", "kk", "bn", "be", "ky"}  # bn/be/ky: nova-3 monolingual (Deepgram changelog 21.01 and 16.11.2026)
+# Whisper has no Kyrgyz: for ky there is no local model, only the cloud one (the KG consent text says so).
+NO_WHISPER = {"ky"}
 DEEPGRAM_FIRST = {"ru", "hi", "vi", "uz"}  # with STT_ORDER=cloud-first (local-first: Whisper + uz Cyrillic->Latin fix)
 # Domain vocabulary for Whisper (initial_prompt): brands, units, typical complaint words.
 DOMAIN_PROMPT = ("Диагностика грузовика. КамАЗ, МАЗ, Урал, ПАЗ, ГАЗ, УАЗ, ЯМЗ-236, ЯМЗ-238, ЯМЗ-536, ЗМЗ-409, Cummins. "
@@ -87,6 +89,8 @@ LANG_PROMPTS = {
     "uz": "KamAZ, YaMZ-236, ZMZ-409.",
     "hi": "ट्रक डायग्नोस्टिक। इंजन आइडल पर खटखट, तेल का दबाव कम, कूलेंट, कामाज़।",
     "vi": "Chẩn đoán xe tải. Động cơ bị gõ, áp suất dầu thấp, chạy không tải, nước làm mát.",
+    "bn": "ট্রাক ডায়াগনস্টিক। ইঞ্জিনে ঠকঠক শব্দ, তেলের চাপ কম, কুল্যান্ট, কামাজ।",
+    "be": "Дыягностыка грузавіка. Рухавік стукае, нізкі ціск масла, халасты ход, ЯМЗ-236.",
 }
 
 
@@ -155,12 +159,13 @@ def speech_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
 def transcribe(audio: bytes, mime: str, lang: str, s: Settings, local_first: bool = False) -> tuple[str, str]:
     """Return (text, engine): local whisper service -> Deepgram (ru/hi/vi) -> in-process whisper."""
     errors = []
-    chain = [("whisper-local", lambda: speech_stt(audio, mime, lang, s))]
+    chain = [] if lang in NO_WHISPER else [("whisper-local", lambda: speech_stt(audio, mime, lang, s))]
     if lang in DEEPGRAM_LANGS:
         dg = ("deepgram", lambda: deepgram_stt(audio, mime, lang, s))
         first = lang in DEEPGRAM_FIRST and s.stt_order == "cloud-first" and not local_first  # local-first (strict 152-FZ): audio stays on the stand
         chain.insert(0, dg) if first else chain.append(dg)
-    chain.append(("whisper", lambda: whisper_stt(audio, lang, s)))
+    if lang not in NO_WHISPER:
+        chain.append(("whisper", lambda: whisper_stt(audio, lang, s)))
     for name, fn in chain:
         try:
             return fn(), name

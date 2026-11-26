@@ -353,3 +353,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .seen p{margin-top:8px}
 .tl-media{display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--border)}
 .tl-media img{width:64px;height:48px;object-fit:cover;border-radius:6px;flex:none}
+.origbtn{margin-left:auto;background:none;border:0;color:var(--accent);font-size:.8rem;cursor:pointer;padding:4px 0;text-decoration:underline;text-underline-offset:2px}
+.pv-head{display:flex;align-items:center;gap:8px}
+.tr-wait{opacity:.55}

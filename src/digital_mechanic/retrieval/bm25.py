@@ -121,22 +121,43 @@ class ManualIndex:
         idx = self._engine_index(engine_type)
         return [Hit(idx.pages[i], s) for i, s in idx.search(query, k)]
 
-    def search_multi(self, engine_type: str, queries: list[str], k: int = 6, boost=None, depth: int = 30) -> list[Hit]:
+    def search_multi(self, engine_type: str, queries: list[str], k: int = 6, boost=None, depth: int = 30, lang: str | None = None) -> list[Hit]:
         """Reciprocal rank fusion of several reformulations (original + symptom expansion + fault-table query).
 
-        `boost(page) -> float` multiplies the fused score (e.g. fault tables for symptom questions)."""
-        idx = self._engine_index(engine_type)
-        fused: dict[int, float] = {}
-        best: dict[int, float] = {}
-        for qi, q in enumerate(q for q in queries if q and q.strip()):
-            w = (1.0, 0.9, 0.5)[min(qi, 2)]
-            for rank, (i, s) in enumerate(idx.search(q, depth)):
-                fused[i] = fused.get(i, 0.0) + w / (60 + rank)
-                best[i] = max(best.get(i, 0.0), s)
+        `boost(page) -> float` multiplies the fused score (e.g. fault tables for symptom questions).
+        `lang`: when people translated the manuals into this language (data/i18n/pages_<lang>.jsonl.gz), the same queries
+        are also searched in the translated pages; hits map back to the ORIGINAL page, so citations stay on the Russian page."""
+        idxs = [(self._engine_index(engine_type), 1.0)]
+        if lang and lang in self.translations:
+            idxs.append((self._lang_index(engine_type, lang), 1.0))
+        fused: dict[tuple, float] = {}
+        best: dict[tuple, float] = {}
+        for idx, wl in idxs:
+            for qi, q in enumerate(q for q in queries if q and q.strip()):
+                w = (1.0, 0.9, 0.5)[min(qi, 2)] * wl
+                for rank, (i, sc) in enumerate(idx.search(q, depth)):
+                    key = (idx.pages[i].doc_id, idx.pages[i].page)
+                    fused[key] = fused.get(key, 0.0) + w / (60 + rank)
+                    best[key] = max(best.get(key, 0.0), sc)
         if boost:
-            fused = {i: v * boost(idx.pages[i]) for i, v in fused.items()}
-        order = sorted(fused, key=lambda i: -fused[i])[:k]
-        return [Hit(idx.pages[i], best[i]) for i in order]
+            fused = {key: v * boost(self._pages_by_key[key]) for key, v in fused.items()}
+        order = sorted(fused, key=lambda key: -fused[key])[:k]
+        return [Hit(self._pages_by_key[key], best[key]) for key in order]
+
+    translations: dict = {}
+
+    def add_translations(self, lang: str, texts: dict[tuple[str, int], str]) -> None:
+        self.translations = {**self.translations, lang: texts}
+        self._by_engine = {k: v for k, v in self._by_engine.items() if not k.startswith(f"{lang}:")}
+
+    def _lang_index(self, engine: str, lang: str) -> Bm25:
+        from dataclasses import replace
+
+        key = f"{lang}:{engine}"
+        if key not in self._by_engine:
+            tr = self.translations[lang]
+            self._by_engine[key] = Bm25([replace(p, text=tr[(p.doc_id, p.page)]) for p in for_engine(self.pages, engine) if (p.doc_id, p.page) in tr])
+        return self._by_engine[key]
 
     def get_page(self, doc_id: str, page: int, engine_type: str | None = None) -> ManualPage | None:
         p = self._pages_by_key.get((doc_id, page))

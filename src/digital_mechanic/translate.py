@@ -22,19 +22,19 @@ CYR = re.compile(r"[А-Яа-яЁё]")
 # letters a Russian text never has; their presence means the text is already in that language
 OWN_LETTERS = {"kk": "әғқңөұүһі", "ky": "ңөү", "tg": "ғӣқӯҳҷ", "be": "ўі", "uz": "ўқғҳ"}
 NUM = re.compile(r"\d+(?:[.,]\d+)?")
-TOKENS = re.compile(r"\[(?:S|X)\d+\]|\b[A-Z]{1,4}-?\d[\w.-]*|\bF\d{2}\b")  # [S1], ЯМЗ-236 style codes, F08
+TOKENS = re.compile(r"\[(?:S|X)\d+\]|\b[A-Z]{1,4}-?\d[\w.-]*|\b[А-ЯЁ]{2,5}-\d[\w.-]*|\bF\d{2}\b")  # [S1], ЯМЗ-236 style codes, F08
 
 SYSTEM = """Ты переводчик технической документации для механиков грузовых автомобилей.
 Переведи каждый элемент массива items с русского. Язык перевода: {name} — пиши на {lang} языке. Регистр: живой язык мастерской, без канцелярита, термины как говорят механики.
 Строго сохрани без изменений: все числа и единицы (мм, Н·м, кгс·см, бар, об/мин, °C, л), коды неисправностей (F01–F14), номера деталей и
-документов (236-1003270, 236-3902150-Б РЭ), марки и модели (ЯМЗ-236М2, МАЗ-5337), ссылки на страницы («с. 52»), метки в квадратных скобках ([S1]),
+документов (236-1003270, 236-3902150-Б РЭ), марки и модели в исходном написании, кириллицей (ЯМЗ-236М2, МАЗ-5337), ссылки на страницы («с. 52»), метки в квадратных скобках ([S1]),
 разметку (**, •, переводы строк). Ничего не добавляй и не сокращай. Если элемент уже не на русском — верни как есть.
 {glossary}Верни JSON: {{"items": ["перевод 1", "перевод 2", ...]}} — столько же элементов и в том же порядке."""
 
 
 def looks_russian(text: str, lang: str) -> bool:
-    if len(CYR.findall(text or "")) < 2:
-        return False
+    if len(CYR.findall(text or "")) < 2 or not re.search(r"[а-яё]{3,}", text or ""):
+        return False  # model names (МАЗ-5337, ЯМЗ-236М2) and abbreviations stay as they are
     own = OWN_LETTERS.get(lang)
     return not (own and any(ch in own for ch in text.lower()))
 
@@ -42,7 +42,8 @@ def looks_russian(text: str, lang: str) -> bool:
 def numbers_kept(src: str, out: str) -> bool:
     norm = lambda s: Counter(x.replace(",", ".") for x in NUM.findall(s))  # noqa: E731
     a, b = norm(src), norm(out)
-    return all(b[k] >= v for k, v in a.items()) and all(t in out for t in TOKENS.findall(src))
+    return (all(b[k] >= v for k, v in a.items()) and all(k in a for k in b)  # nothing lost, nothing invented
+            and all(t in out for t in TOKENS.findall(src)))
 
 
 def _h(lang: str, text: str) -> str:

@@ -85,6 +85,7 @@ class Conv:
     check: Optional[CheckResult] = None
     decision: Optional[PolicyDecision] = None
     draft: Optional[dict] = None
+    lang: str = "ru"
     frags: dict[str, dict] = field(default_factory=dict)
     n_s: int = 0
     n_x: int = 0
@@ -378,7 +379,8 @@ class Agent:
 
         query = self.normalizer.normalize(query)[0]
         queries, symptom = expand(query)
-        hits = self.index.search_multi(c.vehicle.engine_model, queries, k=k, boost=make_boost(queries) if symptom else None)
+        hits = self.index.search_multi(c.vehicle.engine_model, queries, k=k, boost=make_boost(queries) if symptom else None,
+                                       lang=getattr(c, "lang", None))
         out = []
         for h in hits:
             p = h.page
@@ -543,6 +545,7 @@ class Agent:
     # ------------------------------------------------------------------ chat turn
     def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None) -> Turn:
         with c.lock:
+            c.lang = answer_lang(user)  # translated manual index (if imported) is searched in this language too
             turn = self._handle(c, user, text, image_note, event)
             if c.preface:  # deterministic part (e.g. triage order by the TZ urgency rules), not subject to LLM grounding
                 turn.text = c.preface + ("\n\n" + turn.text if turn.text else "")
