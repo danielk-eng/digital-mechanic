@@ -72,7 +72,7 @@ def extract_with_llm(llm, fault_title: str, symptoms: str, frags: list[Fragment]
         f"Неисправность по акустической диагностике: {fault_title}\nПризнаки: {symptoms}\n\nФрагменты:\n\n"
         + "\n\n".join(f.prompt_text() for f in frags)
     )
-    raw = llm.json("extract_works", EXTRACT_SYSTEM, user, max_tokens=1800)
+    raw = llm.json("extract_works", EXTRACT_SYSTEM, user, max_tokens=3500)
     return verify_extraction(raw, frags), raw
 
 

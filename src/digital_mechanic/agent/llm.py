@@ -40,7 +40,7 @@ class Llm:
             self._client = OpenAI(base_url=self.s.llm_base_url, api_key=self.s.llm_api_key, timeout=self.s.llm_timeout_s, max_retries=2)
         return self._client
 
-    def json(self, step: str, system: str, user: str, max_tokens: int = 1500) -> dict:
+    def json(self, step: str, system: str, user: str, max_tokens: int = 1500, attempt: int = 0) -> dict:
         if not self.enabled:
             raise LlmUnavailable("LLM is not configured")
         t = time.time()
@@ -63,7 +63,12 @@ class Llm:
         self.usage.seconds += dt
         self.usage.per_step.append({"step": step, "prompt_tokens": pt, "completion_tokens": ct, "seconds": round(dt, 2)})
         text = r.choices[0].message.content or ""
-        return parse_json(text)
+        try:
+            return parse_json(text)
+        except LlmUnavailable:
+            if attempt >= 1:
+                raise
+            return self.json(step + "_retry", system, user, max_tokens=max_tokens * 2, attempt=attempt + 1)
 
 
 def parse_json(text: str) -> dict:

@@ -39,7 +39,7 @@ class FakeLlm(Llm):
         super().__init__(Settings(llm_api_key="x"))
         self.answers = list(answers)
 
-    def json(self, step, system, user, max_tokens=0):
+    def json(self, step, system, user, max_tokens=0, attempt=0):
         a = self.answers.pop(0)
         if isinstance(a, Exception):
             raise a

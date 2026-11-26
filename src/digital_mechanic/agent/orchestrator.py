@@ -223,7 +223,7 @@ class MechanicAgent:
         if not frags:
             return self._reply(s, none_msg, card={"kind": "answer", "found": False})
         try:
-            raw = self.llm.json("answer", QA_SYSTEM, f"Двигатель: {v.engine_type}\nВопрос: {question}\n\nФрагменты:\n\n" + "\n\n".join(f.prompt_text() for f in frags), max_tokens=900)
+            raw = self.llm.json("answer", QA_SYSTEM, f"Двигатель: {v.engine_type}\nВопрос: {question}\n\nФрагменты:\n\n" + "\n\n".join(f.prompt_text() for f in frags), max_tokens=2500)
         except LlmUnavailable as e:
             self._t(s, "llm_unavailable", reason=str(e))
             return self._reply(s, "Модель сейчас недоступна. Вот страницы руководства по запросу:", card={"kind": "answer", "found": True, "citations": [self._cit(f.page, None) for f in frags[:3]]})
