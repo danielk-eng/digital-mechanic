@@ -80,7 +80,8 @@
   "extra_src": "Дополнительный источник (не база Заказчика)",
   "privacy_note": "🔒 Данные сессии хранятся на сервере заказчика; в языковую модель уходит только замаскированный текст запроса.",
   "scope_only": "Ищу только в руководствах двигателя",
-  "books": "книг(и)"
+  "books": "книг(и)",
+  "key_facts": "Важно из руководства"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -163,7 +164,8 @@
   "extra_src": "Qoʻshimcha manba (Buyurtmachi bazasi emas)",
   "privacy_note": "🔒 Sessiya maʼlumotlari buyurtmachi serverida saqlanadi; til modeliga faqat niqoblangan soʻrov matni yuboriladi.",
   "scope_only": "Faqat ushbu dvigatel qoʻllanmalarida qidiraman",
-  "books": "ta kitob"
+  "books": "ta kitob",
+  "key_facts": "Qoʻllanmadan muhim"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -246,7 +248,8 @@
   "extra_src": "Манбаи иловагӣ (на пойгоҳи Фармоишгар)",
   "privacy_note": "🔒 Маълумоти сессия дар сервери фармоишгар нигоҳ дошта мешавад; ба модели забонӣ танҳо матни ниқобпӯшидаи дархост меравад.",
   "scope_only": "Танҳо дар дастурҳои ҳамин муҳаррик ҷустуҷӯ мекунам",
-  "books": "китоб"
+  "books": "китоб",
+  "key_facts": "Муҳим аз дастур"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -329,7 +332,8 @@
   "extra_src": "Қосымша дереккөз (Тапсырыс беруші базасы емес)",
   "privacy_note": "🔒 Сессия деректері тапсырыс берушінің серверінде сақталады; тілдік модельге тек бүркемеленген сұрау мәтіні жіберіледі.",
   "scope_only": "Тек осы қозғалтқыштың нұсқаулықтарынан іздеймін",
-  "books": "кітап"
+  "books": "кітап",
+  "key_facts": "Нұсқаулықтан маңызды"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -412,7 +416,8 @@
   "extra_src": "अतिरिक्त स्रोत (ग्राहक का आधार नहीं)",
   "privacy_note": "🔒 सत्र का डेटा ग्राहक के सर्वर पर रहता है; भाषा मॉडल को केवल छिपाया गया (मास्क) अनुरोध पाठ भेजा जाता है।",
   "scope_only": "केवल इसी इंजन की पुस्तिकाओं में खोज",
-  "books": "पुस्तकें"
+  "books": "पुस्तकें",
+  "key_facts": "पुस्तिका से महत्वपूर्ण"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -495,6 +500,7 @@
   "extra_src": "Nguồn bổ sung (không thuộc cơ sở của Khách hàng)",
   "privacy_note": "🔒 Dữ liệu phiên được lưu trên máy chủ của khách hàng; mô hình ngôn ngữ chỉ nhận văn bản yêu cầu đã được che thông tin cá nhân.",
   "scope_only": "Chỉ tìm trong sổ tay của động cơ",
-  "books": "cuốn"
+  "books": "cuốn",
+  "key_facts": "Quan trọng từ sổ tay"
  }
 }

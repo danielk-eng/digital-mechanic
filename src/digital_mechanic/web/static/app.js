@@ -68,11 +68,18 @@ function sourcesHtml(sources) {
     `<span class="chip ${s.extra ? "x" : ""}" data-doc="${s.doc_id}" data-page="${s.page}">${esc(s.document.slice(0, 40))}, ${t("page")} ${s.page}${s.extra ? " *" : ""}</span>`).join("") + "</div>";
 }
 
+const FACT_ICON = {danger: "⚠️", tool: "🔧", torque: "🔩", value: "📏"};
+function factsHtml(facts) {  // verbatim lines from the cited pages: danger / tools / torques / control values
+  if (!facts || !facts.length) return "";
+  return `<div class="facts"><b>${t("key_facts")}</b>` + facts.map(f => `<div class="fact ${f.kind}">${FACT_ICON[f.kind] || "•"} ${esc(f.text)} ` +
+    `<span class="chip" data-doc="${esc(f.doc_id)}" data-page="${f.page}" data-q="${esc(f.text.slice(0, 200))}">${t("page")} ${f.page}</span></div>`).join("") + `</div>`;
+}
+
 function renderTurn(turn, expanded = false) {
   (turn.cards || []).forEach(renderCard);
   if (turn.text) {
     const canExpand = !expanded && (turn.sources || []).length && (ME.detail || "brief") === "brief";
-    const d = addMsg("bot", md(turn.text, turn.sources) + sourcesHtml(turn.sources) +
+    const d = addMsg("bot", factsHtml(turn.facts) + md(turn.text, turn.sources) + sourcesHtml(turn.sources) +
       (canExpand ? `<button class="expand">${t("expand")} ▾</button>` : ""));
     if (canExpand) d.querySelector(".expand").onclick = ev => { ev.stopPropagation(); ev.target.remove(); expandAnswer(turn.text); };
     speak(turn.text);

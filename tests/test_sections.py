@@ -33,3 +33,15 @@ def test_extract_drops_numbers_not_in_section(make_agent):
     a = make_agent([SimpleNamespace(content="Зазор в стыке колец 0,20…0,40 мм. Для работавшего кольца не более 7,7 мм.", tool_calls=None)])
     x = a.section_extract("ZMZ409-RK", 175, "Замерить тепловой зазор в стыке колец", "какой зазор колец")
     assert "0,20…0,40" in x["text"] and "7,7" not in x["text"] and x["dropped_numbers"]
+
+
+def test_key_facts_verbatim(index):
+    from digital_mechanic.agent.facts import key_facts
+    q = "регулировка теплового зазора клапанов"
+    hs = index.search("ЯМЗ-236М2", q, 3)
+    fr = [{"label": f"S{i+1}", "doc_id": h.page.doc_id, "page": h.page.page, "text": h.page.text} for i, h in enumerate(hs)]
+    facts = key_facts(fr, q, q)
+    assert facts and len(facts) <= 4
+    flat = {f["label"]: " ".join(x["text"].split()) for x in fr for f in [x]}
+    for f in facts:  # every fact is a verbatim piece of its page
+        assert f["text"].strip("…")[:40] in " ".join(next(x["text"] for x in fr if x["label"] == f["label"]).replace("-\n", "").split())

@@ -90,9 +90,10 @@ class Turn:
     tools: list[dict] = field(default_factory=list)
     tokens: int = 0
     ok: bool = True
+    facts: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:
-        return {"text": self.text, "cards": self.cards, "sources": self.sources, "tools": self.tools}
+        return {"text": self.text, "cards": self.cards, "sources": self.sources, "tools": self.tools, "facts": self.facts}
 
 
 def _same(a: str, b: str) -> bool:
@@ -475,7 +476,13 @@ class Agent:
     # ------------------------------------------------------------------ chat turn
     def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None) -> Turn:
         with c.lock:
-            return self._handle(c, user, text, image_note, event)
+            turn = self._handle(c, user, text, image_note, event)
+            if turn.text and turn.sources:
+                from .facts import key_facts
+
+                frags = [{"label": l, **c.frags[l]} for l in cited_labels(turn.text) if l in c.frags and not c.frags[l].get("extra")]
+                turn.facts = key_facts(frags, text, turn.text)
+            return turn
 
     def _handle(self, c: Conv, user: dict, text: str, image_note: str | None, event: str | None) -> Turn:
         turn = Turn()
