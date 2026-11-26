@@ -18,17 +18,23 @@ THREADS = int(os.getenv("WHISPER_THREADS", "4"))  # more threads hurt on a busy 
 BEAM = int(os.getenv("WHISPER_BEAM", "1"))  # greedy: ~2x faster on CPU, near-equal quality on short commands
 ROOT = os.getenv("MODELS_DIR", "/models")
 TTS_ON = os.getenv("SILERO_ENABLED", "1") == "1"
+# Per-language fine-tunes (CT2 dirs under /models), e.g. WHISPER_MODEL_UZ=/models/uz/abduqayum-ct2.
+LANG_MODELS = {k[len("WHISPER_MODEL_"):].lower(): v for k, v in os.environ.items() if k.startswith("WHISPER_MODEL_") and v}
 
 app = FastAPI(title="speech")
-_w = None; _wl = threading.Lock(); _t = None; _tl = threading.Lock()
+_ws: dict = {}; _wl = threading.Lock(); _t = None; _tl = threading.Lock()
 
 
-def whisper():
-    global _w
-    if _w is None:
+def model_for(lang: str) -> str:
+    return LANG_MODELS.get((lang or "").lower(), MODEL)
+
+
+def whisper(lang: str = ""):
+    name = model_for(lang)
+    if name not in _ws:
         from faster_whisper import WhisperModel
-        _w = WhisperModel(MODEL, device=DEVICE, compute_type=COMPUTE, cpu_threads=THREADS, download_root=f"{ROOT}/whisper")
-    return _w
+        _ws[name] = WhisperModel(name, device=DEVICE, compute_type=COMPUTE, cpu_threads=THREADS, download_root=f"{ROOT}/whisper")
+    return _ws[name]
 
 
 def silero():
@@ -46,6 +52,8 @@ def warm():
     def go():
         with _wl:
             whisper()
+            for lang in LANG_MODELS:
+                whisper(lang)
         if TTS_ON:
             with _tl:
                 silero()
@@ -54,7 +62,7 @@ def warm():
 
 @app.get("/health")
 def health():
-    return {"whisper": MODEL, "loaded": _w is not None, "tts": TTS_ON and _t is not None}
+    return {"whisper": MODEL, "lang_models": LANG_MODELS, "loaded": MODEL in _ws, "tts": TTS_ON and _t is not None}
 
 
 @app.post("/stt")
@@ -63,10 +71,12 @@ async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), prompt: str
     t0 = time.time()
     with _wl, tempfile.NamedTemporaryFile(suffix=".audio") as f:  # temp file deleted on close
         f.write(data); f.flush()
-        segs, info = whisper().transcribe(f.name, language=lang or None, initial_prompt=prompt or None,
+        name = model_for(lang)
+        # fine-tunes were trained without a prompt; a prompt makes them echo it
+        segs, info = whisper(lang).transcribe(f.name, language=lang or None, initial_prompt=(prompt if name == MODEL else None) or None,
                                           vad_filter=True, beam_size=BEAM, condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segs).strip()
-    return {"text": text, "ms": int((time.time() - t0) * 1000), "model": MODEL, "duration": round(info.duration, 2)}
+    return {"text": text, "ms": int((time.time() - t0) * 1000), "model": os.path.basename(name), "duration": round(info.duration, 2)}
 
 
 class TtsIn(BaseModel):
