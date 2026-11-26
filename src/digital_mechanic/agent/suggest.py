@@ -15,7 +15,8 @@ from ..retrieval.bm25 import tokens
 
 # fault code -> manual topics: (search query in manual terms, question, terse expert form)
 TOPICS: dict[str, list[tuple[str, str, str]]] = {
-    "F01": [("тепловой зазор клапанов коромысло", "Какие тепловые зазоры клапанов на {engine}?", "Зазоры клапанов {engine}"),
+    "F01": [("гидротолкатель стук проверка", "Как проверить гидротолкатели на стук?", "Гидротолкатели: проверка"),
+            ("тепловой зазор клапанов коромысло", "Какие тепловые зазоры клапанов на {engine}?", "Зазоры клапанов {engine}"),
             ("регулировка зазоров клапанов порядок", "Порядок регулировки зазоров клапанов", "Регулировка зазоров: порядок"),
             ("момент затяжки болтов осей коромысел", "Момент затяжки осей коромысел", "Момент: оси коромысел")],
     "F02": [("давление масла холостой ход номинальное", "Какое давление масла должно быть на {engine}?", "Давление масла: норма"),
@@ -65,13 +66,29 @@ class Chip:
 
 def grounded_page(index, engine: str, query: str):
     """Top page of this engine's manual if it really covers the query (most query terms present), else None."""
-    hits = index.search(engine, query, k=1)
-    if not hits:
-        return None
     q = set(tokens(query))
-    have = set(tokens(hits[0].page.text))
+    key = list(dict.fromkeys(tokens(query)))[:3]  # leading terms must co-occur within a few lines
     need = max(2, int(len(q) * 0.6 + 0.5)) if len(q) > 2 else len(q)
-    return hits[0].page if len(q & have) >= need else None
+    for h in index.search(engine, query, k=3):
+        if len(q & set(tokens(h.page.text))) < need:
+            continue
+        lines = h.page.text.split("\n")
+        for i in range(len(lines)):
+            win = set(tokens(" ".join(lines[i: i + 4])))
+            if set(key[:2]) <= win and len(q & win) >= need:
+                return h.page
+    return None
+
+
+HYDRO = re.compile(r"гидравлическ\w* толкател|гидротолкател|гидрокомпенсатор", re.I)
+_hydro_cache: dict[str, bool] = {}
+
+
+def hydraulic_lifters(index, engine: str) -> bool:
+    """Engine with hydraulic tappets: no valve clearance adjustment, so clearance chips are wrong."""
+    if engine not in _hydro_cache:
+        _hydro_cache[engine] = any(HYDRO.search(h.page.text) for h in index.search(engine, "гидравлические толкатели клапанов", k=3))
+    return _hydro_cache[engine]
 
 
 def build(index, vehicle, check, history: list, repair: dict | None, draft: dict | None, has_ticket: bool,
@@ -82,6 +99,8 @@ def build(index, vehicle, check, history: list, repair: dict | None, draft: dict
 
     def manual(topics):
         for q, ques, short in topics:
+            if (("зазор" in q and "клапан" in q) or "коромыс" in q) and hydraulic_lifters(index, eng):
+                continue
             p = grounded_page(index, eng, q)
             if p:
                 text = (short if expert else ques).format(engine=eng)
