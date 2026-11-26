@@ -33,6 +33,7 @@ def package(agent, c, limit_msgs: int = 40) -> dict:
     pages = [{"label": l, "doc_id": c.frags[l]["doc_id"], "document": c.frags[l]["document"], "page": c.frags[l]["page"],
               "extra": bool(c.frags[l].get("extra"))} for l in labels]
     tickets = agent.store.tickets(v.vehicle_id)[:1]
+    insp = next((h for h in agent.store.handoffs(vehicle_id=v.vehicle_id, limit=20) if h["kind"] == "inspection"), None)
     rep = agent.store.repair_open(v.vehicle_id)
     return {
         "vehicle": {"vehicle_id": v.vehicle_id, "model": v.model, "engine_model": v.engine_model},
@@ -41,6 +42,7 @@ def package(agent, c, limit_msgs: int = 40) -> dict:
         "pages": pages, "photos": photos,
         "ticket": {"ticket_id": tickets[0]["ticket_id"], "urgency": tickets[0]["urgency"]} if tickets else None,
         "draft": bool(c.draft),
+        "inspection": insp["payload"].get("items") if insp else None,
         "repair": {"title": rep["title"], "step": rep["current"] + 1, "steps": len(json.loads(rep["steps"]) if isinstance(rep["steps"], str) else rep["steps"])} if rep else None,
     }
 

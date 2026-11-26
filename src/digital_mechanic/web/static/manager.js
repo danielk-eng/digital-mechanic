@@ -69,6 +69,7 @@ function attHtml(a) {  // ticket package: summary, last answer, pages, photos
   if (!a) return `<div class="muted">Вложений нет (заявка создана до версии с пакетом)</div>`;
   return `<div class="att"><div>${mdl(a.summary)}</div>` + (a.answer ? `<details><summary>Ответ агента</summary><div>${mdl(a.answer)}</div></details>` : "") +
     (a.pages && a.pages.length ? `<div>📄 ${a.pages.map(pageLink).join(" ")}</div>` : "") +
+    (a.inspection && a.inspection.length ? `<div>🔍 Осмотр: ${a.inspection.map(it => `${esc(it.component)} — ${esc(it.finding)}`).join("; ")}</div>` : "") +
     (a.photos && a.photos.length ? `<div>${a.photos.map(n => `<a target="_blank" href="/api/photo/${encodeURIComponent(n)}"><img class="thumb" src="/api/photo/${encodeURIComponent(n)}"></a>`).join("")}</div>` : "") + `</div>`;
 }
 async function loadTickets() {
@@ -95,12 +96,15 @@ function bindReview() {
 async function loadHandoffs() {
   const r = await api("/api/handoffs");
   const st = {open: "🟠 новая", taken: "🔵 в работе у главного", closed: "✅ закрыта"};
-  $("#tab-handoffs").innerHTML = r.handoffs.length ? r.handoffs.map(h => `<div class="card"><div class="row"><b>${esc(h.vehicle_id)}</b><span class="muted">${new Date(h.ts * 1000).toLocaleString("ru-RU")} · ${esc(h.user_name)}</span><span>${st[h.status] || h.status}</span></div>` +
+  r.handoffs.forEach(h => { h.payload = Object.assign({pages: [], photos: [], dialog: [], items: []}, h.payload); });
+  const sev = {"норма": "🟢", "внимание": "🟡", "дефект": "🔴"};
+  $("#tab-handoffs").innerHTML = r.handoffs.length ? r.handoffs.map(h => `<div class="card">${h.kind === "inspection" ? "<b>🔍 Акт осмотра</b> " : ""}<div class="row"><b>${esc(h.vehicle_id)}</b><span class="muted">${new Date(h.ts * 1000).toLocaleString("ru-RU")} · ${esc(h.user_name)}</span><span>${st[h.status] || h.status}</span></div>` +
     (h.note ? `<div>💬 ${esc(h.note)}</div>` : "") + `<div style="margin:.4em 0">${mdl(h.summary)}</div>` +
+    (h.payload.items.length ? `<ul>${h.payload.items.map(it => `<li>${sev[it.severity] || "🟡"} <b>${esc(it.component)}</b>: ${esc(it.finding)} <span class="muted">(${esc(it.source)})</span>${it.page ? " " + pageLink(it) : ""}</li>`).join("")}</ul>` : "") +
     (h.payload.check ? `<div class="muted">ML: ${esc(h.payload.check.status)} ${esc(h.payload.check.anomaly_type || "")} · score ${h.payload.check.anomaly_score ?? "—"} · conf ${h.payload.check.confidence ?? "—"}</div>` : "") +
     (h.payload.pages.length ? `<div>📄 ${h.payload.pages.map(pageLink).join(" ")}</div>` : "") +
     (h.payload.photos.length ? `<div>${h.payload.photos.map(n => `<a target="_blank" href="/api/photo/${encodeURIComponent(n)}"><img class="thumb" src="/api/photo/${encodeURIComponent(n)}"></a>`).join("")}</div>` : "") +
-    `<details><summary>Диалог (${h.payload.dialog.length})</summary>${h.payload.dialog.map(d => `<div class="msg ${d.role === "user" ? "user" : "bot"}"><div class="b">${mdl(d.text)}</div></div>`).join("")}</details>` +
+    (h.payload.dialog.length ? `<details><summary>Диалог (${h.payload.dialog.length})</summary>` : "<span>") + `${h.payload.dialog.map(d => `<div class="msg ${d.role === "user" ? "user" : "bot"}"><div class="b">${mdl(d.text)}</div></div>`).join("")}` + (h.payload.dialog.length ? "</details>" : "</span>") +
     `<div class="row">${h.status === "open" ? `<button data-h="${h.id}" data-s="taken">Взять в работу</button>` : ""}${h.status !== "closed" ? `<button data-h="${h.id}" data-s="closed">Закрыть</button>` : ""}<button onclick="openVehicle('${h.vehicle_id}')">🗂 Машина</button></div></div>`).join("")
     : `<div class="muted">Пока никто не передавал случаи главному</div>`;
   document.querySelectorAll("#tab-handoffs button[data-h]").forEach(b => b.onclick = async () => {

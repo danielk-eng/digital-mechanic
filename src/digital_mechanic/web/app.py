@@ -230,6 +230,33 @@ def handoff(body: VehIn, uid: str | None = Cookie(None)) -> dict:
     return r
 
 
+class InspIn(BaseModel):
+    vehicle_id: str
+    items: list[dict] = []
+    note: str = ""
+
+
+@app.post("/api/inspection/draft")
+def inspection_draft(body: InspIn, uid: str | None = Cookie(None)) -> dict:
+    """Item 15: inspection draft from photos and voice/text notes of this visit; the mechanic must review it."""
+    u = user_of(uid)
+    from ..inspection import draft
+
+    return draft(AGENT, _conv_for(u, body.vehicle_id))
+
+
+@app.post("/api/inspection/confirm")
+def inspection_confirm(body: InspIn, uid: str | None = Cookie(None)) -> dict:
+    u = user_of(uid)
+    items = [{k: (pii.mask(str(v))[:400] if isinstance(v, str) else v) for k, v in it.items() if k in ("component", "finding", "severity", "source", "doc_id", "page", "document", "confirmed")}
+             for it in body.items[:20] if it.get("confirmed")]
+    if not items:
+        raise HTTPException(400, "nothing confirmed")
+    hid = STORE.add_handoff(u["id"], body.vehicle_id, "inspection", pii.mask(body.note)[:500], "", {"items": items})
+    STORE.audit(user_id=u["id"], role=u["role"], vehicle_id=body.vehicle_id, action="inspection", output=json.dumps(items, ensure_ascii=False)[:2000], ok=1)
+    return {"id": hid, "items": items}
+
+
 @app.get("/api/proven")
 def proven(vehicle_id: str, code: str | None = None, uid: str | None = Cookie(None)) -> dict:
     """Item 6: proven fixes for this engine + fault code from this fleet's tickets/repairs."""
@@ -412,7 +439,7 @@ async def photo(file: UploadFile = File(...), vehicle_id: str = Form(""), text: 
     if vehicle_id and desc:
         c = AGENT.conv(u["id"], vehicle_id)
         turn = AGENT.handle(c, u, text or "Посмотри фото и подскажи, что проверить по руководству.", image_note=pii.mask(desc))
-        _record(u, c, "photo", (text or "") + " [фото]", turn, t0, {"photo": name})
+        _record(u, c, "photo", (text or "") + " [фото]", turn, t0, {"photo": name, "photo_desc": pii.mask(desc)[:1000]})
         res["turn"] = turn.as_dict()
     return res
 

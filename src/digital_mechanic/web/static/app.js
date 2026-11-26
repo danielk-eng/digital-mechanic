@@ -256,12 +256,30 @@ async function selectVehicle(vid) {
   $("#vehInfo").classList.remove("hidden");
   $("#vehInfo").innerHTML = `<b>${esc(v.vehicle_id)}</b> · ${esc(v.model && v.model.startsWith(v.make) ? v.model : v.make + " " + (v.model || ""))} · ${esc(v.vehicle_type)}<br>⚙️ <b>${esc(v.engine_model)}</b> (${esc(v.fuel)}) · гараж. ${esc(v.garage_no)}<div class="scope" title="${esc(r.manuals.map(m => m.title).join(" · "))}">🔎 ${t("scope_only")} <b>${esc(v.engine_model)}</b> · ${r.manuals.length} ${t("books")}</div><div class="muted">📚 ${r.manuals.map(m => esc(m.title)).join(" · ")}</div>` +
     (r.tickets.length ? `<div class="muted">${t("tickets")}: ${r.tickets.slice(0, 3).map(x => esc(x.ticket_id)).join(", ")}</div>` : "") +
-    `<div class="row acts"><button id="btnHist" class="expand">🗂 ${t("history")}</button><button id="btnSum" class="expand">📝 ${t("summary")}</button><button id="btnHand" class="expand">🙋 ${t("handoff")}</button></div><div id="arrBox"></div><div id="histBox" class="hidden"></div>`;
+    `<div class="row acts"><button id="btnHist" class="expand">🗂 ${t("history")}</button><button id="btnSum" class="expand">📝 ${t("summary")}</button><button id="btnHand" class="expand">🙋 ${t("handoff")}</button><button id="btnInsp" class="expand">🔍 ${t("inspection")}</button></div><div id="arrBox"></div><div id="histBox" class="hidden"></div>`;
   api(`/api/history/${encodeURIComponent(vid)}`).then(tl => { if (VID === vid && $("#arrBox")) $("#arrBox").innerHTML = arrivalCard(tl, t); }).catch(() => {});
   $("#btnSum").onclick = async () => {
     const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
     try { const s = await api("/api/summary", {json: {vehicle_id: VID}}); th.querySelector(".b").innerHTML = `<b>📝 ${t("summary")}</b><br>` + md(s.text) + pagesHtml(s.pages); }
     catch (e) { th.querySelector(".b").textContent = e.message; }
+  };
+  $("#btnInsp").onclick = async () => {
+    const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
+    try {
+      const r = await api("/api/inspection/draft", {json: {vehicle_id: VID}}); const b = th.querySelector(".b");
+      if (!r.items.length) { b.textContent = r.note; return; }
+      const sev = {"норма": "🟢", "внимание": "🟡", "дефект": "🔴"};
+      b.innerHTML = `<b>🔍 ${t("inspection")}</b> <span class="muted">${t("insp_review")}</span>` + r.items.map((it, i) =>
+        `<div class="insp"><label><input type="checkbox" data-i="${i}" checked> ${sev[it.severity] || "🟡"} <b contenteditable="true" data-f="component">${esc(it.component)}</b>: <span contenteditable="true" data-f="finding">${esc(it.finding)}</span></label> <span class="muted">(${esc(it.source)})</span>` +
+        (it.page ? ` <span class="chip" data-doc="${esc(it.doc_id)}" data-page="${it.page}">${t("page")} ${it.page}</span>` : "") + `</div>`).join("") +
+        `<div class="row" style="margin-top:.5em"><button class="go" id="inspOk">✅ ${t("insp_confirm")}</button></div>`;
+      b.querySelector("#inspOk").onclick = async () => {
+        const items = r.items.map((it, i) => { const row = b.querySelectorAll(".insp")[i];
+          return {...it, component: row.querySelector('[data-f="component"]').textContent.trim(), finding: row.querySelector('[data-f="finding"]').textContent.trim(), confirmed: row.querySelector("input").checked}; });
+        try { const s = await api("/api/inspection/confirm", {json: {vehicle_id: VID, items}}); b.querySelector(".row").innerHTML = `✅ ${t("insp_saved")} №${s.id}`; }
+        catch (e) { alert(e.message); }
+      };
+    } catch (e) { th.querySelector(".b").textContent = e.message; }
   };
   $("#btnHand").onclick = async () => {
     const note = prompt(t("handoff_note")); if (note === null) return;

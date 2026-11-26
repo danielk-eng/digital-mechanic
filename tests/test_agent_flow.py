@@ -218,3 +218,12 @@ def test_triage_orders_by_urgency(make_agent):
     c = a.conv("u1", "B332BP98")
     t = a.handle(c, {"lang": "ru"}, "", event="triage")
     assert t.text.startswith("**Порядок работ по приоритету**") and "Порядок не меняй" in str(a.llm.calls[-1]["messages"])
+
+
+def test_inspection_draft_no_new_numbers(make_agent):
+    from digital_mechanic.inspection import draft
+    a = make_agent([msg('{"items":[{"component":"Ремень генератора","finding":"трещины, прогиб 25 мм","severity":"дефект","source":"фото"}]}')])
+    c = a.conv("u1", "M333YK47")
+    a.store.add_message(c.cid, "u1", "M333YK47", "assistant", "ok", {"photo": "p.jpg", "photo_desc": "Ремень привода с трещинами"})
+    r = draft(a, c)
+    assert r["items"] and "25" not in r["items"][0]["finding"] and r["photos"] == ["p.jpg"]

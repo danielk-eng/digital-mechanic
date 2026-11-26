@@ -787,7 +787,7 @@ class Agent:
             p = package(self, c)
             last = next((d["text"] for d in reversed(p["dialog"]) if d["role"] == "assistant"), "")
             self.store.set_ticket_attachments(ack.ticket_id, {"summary": _plain(p), "answer": last[:2500], "pages": p["pages"],
-                                                              "photos": p["photos"], "check": p["check"]})
+                                                              "photos": p["photos"], "check": p["check"], "inspection": p.get("inspection")})
         except Exception:
             pass
         card = {"kind": "ticket_created", "ticket_id": ack.ticket_id, "request": c.draft["request"]}

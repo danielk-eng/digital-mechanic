@@ -105,7 +105,11 @@
   "ticket_returned": "Заявку вернул главный",
   "labor": "Норма времени",
   "labor_na": "в книге не указана",
-  "labor_na_some": "для остальных работ в книге не указана"
+  "labor_na_some": "для остальных работ в книге не указана",
+  "inspection": "Акт осмотра",
+  "insp_review": "черновик — проверьте, поправьте и отметьте пункты",
+  "insp_confirm": "Подтвердить осмотр",
+  "insp_saved": "Осмотр сохранён и передан главному"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -213,7 +217,11 @@
   "ticket_returned": "Arizani bosh mexanik qaytardi",
   "labor": "Vaqt meʼyori",
   "labor_na": "kitobda koʻrsatilmagan",
-  "labor_na_some": "qolgan ishlar uchun kitobda koʻrsatilmagan"
+  "labor_na_some": "qolgan ishlar uchun kitobda koʻrsatilmagan",
+  "inspection": "Koʻrik dalolatnomasi",
+  "insp_review": "qoralama — tekshiring, tuzating va belgilang",
+  "insp_confirm": "Koʻrikni tasdiqlash",
+  "insp_saved": "Koʻrik saqlandi va bosh mexanikka yuborildi"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -321,7 +329,11 @@
   "ticket_returned": "Дархостро сармеханик баргардонд",
   "labor": "Меъёри вақт",
   "labor_na": "дар китоб нишон дода нашудааст",
-  "labor_na_some": "барои корҳои дигар дар китоб нест"
+  "labor_na_some": "барои корҳои дигар дар китоб нест",
+  "inspection": "Санади муоина",
+  "insp_review": "лоиҳа — санҷед, ислоҳ кунед ва қайд кунед",
+  "insp_confirm": "Тасдиқи муоина",
+  "insp_saved": "Муоина сабт ва ба сармеханик фиристода шуд"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -429,7 +441,11 @@
   "ticket_returned": "Өтінімді бас механик қайтарды",
   "labor": "Уақыт нормасы",
   "labor_na": "кітапта көрсетілмеген",
-  "labor_na_some": "қалған жұмыстар үшін кітапта көрсетілмеген"
+  "labor_na_some": "қалған жұмыстар үшін кітапта көрсетілмеген",
+  "inspection": "Тексеру актісі",
+  "insp_review": "жоба — тексеріп, түзетіп, белгілеңіз",
+  "insp_confirm": "Тексеруді растау",
+  "insp_saved": "Тексеру сақталды және бас механикке жіберілді"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -537,7 +553,11 @@
   "ticket_returned": "मुख्य मैकेनिक ने अनुरोध लौटाया",
   "labor": "समय मानक",
   "labor_na": "पुस्तिका में नहीं दिया",
-  "labor_na_some": "बाकी कार्यों के लिए पुस्तिका में नहीं"
+  "labor_na_some": "बाकी कार्यों के लिए पुस्तिका में नहीं",
+  "inspection": "निरीक्षण रिपोर्ट",
+  "insp_review": "मसौदा — जाँचें, सुधारें और चिह्नित करें",
+  "insp_confirm": "निरीक्षण की पुष्टि करें",
+  "insp_saved": "निरीक्षण सहेजा गया और मुख्य मैकेनिक को भेजा गया"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -645,6 +665,10 @@
   "ticket_returned": "Thợ trưởng trả lại phiếu",
   "labor": "Định mức thời gian",
   "labor_na": "không có trong sổ tay",
-  "labor_na_some": "các việc còn lại không có trong sổ tay"
+  "labor_na_some": "các việc còn lại không có trong sổ tay",
+  "inspection": "Biên bản kiểm tra",
+  "insp_review": "bản nháp — kiểm tra, sửa và đánh dấu",
+  "insp_confirm": "Xác nhận kiểm tra",
+  "insp_saved": "Đã lưu và gửi thợ trưởng"
  }
 }
