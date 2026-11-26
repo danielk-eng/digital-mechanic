@@ -369,6 +369,68 @@ def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str |
     return "\n".join(x for x in out if x.strip()), g
 
 
+# ---------------------------------------------------------------- repair-manual defect maps (ЯМЗ-536 РК «Карта дефектации»)
+# Columns «№ поз. | Возможный дефект, способ установления | Размеры: Номинальные | Допустимые | Заключение». pdftotext reads
+# them column by column, so «Не допускается»/«Браковать» and the sizes end up apart from their defect. The row number and the
+# one-line cells are vertically centred on a row: a row runs from its first defect line to 2*y(number) - start.
+_FOOT_RE = re.compile(r"^(Действительно|\d{4}-\d{2}-\d{2}\s+Страница)")
+
+
+def reflow_defect_map(page_xml: str) -> str | None:
+    lines = _words(page_xml)
+    hi = next((i for i, ws in enumerate(lines) if {"Номинальные", "Допустимые"} <= {w[4] for w in ws}), None)
+    if hi is None or not any(w[4] == "№" for ws in lines[max(0, hi - 6):hi] for w in ws):
+        return None
+    head = lines[:hi + 1]
+    x_nom = next(w[0] for w in lines[hi] if w[4] == "Номинальные")
+    x_all = next(w[0] for w in lines[hi] if w[4] == "Допустимые")
+    concl = [w[0] for ws in head[-6:] for w in ws if w[4] in ("Заключение", "Метод")]
+    x_num = next((w[2] for ws in head[-6:] for w in ws if w[4] in ("№", "поз.")), None)
+    if not concl or x_num is None:
+        return None
+    x_con = min(concl) - 8
+    body, tail = [], []
+    for ws in lines[hi + 1:]:
+        (tail if tail or _FOOT_RE.match(_join_words(ws)) else body).append(ws)
+    nums = [(w[1], w[4]) for ws in body for w in ws if w[2] <= x_num + 12 and re.fullmatch(r"\d{1,2}", w[4])]
+    if not nums:
+        return None
+    rest = [[w for w in ws if not (w[2] <= x_num + 12 and re.fullmatch(r"\d{1,2}", w[4]))] for ws in body]
+    rest = [ws for ws in rest if ws]
+    rows, k, start = [], 0, None
+    for n, (y, label) in enumerate(nums):
+        if k >= len(rest):
+            break
+        start = rest[k][0][1]
+        end = 2 * y - start + 4 if n < len(nums) - 1 else float("inf")
+        cur = []
+        while k < len(rest) and rest[k][0][1] <= end:
+            cur.append(rest[k]); k += 1
+        rows.append((label, cur))
+    if k < len(rest):
+        return None  # lines left over: the layout is not what we expect, keep pdftotext's text
+    out = [_join_words(ws) for ws in head[:-1]]  # title, part, material (header labels of the size columns dropped)
+    out.append("№ — Возможный дефект, способ установления — Размеры, мм: номинальные / допустимые — Заключение")
+    for label, cur in rows:
+        cols = {"d": [], "n": [], "a": [], "c": []}
+        for ws in cur:
+            parts = {"d": [], "n": [], "a": [], "c": []}
+            for w in ws:
+                c = "c" if w[0] >= x_con else "a" if w[0] >= x_all - 12 else "n" if w[0] >= x_nom - 15 else "d"
+                parts[c].append(w)
+            for c, p in parts.items():
+                if p:
+                    cols[c].append(_join_words(p))
+        d, nm, al, cn = (_join_cell(cols[c]) for c in "dnac")
+        if nm and not al and nm.lower().startswith("не допуска"):
+            sizes = nm[0].lower() + nm[1:]
+        else:
+            sizes = "; ".join(x for x in (f"номинальный {nm}" if nm else "", f"допустимый {al}" if al else "") if x)
+        out.append(f"{label}. {d}" + (f" — {sizes}" if sizes else "") + (f" — {cn}" if cn else ""))
+    out.extend(_join_words(ws) for ws in tail)
+    return "\n".join(x for x in out if x.strip())
+
+
 def _extract_bbox_pages(pdf: Path) -> list[str]:
     out = subprocess.run(["pdftotext", "-enc", "UTF-8", "-bbox-layout", str(pdf), "-"], capture_output=True, check=True).stdout.decode("utf-8", "replace")
     return re.findall(r"<page [^>]*>(.*?)</page>", out, re.S)
@@ -393,7 +455,8 @@ def extract_pdf(pdf: Path) -> list[str]:
             out, g = [], None
             for t, b in zip(pages, boxes):
                 tab, g = reflow_table(b, g)
-                out.append(_pick(t, tab) if tab else _pick(t, reflow_side_captions(b)))
+                dm = None if tab else reflow_defect_map(b)
+                out.append(_pick(t, tab) if tab else _pick(t, dm) if dm else _pick(t, reflow_side_captions(b)))
             pages = out
         return pages
     return _extract_pypdf(pdf)

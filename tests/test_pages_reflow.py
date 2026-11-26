@@ -132,3 +132,32 @@ def test_key_fact_danger_not_from_safety_boilerplate():
     from digital_mechanic.agent.facts import key_facts
     fr = [{"label": "S1", "doc_id": "x", "page": 34, "text": "ЗАМЕНА МАСЛА Для удаления из картера вместе с маслом отложений сливать масло из прогретого двигателя, соблюдая меры безопасности."}]
     assert key_facts(fr, "почему стучит двигатель", "Причина: ранний впрыск") == []
+
+
+def test_defect_map_rows_keep_sizes_and_conclusion_with_the_defect():
+    """ЯМЗ-536 РК «Карта дефектации»: the row number is centred on its row; sizes and «Браковать» stay on the defect's line."""
+    from digital_mechanic.ingest.pages import reflow_defect_map
+    page = "".join([
+        _line(100, [(160, 200, "Карта"), (205, 260, "дефектации")]),
+        _line(280, [(79, 85, "№"), (453, 500, "Заключение")]),
+        _line(292, [(79, 95, "поз."), (415, 440, "Метод")]),
+        _line(316, [(253, 320, "Номинальные"), (335, 390, "Допустимые")]),
+        _line(336, [(110, 150, "Трещины"), (155, 200, "блока.")]),
+        _line(347, [(89, 94, "1"), (110, 150, "Осмотр"), (246, 300, "Не допускается"), (457, 500, "Браковать")]),
+        _line(358, [(110, 150, "Нагара")]),
+        _line(400, [(110, 150, "Износ")]),
+        _line(411, [(84, 90, "2"), (110, 150, "отверстия"), (274, 300, "105+0,022"), (348, 380, "105,05"), (457, 500, "Браковать")]),
+        _line(422, [(110, 150, "Нутромер")]),
+        _line(756, [(77, 150, "Действительно:"), (155, 170, "Все")]),
+    ])
+    t = reflow_defect_map(page)
+    assert t is not None
+    rows = [x for x in t.split("\n") if x[:2] in ("1.", "2.")]
+    assert rows[0] == "1. Трещины блока. Осмотр Нагара — не допускается — Браковать"
+    assert rows[1] == "2. Износ отверстия Нутромер — номинальный 105+0,022; допустимый 105,05 — Браковать"
+    assert t.endswith("Действительно: Все")
+
+
+def test_defect_map_not_detected_on_ordinary_page():
+    from digital_mechanic.ingest.pages import reflow_defect_map
+    assert reflow_defect_map(_line(100, [(68, 120, "Перед"), (124, 200, "установкой")])) is None
