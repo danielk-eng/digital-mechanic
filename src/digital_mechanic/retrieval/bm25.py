@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 import re
+import threading
 from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
@@ -38,11 +39,15 @@ STEM_ALIAS = {
 }
 
 
+_STEM_LOCK = threading.Lock()
+
+
 @lru_cache(maxsize=200_000)
 def stem(w: str) -> str:
     w = w.lower().replace("ё", "е")
     if _STEM and not w[0].isdigit():
-        st = _STEM.stemWord(w)
+        with _STEM_LOCK:  # the Snowball stemmer keeps state in the object: not thread-safe
+            st = _STEM.stemWord(w)
         return STEM_ALIAS.get(st, st)
     return w
 

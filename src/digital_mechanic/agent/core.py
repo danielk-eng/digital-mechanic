@@ -128,6 +128,7 @@ class Agent:
         self.convs: dict[str, Conv] = {}
         self.progress: dict[str, list[str]] = {}
         self._lock = threading.Lock()
+        self._init_lock = threading.Lock()
         self._sections = None
         self._extracts: dict[tuple, dict] = {}
 
@@ -136,7 +137,9 @@ class Agent:
         if getattr(self, "_norm", None) is None:
             from ..retrieval.synonyms import Normalizer
 
-            self._norm = Normalizer(self.index.pages)
+            with self._init_lock:  # built once on the first request; parallel first requests wait for it
+                if getattr(self, "_norm", None) is None:
+                    self._norm = Normalizer(self.index.pages)
         return self._norm
 
     @property

@@ -46,3 +46,17 @@ def test_slang_and_typos_to_manual_terms(pages):
     out, ch = n.normalize("помпа течёт, зазоры клапонов")
     assert "водяной насос" in out and "клапанов" in out and len(ch) == 2
     assert n.normalize("давление упало")[1] == []  # common words are left alone
+
+
+def test_stem_thread_safe():
+    """Snowball keeps state in the stemmer object: parallel first requests crashed with IndexError."""
+    import concurrent.futures as cf
+    from digital_mechanic.retrieval import bm25
+
+    words = [f"{w}{i}" for i in range(300) for w in ("коренных", "подшипников", "охлаждающей", "топливного", "стучит")]
+    bm25.stem.cache_clear()
+    with cf.ThreadPoolExecutor(8) as ex:
+        out = list(ex.map(bm25.stem, words))
+    assert len(out) == len(words)
+    bm25.stem.cache_clear()
+    assert [bm25.stem(w) for w in words] == out
