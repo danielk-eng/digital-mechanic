@@ -14,7 +14,7 @@ from pydantic import BaseModel
 MODEL = os.getenv("WHISPER_MODEL", "large-v3-turbo")
 DEVICE = os.getenv("WHISPER_DEVICE", "auto")  # auto -> cuda if available, else cpu
 COMPUTE = os.getenv("WHISPER_COMPUTE", "int8")
-THREADS = int(os.getenv("WHISPER_THREADS", str(os.cpu_count() or 4)))
+THREADS = int(os.getenv("WHISPER_THREADS", "4"))  # more threads hurt on a busy host
 BEAM = int(os.getenv("WHISPER_BEAM", "1"))  # greedy: ~2x faster on CPU, near-equal quality on short commands
 ROOT = os.getenv("MODELS_DIR", "/models")
 TTS_ON = os.getenv("SILERO_ENABLED", "1") == "1"

@@ -64,7 +64,7 @@ def speech_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
     if not s.speech_url:
         raise SttUnavailable("no speech service")
     r = httpx.post(f"{s.speech_url.rstrip('/')}/stt", files={"audio": ("a", audio, mime or "audio/webm")},
-                   data={"lang": lang, "prompt": DOMAIN_PROMPT}, timeout=60)
+                   data={"lang": lang, "prompt": DOMAIN_PROMPT}, timeout=s.speech_timeout_s)
     if r.status_code != 200:
         raise SttUnavailable(f"speech {r.status_code}")
     return r.json()["text"].strip()
@@ -75,7 +75,8 @@ def transcribe(audio: bytes, mime: str, lang: str, s: Settings) -> tuple[str, st
     errors = []
     chain = [("whisper-local", lambda: speech_stt(audio, mime, lang, s))]
     if lang in DEEPGRAM_LANGS:
-        chain.append(("deepgram", lambda: deepgram_stt(audio, mime, lang, s)))
+        dg = ("deepgram", lambda: deepgram_stt(audio, mime, lang, s))
+        chain.insert(0, dg) if s.stt_order == "cloud-first" else chain.append(dg)
     chain.append(("whisper", lambda: whisper_stt(audio, lang, s)))
     for name, fn in chain:
         try:

@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     # Voice
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-3"
+    stt_order: str = "local-first"  # "cloud-first": Deepgram before local whisper (ru/hi/vi), e.g. for a slow CPU host
+    speech_timeout_s: float = 30.0
     speech_url: str = ""  # local speech service (services/speech): whisper STT + Silero TTS
     whisper_model: str = "small"  # local fallback (faster-whisper), optional
     silero_enabled: bool = False  # local TTS (torch), optional; browser TTS otherwise
