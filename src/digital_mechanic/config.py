@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     llm_vision_model: str = ""  # defaults to llm_model
     llm_timeout_s: float = 90.0
     llm_max_tool_rounds: int = 5
+    # "off" sends thinking={"type":"disabled"} (DeepSeek-style); ~4x faster answers. "on" keeps model default.
+    llm_thinking: str = "off"
 
     # Voice
     deepgram_api_key: str = ""

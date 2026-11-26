@@ -84,6 +84,8 @@ class Llm:
         kw: dict[str, Any] = dict(model=model or self.s.llm_model, messages=messages, temperature=temperature, max_tokens=max_tokens)
         if tools:
             kw["tools"] = tools
+        if self.s.llm_thinking.lower() in ("off", "0", "false", "disabled"):
+            kw["extra_body"] = {"thinking": {"type": "disabled"}}
         last: Exception | None = None
         for attempt in range(2):
             try:

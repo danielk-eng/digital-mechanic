@@ -50,7 +50,7 @@ function renderFleet() {
 async function openVehicle(vid) {
   const h = await api(`/api/fleet/${encodeURIComponent(vid)}`);
   const v = h.vehicle, row = FLEET.vehicles.find(r => r.vehicle_id === vid) || {};
-  $("#dTitle").textContent = `${v.vehicle_id} · ${v.make} ${v.model || ""} · ${v.engine_model}`;
+  $("#dTitle").textContent = `${v.vehicle_id} · ${v.model && v.model.startsWith(v.make) ? v.model : (v.make + " " + (v.model || ""))} · ${v.engine_model}`;
   let b = `<div class="card">${badge(row.status, row.in_repair)} · тренд anomaly_score: <b>${esc(h.anomaly_score_trend)}</b>${row.urgency_basis && row.urgency_basis.length ? `<div class="muted">Приоритет ${row.urgency}: ${row.urgency_basis.map(esc).join("; ")}</div>` : ""}</div>`;
   b += `<div class="card"><b>${t("history")}</b><br>${chart(h.checks)}<table><tr><th>Проверка</th><th>Дата</th><th>Статус</th><th>Тип</th><th>Оценка</th><th>Уверенность</th><th>Запись</th></tr>` +
     h.checks.map(c => `<tr><td>${c.session_id}</td><td>${(c.checked_at || "").slice(0, 16).replace("T", " ")}</td><td>${c.status}</td><td>${esc((c.anomaly_type || "") + " " + (c.anomaly_title || ""))}</td><td>${c.anomaly_score ?? "—"}</td><td>${c.confidence ?? "—"}</td><td>${c.signal_quality}</td></tr>`).join("") + "</table></div>";
