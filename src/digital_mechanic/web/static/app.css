@@ -178,6 +178,8 @@ pre.json{white-space:pre-wrap;font-size:.75rem;background:var(--surface-2);paddi
 .skeleton .line{height:12px;border-radius:6px;background:linear-gradient(90deg,var(--surface-2) 25%,var(--surface-3) 50%,var(--surface-2) 75%);background-size:200% 100%;animation:sh 1.4s linear infinite;margin:10px 0}
 .skeleton .line:nth-child(2){width:92%}.skeleton .line:nth-child(3){width:76%}.skeleton .line:nth-child(4){width:54%}
 @keyframes sh{to{background-position:-200% 0}}
+.skeleton.has-draft .line:nth-child(n+4){display:none}
+.skeleton .draft{color:var(--text-2);margin:4px 0 6px}.skeleton .draft p,.skeleton .draft li{margin:0 0 4px}
 .progress{display:flex;align-items:center;gap:8px;color:var(--text-2);font-size:.85rem;margin-bottom:8px}
 .spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 

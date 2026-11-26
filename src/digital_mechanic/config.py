@@ -39,7 +39,9 @@ class Settings(BaseSettings):
     llm_vision_model: str = ""  # defaults to llm_model
     llm_timeout_s: float = 90.0
     llm_max_tool_rounds: int = 5
-    llm_hedge_s: float = 12.0  # resend the same request if no answer after N s, take the first; 0 = off
+    llm_hedge_s: float = 12.0  # non-streaming mode: resend the same request if no answer after N s, take the first; 0 = off
+    llm_stream: bool = True  # stream answers: time-to-first-token hedge + live verified lines in the UI
+    llm_hedge_ttft_s: float = 5.0  # streaming: no first token after N s -> second identical request, first to start streaming wins
     # "off" sends thinking={"type":"disabled"} (DeepSeek-style); ~4x faster answers. "on" keeps model default.
     llm_thinking: str = "off"
 

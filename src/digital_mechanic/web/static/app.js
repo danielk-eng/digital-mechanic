@@ -443,9 +443,15 @@ async function ask(text, event = null) {
   const th = skeleton(), t0 = Date.now();
   const tick = setInterval(async () => {
     const sec = Math.round((Date.now() - t0) / 1000);
-    let steps = [];
-    if (sec % 2 === 0) { try { steps = (await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`)).steps || []; } catch (_) {} }
-    const el = th.querySelector(".ptext"); if (el) { if (steps.length) el.dataset.step = steps[steps.length - 1]; el.textContent = `${el.dataset.step || t("thinking")} · ${sec} ${t("sec")}`; }
+    let steps = [], draft = "";
+    try { const p = await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`); steps = p.steps || []; draft = p.draft || ""; } catch (_) {}
+    if (!th.isConnected) return;
+    const el = th.querySelector(".ptext"); if (el) { if (steps.length) el.dataset.step = steps[steps.length - 1]; el.textContent = `${draft ? t("writing") : (el.dataset.step || t("thinking"))} · ${sec} ${t("sec")}`; }
+    if (draft && draft !== th.dataset.draft) {  // live lines already checked against the manual (numbers), replaced by the final answer
+      th.dataset.draft = draft; th.classList.add("has-draft");
+      let box = th.querySelector(".draft"); if (!box) { box = document.createElement("div"); box.className = "draft"; th.querySelector(".progress").after(box); }
+      box.innerHTML = md(draft, []);
+    }
     if (VOICE.on && steps.length) $("#vHint").textContent = steps[steps.length - 1];
   }, 1000);
   try { const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event}}); th.remove(); return renderTurn(r, event === "expand"); }

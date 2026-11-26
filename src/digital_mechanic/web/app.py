@@ -395,7 +395,8 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
 @app.get("/api/progress")
 def progress(vehicle_id: str | None = None, uid: str | None = Cookie(None)) -> dict:
     u = user_of(uid)
-    return {"steps": AGENT.progress.get(f"{u['id']}:{vehicle_id or '-'}", [])}
+    cid = f"{u['id']}:{vehicle_id or '-'}"
+    return {"steps": AGENT.progress.get(cid, []), "draft": AGENT.drafts.get(cid, "")}
 
 
 @app.get("/api/history/{vid}")

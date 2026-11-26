@@ -233,7 +233,8 @@
   "avg_call": "Среднее время вызова",
   "tokens_per_call": "Токенов на вызов",
   "econ_note": "Методика расчёта стоимости описана в docs/ЭКОНОМИКА.md.",
-  "no_tickets": "Заявок пока нет"
+  "no_tickets": "Заявок пока нет",
+  "writing": "Пишу ответ, цифры сверены с руководством"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -465,7 +466,8 @@
   "tokens_per_call": "Chaqiruvga tokenlar",
   "trend": "Dinamika",
   "vehicle_card": "Mashina kartasi",
-  "who": "Kim"
+  "who": "Kim",
+  "writing": "Javob yozilmoqda, raqamlar qoʻllanma bilan tekshirildi"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -697,7 +699,8 @@
   "tokens_per_call": "Токенҳо барои занг",
   "trend": "Динамика",
   "vehicle_card": "Корти мошин",
-  "who": "Кӣ"
+  "who": "Кӣ",
+  "writing": "Ҷавоб навишта мешавад, рақамҳо бо дастур санҷида шуданд"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -929,7 +932,8 @@
   "tokens_per_call": "Шақыруға токендер",
   "trend": "Динамика",
   "vehicle_card": "Машина карточкасы",
-  "who": "Кім"
+  "who": "Кім",
+  "writing": "Жауап жазылуда, сандар нұсқаулықпен тексерілді"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -1161,7 +1165,8 @@
   "tokens_per_call": "प्रति कॉल टोकन",
   "trend": "गतिशीलता",
   "vehicle_card": "गाड़ी कार्ड",
-  "who": "कौन"
+  "who": "कौन",
+  "writing": "उत्तर लिखा जा रहा है, संख्याएँ मैनुअल से जाँची गईं"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -1393,6 +1398,7 @@
   "tokens_per_call": "Token mỗi lần gọi",
   "trend": "Xu hướng",
   "vehicle_card": "Thẻ xe",
-  "who": "Ai"
+  "who": "Ai",
+  "writing": "Đang viết câu trả lời, số liệu đã đối chiếu với sách hướng dẫn"
  }
 }

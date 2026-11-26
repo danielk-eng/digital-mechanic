@@ -111,7 +111,7 @@ def test_expertise_and_detail_change_prompt_not_grounding(make_agent):
     c = a.conv("u1", "M333YK47")
     novice = a._system(c, {"lang": "ru", "experience": "novice"})
     expert = a._system(c, {"lang": "ru", "experience": "expert", "detail": "detailed"})
-    assert "новичок" in novice and "эксперт" in expert and "до 25 строк" in expert and "не больше 6 строк" in novice
+    assert "новичок" in novice and "эксперт" in expert and "до 14 строк" in expert and "3–4 строки" in novice
     for s in (novice, expert):
         assert "ТОЛЬКО из фрагментов" in s  # same grounding rule in every variant
 
@@ -250,3 +250,75 @@ def test_llm_hedged_request_takes_first_answer():
     llm2 = Llm(Settings(llm_api_key="x", llm_hedge_s=0))
     llm2._client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: "one")))
     assert llm2._create({}) == "one"
+
+
+def test_expand_uses_slim_prompt_and_live_lines_skip_unverified_numbers(make_agent):
+    seen = {}
+
+    def expand_reply(messages):
+        # the streamed draft only shows complete lines whose numbers are in the fragments
+        cb = seen["cb"]
+        cb("Момент 421-461 Н·м [S1].\nВыдумка 777 Н·м [S1].\nнедописан")
+        return msg("Подробно: момент 421-461 Н·м [S1].")
+    a = make_agent([
+        msg(None, [tool_call("search_manual", {"query": "момент затяжки болтов крышек коренных подшипников"}, 1)]),
+        msg("421-461 Н·м [S1]."),
+        expand_reply,
+    ])
+    orig = a.llm.chat
+
+    def chat(step, messages, tools=None, **kw):
+        seen.setdefault("kw", {})[step] = kw
+        if kw.get("on_text"):
+            seen["cb"] = kw["on_text"]
+        return orig(step, messages, tools=tools, **kw)
+    a.llm.chat = chat
+    c = a.conv("u1", "M333YK47")
+    a.diagnose(c, "S-0005")
+    short = a.handle(c, {"lang": "ru"}, "Момент затяжки коренных?")
+    long = a.handle(c, {"lang": "ru"}, short.text, event="expand")
+    sys_prompt = a.llm.calls[2]["messages"][0]["content"]
+    assert "ИНСТРУМЕНТЫ" not in sys_prompt and "ИСТОРИЯ МАШИНЫ" not in sys_prompt and len(sys_prompt) < 1500
+    assert seen["kw"]["expand"]["max_tokens"] <= 1500
+    d = a.drafts[c.cid]
+    assert "421-461" in d and "777" not in d and "недописан" not in d and "[S1]" not in d
+    assert "421" in long.text
+
+
+def test_brief_rule_is_compact():
+    from digital_mechanic.agent.prompts import DETAIL
+    assert "3–4 строки" in DETAIL["brief"] and "**Причина:**" in DETAIL["brief"] and "Подробнее" in DETAIL["brief"]
+
+
+def test_llm_stream_race_hedges_on_first_token():
+    import time
+    from types import SimpleNamespace as NS
+    from digital_mechanic.agent.llm import Llm
+    from digital_mechanic.config import Settings
+    calls = []
+
+    def chunk(content=None, tc=None):
+        return NS(usage=None, choices=[NS(delta=NS(content=content, tool_calls=tc, reasoning_content=None))])
+
+    def create(**kw):
+        calls.append(kw)
+        n = len(calls)
+
+        def gen():
+            if n == 1:
+                time.sleep(2.0)  # queued at the provider: no first token
+                yield chunk("slow")
+                return
+            yield chunk("бы")
+            yield chunk("стро")
+            yield chunk(None, [NS(index=0, id="c1", function=NS(name="search_manual", arguments='{"query":'))])
+            yield chunk(None, [NS(index=0, id=None, function=NS(name=None, arguments=' "x"}'))])
+        return gen()
+    llm = Llm(Settings(llm_api_key="x", llm_hedge_ttft_s=0.5, llm_stream=True))
+    llm._client = NS(chat=NS(completions=NS(create=create)))
+    texts = []
+    t = time.time()
+    m, _ = llm.chat("s", [{"role": "user", "content": "q"}], on_text=texts.append)
+    assert time.time() - t < 1.8 and len(calls) == 2 and calls[0]["stream"] is True
+    assert m.content == "быстро" and m.tool_calls[0].function.name == "search_manual" and m.tool_calls[0].function.arguments == '{"query": "x"}'
+    assert texts and texts[-1] == "быстро"

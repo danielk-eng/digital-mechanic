@@ -27,7 +27,7 @@ from ..store import Store
 from ..history import summary_for_agent as hist_summary, timeline as build_timeline
 from .grounding import cited_labels, quote_in_text, unverified_numbers
 from .llm import Llm, LlmUnavailable
-from .prompts import DETAIL, EXPAND_PROMPT, EXPERIENCE, MANAGER_SYSTEM, MECHANIC_SYSTEM
+from .prompts import DETAIL, EXPAND_PROMPT, EXPAND_SYSTEM, EXPERIENCE, MANAGER_SYSTEM, MECHANIC_SYSTEM
 
 URG_RU = {"high": "высокий", "medium": "средний", "low": "низкий"}
 
@@ -71,7 +71,7 @@ TOOLS_MANAGER = [
 ]
 
 
-PROGRESS = {"search_manual": "🔎 Ищу в руководстве", "search_extra_docs": "📗 Доп. руководство", "get_diagnosis": "🎧 Запрашиваю ML-диагностику",
+PROGRESS = {"search_manual": "🔎 Ищу в руководстве", "expand": "📖 Разворачиваю ответ по тем же страницам", "search_extra_docs": "📗 Доп. руководство", "get_diagnosis": "🎧 Запрашиваю ML-диагностику",
             "get_vehicle_history": "🗂 Смотрю историю машины", "prepare_ticket": "📝 Готовлю заявку", "start_repair": "🛠 Составляю план ремонта",
             "update_repair": "✔ Отмечаю шаг", "fleet_overview": "📊 Сводка по парку"}
 
@@ -127,6 +127,7 @@ class Agent:
         self.llm, self.store, self.docs, self.max_rounds, self.pii_masking = llm, store, engine_docs, max_rounds, pii_masking
         self.convs: dict[str, Conv] = {}
         self.progress: dict[str, list[str]] = {}
+        self.drafts: dict[str, str] = {}  # live verified lines of the answer being written (see _live)
         self._lock = threading.Lock()
         self._init_lock = threading.Lock()
         self._sections = None
@@ -328,11 +329,16 @@ class Agent:
             turn.text = answer
             turn.sources = [self._source_view(l, c) for l in labels]
             return turn
-        frags = "\n\n".join(f"[{l}] {c.frags[l]['document']}, стр. PDF {c.frags[l]['page']}\n{snippet(c.frags[l]['text'], answer, 2500)}" for l in labels[:8])
-        messages = [{"role": "system", "content": self._system(c, user, detail="detailed")},
-                    {"role": "user", "content": EXPAND_PROMPT.format(answer=answer[:3000], frags=frags)}]
+        # Reuse the fragments already retrieved for this answer (no new search) and a slim prompt: only the
+        # grounding rules, no tool list / vehicle history -> fewer input tokens and a bounded output length.
+        self.progress.setdefault(c.cid, []).append(PROGRESS["expand"])
+        frags = "\n\n".join(f"[{l}] {c.frags[l]['document']}, стр. PDF {c.frags[l]['page']}\n{snippet(c.frags[l]['text'], answer, 1800)}" for l in labels[:6])
+        lang = LANGS[answer_lang(user)]["llm"]
+        system = EXPAND_SYSTEM.format(lang_name=lang, experience_rule=EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"]))
+        messages = [{"role": "system", "content": system},
+                    {"role": "user", "content": EXPAND_PROMPT.format(answer=answer[:2500], frags=frags)}]
         try:
-            msg, tok = self.llm.chat("expand", messages, max_tokens=4500)
+            msg, tok = self.llm.chat("expand", messages, max_tokens=1500, on_text=self._live(c, messages))
             turn.tokens += tok
             out = self._verify_answer(c, messages, (msg.content or "").strip(), turn)
         except LlmUnavailable as e:
@@ -537,6 +543,7 @@ class Agent:
     def _handle(self, c: Conv, user: dict, text: str, image_note: str | None, event: str | None) -> Turn:
         turn = Turn()
         self.progress[c.cid] = []
+        self.drafts[c.cid] = ""
         manager = user.get("role") == "manager" and c.vehicle is None
         raw = (text or "").strip()
         masked = pii.mask(raw) if self.pii_masking else raw
@@ -602,7 +609,8 @@ class Agent:
                                    "hits": [f"{f['label']}:{f['document']} стр.{f['pdf_page']}" for f in r["fragments"]]})
                 pre += [f for f in r["fragments"] if f["label"] not in {x["label"] for x in pre}]
             frag_txt = "\n\n".join(f"[{f['label']}] {f['document']}, стр. PDF {f['pdf_page']}\n{f['text']}" for f in pre[:7])
-            masked = ("Объясни механику результат текущей проверки (до 12 строк): вердикт; что вероятно не так; чем грозит; что и как проверить "
+            brief = (user.get("detail") or "brief") == "brief"
+            masked = (f"Объясни механику результат текущей проверки ({'коротко, до 6 строк' if brief else 'до 12 строк'}): вердикт; что вероятно не так; чем грозит; что и как проверить "
                       "(допуски, порядок со страницами); в конце предложи создать заявку. Ниже — уже найденные фрагменты руководства этого двигателя; "
                       "если в них нет нужного — сделай не более одного дополнительного поиска.\n\n" + frag_txt)
         if image_note:
@@ -646,7 +654,8 @@ class Agent:
         answer = ""
         try:
             for rnd in range(self.max_rounds + 1):
-                msg, tok = self.llm.chat(f"agent_r{rnd}", messages, tools=tools if rnd < self.max_rounds else None, max_tokens=4500)
+                msg, tok = self.llm.chat(f"agent_r{rnd}", messages, tools=tools if rnd < self.max_rounds else None, max_tokens=4500,
+                                         on_text=self._live(c, messages))
                 turn.tokens += tok
                 calls = getattr(msg, "tool_calls", None) or []
                 if not calls:
@@ -725,6 +734,47 @@ class Agent:
         turn.tools.append(log)
         return res
 
+    def _allowed_numbers(self, c: Conv, messages: list[dict]) -> set[str]:
+        """Numbers that may appear without a manual fragment: check card, vehicle card, tickets, what the mechanic typed."""
+        from .grounding import numbers
+
+        allowed: set[str] = set()
+        if c.check:
+            allowed |= numbers(json.dumps(c.check.model_dump(mode="json"), ensure_ascii=False))
+        if c.vehicle:
+            allowed |= numbers(c.vehicle.model_dump_json())
+        for t in self.store.tickets(c.vehicle.vehicle_id) if c.vehicle else []:
+            allowed |= {t["ticket_id"].split("-")[-1].lstrip("0")}
+        if c.draft:
+            allowed |= {str(len(c.draft["operations"])), str(len(c.draft["spare_parts"]))}
+        for m in messages:  # numbers the mechanic typed himself may be echoed back
+            if m.get("role") == "user" and isinstance(m.get("content"), str) and not m["content"].startswith("Проверка:"):
+                allowed |= numbers(m["content"])
+        return allowed
+
+    def _live(self, c: Conv, messages: list[dict]):
+        """Callback for the streamed answer: publish only COMPLETE lines whose numbers are all found in the
+        fragments (same rule as the final number guard), so the mechanic reads the answer while it is written
+        but never sees an unverified figure. The final verified answer replaces this draft."""
+        allowed = self._allowed_numbers(c, messages)
+        evidence = [f["text"] for f in c.frags.values()]
+        state = {"n": 0}
+
+        def cb(text: str) -> None:
+            if text.lstrip().startswith("{"):
+                return  # JSON tool payloads are not for the screen
+            lines = text.split("\n")[:-1]  # the last line may be incomplete
+            if len(lines) <= state["n"]:
+                return
+            state["n"] = len(lines)
+            ok = []
+            for ln in lines:
+                ln = re.sub(r"\[(?:S|X)\d+\]", "", ln).rstrip()
+                if ln.strip() and not unverified_numbers(ln, evidence, allowed):
+                    ok.append(ln)
+            self.drafts[c.cid] = "\n".join(ok)[-3000:]
+        return cb
+
     def _verify_answer(self, c: Conv, messages: list[dict], answer: str, turn: Turn) -> str:
         if not answer:
             return answer
@@ -733,21 +783,7 @@ class Agent:
             if lab not in c.frags:
                 answer = answer.replace(f"[{lab}]", "")
         evidence = [f["text"] for f in c.frags.values()]
-        allowed: set[str] = set()
-        if c.check:
-            from .grounding import numbers
-            allowed |= numbers(json.dumps(c.check.model_dump(mode="json"), ensure_ascii=False))
-        if c.vehicle:
-            from .grounding import numbers
-            allowed |= numbers(c.vehicle.model_dump_json())
-        for t in self.store.tickets(c.vehicle.vehicle_id) if c.vehicle else []:
-            allowed |= {t["ticket_id"].split("-")[-1].lstrip("0")}
-        if c.draft:
-            allowed |= {str(len(c.draft["operations"])), str(len(c.draft["spare_parts"]))}
-        from .grounding import numbers as _nums
-        for m in messages:  # numbers the mechanic typed himself may be echoed back
-            if m.get("role") == "user" and isinstance(m.get("content"), str) and not m["content"].startswith("Проверка:"):
-                allowed |= _nums(m["content"])
+        allowed = self._allowed_numbers(c, messages)
         bad = unverified_numbers(answer, evidence, allowed)
         if bad and self.llm.available:
             messages.append({"role": "assistant", "content": answer})
