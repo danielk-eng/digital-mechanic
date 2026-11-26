@@ -26,7 +26,8 @@ class SttUnavailable(Exception):
 def deepgram_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
     if not s.deepgram_api_key:
         raise SttUnavailable("no deepgram key")
-    params = {"model": s.deepgram_model, "language": lang, "smart_format": "true", "punctuate": "true"}
+    params = {"model": s.deepgram_model, "language": lang, "smart_format": "true", "punctuate": "true",
+              "mip_opt_out": "true"}  # do not let the provider keep audio for model training
     r = httpx.post("https://api.deepgram.com/v1/listen", params=params, content=audio,
                    headers={"Authorization": f"Token {s.deepgram_api_key}", "Content-Type": mime or "audio/webm"}, timeout=30)
     if r.status_code != 200:

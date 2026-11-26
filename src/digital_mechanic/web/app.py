@@ -50,8 +50,13 @@ def user_of(uid: str | None, manager: bool = False) -> dict:
     return u
 
 
+_LAST_PURGE = [0.0]
+
+
 @app.on_event("startup")
 def _purge() -> None:
+    """Retention (152-FZ): at startup and then at most hourly, triggered by logins."""
+    _LAST_PURGE[0] = time.time()
     STORE.purge(S.audit_retention_days)
 
 
@@ -84,6 +89,8 @@ class LoginIn(BaseModel):
 def login(body: LoginIn, response: Response) -> dict:
     if S.require_consent and not body.consent:
         raise HTTPException(400, "consent required (152-FZ)")
+    if time.time() - _LAST_PURGE[0] > 3600:
+        _purge()
     uid = uuid.uuid4().hex
     role = "manager" if body.role == "manager" else "mechanic"
     u = STORE.upsert_user(uid, name=pii.mask(body.name.strip()[:60]) or "—", role=role, lang=lang_or_default(body.lang),
