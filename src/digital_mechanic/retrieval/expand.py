@@ -24,12 +24,10 @@ SYMPTOMS: list[tuple[str, str]] = [
     (r"расход масл|ест масл|жр[её]т масл|масложор|угар", "повышенный расход масла на угар"),
     (r"теч|подтек|потек|сопл|капает", "подтекание течь негерметичность уплотнений"),
     (r"глохн|глохнет|останавлива", "двигатель внезапно останавливается неустойчивая работа на холостом ходу"),
-    (r"холост", "работа двигателя на холостом ходу неустойчивая"),
     (r"заряд|генератор|аккумулятор", "генератор не заряжает аккумуляторная батарея"),
 ]
 
-FAULT_RX = re.compile(r"(?is)(неисправност|внешнее проявление).{0,400}(причин|способ устранения|метод устранения)|"
-                      r"(причин\w* неисправност).{0,400}(устранен)")
+FAULT_RX = re.compile(r"(?i)способ\w* устранения|метод\w* устранения|причин\w* неисправност|внешнее проявление|неисправности и методы")
 WHY_RX = re.compile(r"(?i)почему|причин|что делать|в ч[её]м дело|из-за чего|отчего|что провер|неисправ")
 
 
@@ -40,7 +38,7 @@ def expand(question: str) -> tuple[list[str], bool]:
     symptom = bool(terms) or bool(WHY_RX.search(low))
     queries = [question]
     if terms:
-        queries.append(question + " " + " ".join(terms))
+        queries.append(" ".join(terms))  # the symptom alone: context words ("на холостом ходу") must not dominate
     if symptom:
         queries.append("возможные неисправности причины способы устранения " + (" ".join(terms) or question))
     return queries, symptom
@@ -58,6 +56,6 @@ def make_boost(queries: list[str]):
         if sym and sym & set(tokens(text)):
             b *= 1.25
             if FAULT_RX.search(text):
-                b *= 1.25
+                b *= 1.3
         return b
     return boost
