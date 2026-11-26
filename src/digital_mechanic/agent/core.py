@@ -613,6 +613,11 @@ class Agent:
             # For a ticket request the procedures for the current fault are prefetched, so prepare_ticket gets quotes at once.
             q = (f"{c.check.anomaly_title} {c.check.description} проверка регулировка замена" if ticket_ask
                  else self.normalizer.normalize(pii.mask(raw) if self.pii_masking else raw)[0])
+            codes = [(m.upper(), self.fleet.fault_types.get(m.upper())) for m in re.findall(r"(?i)\b(f\d{2})\b", raw)]
+            codes = [(k, t) for k, t in codes if t]
+            if codes and not ticket_ask:  # "что значит F08?": search by the fault group name, not by the code
+                q = " ".join(t for _, t in codes) + " неисправности причины проверка " + re.sub(r"(?i)\bf\d{2}\b", "", q)
+                masked += "\n(" + "; ".join(f"{k} — код группы неисправностей акустической ML-диагностики: «{t}»" for k, t in codes) + ")"
             r = self.tool_search_manual(c, q, k=5)
             self.progress.setdefault(c.cid, []).append(PROGRESS["search_manual"] + f": {q[:80]}")
             turn.tools.append({"tool": "search_manual", "args": {"query": q}, "ok": True, "auto": True,

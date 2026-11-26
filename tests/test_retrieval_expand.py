@@ -58,3 +58,13 @@ def test_ticket_request_prefetches_fault_procedures(make_agent):
     a.handle(c, {"lang": "ru"}, "Создай заявку")
     first = a.llm.calls[0]["messages"][-1]["content"]
     assert "ФРАГМЕНТЫ РУКОВОДСТВА" in first and "[S1]" in first
+
+
+def test_fault_code_inside_question_searches_by_group_name(make_agent):
+    a = make_agent([msg("ок")])
+    c = a.conv("u1", "M333YK47")
+    a.handle(c, {"lang": "ru"}, "что значит F08?")
+    first = a.llm.calls[0]["messages"][-1]["content"]
+    title = a.fleet.fault_types["F08"]
+    assert f"«{title}»" in first and "ФРАГМЕНТЫ РУКОВОДСТВА" in first
+    assert title.split()[0].lower() in a.progress[c.cid][0].lower()
