@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="server"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_server_short"
+        android:shortcutLongLabel="@string/shortcut_server_long">
+        <intent
+            android:action="ru.iikuznitsa.mechanic.EDIT_SERVER"
+            android:targetPackage="ru.iikuznitsa.mechanic"
+            android:targetClass="ru.iikuznitsa.mechanic.MainActivity" />
+    </shortcut>
+</shortcuts>

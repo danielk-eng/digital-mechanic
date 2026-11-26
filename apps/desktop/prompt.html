@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Адрес сервера</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: #0e1013; color: #e8eaed; font-family: system-ui, sans-serif; }
+    form { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+    label { font-size: 13px; color: #9aa0a6; }
+    input { padding: 10px 12px; border-radius: 10px; border: 1px solid #2a2f36; background: #15181c; color: inherit; font: inherit; }
+    .row { display: flex; gap: 8px; justify-content: flex-end; }
+    button { appearance: none; border: 0; border-radius: 10px; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+    .p { background: #4c8dff; color: #fff; }
+    .g { background: #1a1d22; color: #e8eaed; }
+  </style>
+</head>
+<body>
+  <form id="f">
+    <label for="u">Адрес стенда</label>
+    <input id="u" type="url" inputmode="url" autofocus>
+    <div class="row">
+      <button type="button" class="g" id="c">Отмена</button>
+      <button class="p">Подключить</button>
+    </div>
+  </form>
+  <script>
+    const params = new URLSearchParams(location.search);
+    document.getElementById("u").value = params.get("url") || "";
+    document.getElementById("c").onclick = () => window.electronAPI.cancelPrompt();
+    document.getElementById("f").onsubmit = (e) => {
+      e.preventDefault();
+      window.electronAPI.submitPrompt(document.getElementById("u").value);
+    };
+  </script>
+</body>
+</html>
