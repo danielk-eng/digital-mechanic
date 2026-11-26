@@ -748,10 +748,26 @@ class Agent:
         return turn
 
     # ------------------------------------------------------------------ ticket confirmation gate
+    TIME_RX = re.compile(r"(?:трудо[её]мкость|норм\w* времени|время выполнения|продолжительность)[^.\n]{0,80}?\d[\d,.]*\s*(?:чел\.?[- ]?ч|ч\b|час\w*|мин\w*)"
+                         r"|\d[\d,.]*\s*(?:чел\.?[- ]?ч\w*|нормо[- ]?час\w*)", re.I)
+
+    def labor_norms(self, c: Conv, operations: list[dict]) -> list[dict]:
+        """Item 14: labour time per operation, only if the cited manual section states it (verbatim), else 'not in the book'."""
+        out = []
+        for o in operations:
+            sec = self.sections.find(o.get("doc_id"), o.get("page"), o.get("quote") or o.get("text") or "") if o.get("doc_id") else None
+            m = self.TIME_RX.search(sec.text) if sec else None
+            if m:
+                line = next((p for p in sec.pages if m.group(0) in p["text"]), sec.pages[0])
+                out.append({"text": o.get("text"), "norm": m.group(0).strip(), "doc_id": o["doc_id"], "page": line["page"]})
+            else:
+                out.append({"text": o.get("text"), "norm": None})
+        return out
+
     def draft_card(self, c: Conv) -> dict:
         d = c.draft
         return {"kind": "ticket_draft", "draft_id": d["id"], "request": d["request"], "operations": d["operations"], "spare_parts": d["spare_parts"],
-                "urgency_basis": d["urgency_basis"], "requires_inspection": d["requires_inspection"]}
+                "urgency_basis": d["urgency_basis"], "requires_inspection": d["requires_inspection"], "labor": self.labor_norms(c, d["operations"])}
 
     def confirm(self, c: Conv, draft_id: str | None, inspection_ok: bool = True) -> dict:
         if not c.draft or (draft_id and draft_id != c.draft["id"]):

@@ -102,7 +102,10 @@
   "repair_in_progress": "Ремонт идёт, шагов",
   "last_fix": "Последний ремонт",
   "recheck": "повторная проверка",
-  "ticket_returned": "Заявку вернул главный"
+  "ticket_returned": "Заявку вернул главный",
+  "labor": "Норма времени",
+  "labor_na": "в книге не указана",
+  "labor_na_some": "для остальных работ в книге не указана"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -207,7 +210,10 @@
   "repair_in_progress": "Taʼmir davom etmoqda, qadamlar",
   "last_fix": "Oxirgi taʼmir",
   "recheck": "qayta tekshiruv",
-  "ticket_returned": "Arizani bosh mexanik qaytardi"
+  "ticket_returned": "Arizani bosh mexanik qaytardi",
+  "labor": "Vaqt meʼyori",
+  "labor_na": "kitobda koʻrsatilmagan",
+  "labor_na_some": "qolgan ishlar uchun kitobda koʻrsatilmagan"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -312,7 +318,10 @@
   "repair_in_progress": "Таъмир идома дорад, қадамҳо",
   "last_fix": "Таъмири охирин",
   "recheck": "санҷиши такрорӣ",
-  "ticket_returned": "Дархостро сармеханик баргардонд"
+  "ticket_returned": "Дархостро сармеханик баргардонд",
+  "labor": "Меъёри вақт",
+  "labor_na": "дар китоб нишон дода нашудааст",
+  "labor_na_some": "барои корҳои дигар дар китоб нест"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -417,7 +426,10 @@
   "repair_in_progress": "Жөндеу жүріп жатыр, қадамдар",
   "last_fix": "Соңғы жөндеу",
   "recheck": "қайта тексеру",
-  "ticket_returned": "Өтінімді бас механик қайтарды"
+  "ticket_returned": "Өтінімді бас механик қайтарды",
+  "labor": "Уақыт нормасы",
+  "labor_na": "кітапта көрсетілмеген",
+  "labor_na_some": "қалған жұмыстар үшін кітапта көрсетілмеген"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -522,7 +534,10 @@
   "repair_in_progress": "मरम्मत जारी, चरण",
   "last_fix": "अंतिम मरम्मत",
   "recheck": "दोबारा जाँच",
-  "ticket_returned": "मुख्य मैकेनिक ने अनुरोध लौटाया"
+  "ticket_returned": "मुख्य मैकेनिक ने अनुरोध लौटाया",
+  "labor": "समय मानक",
+  "labor_na": "पुस्तिका में नहीं दिया",
+  "labor_na_some": "बाकी कार्यों के लिए पुस्तिका में नहीं"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -627,6 +642,9 @@
   "repair_in_progress": "Đang sửa, bước",
   "last_fix": "Lần sửa gần nhất",
   "recheck": "kiểm tra lại",
-  "ticket_returned": "Thợ trưởng trả lại phiếu"
+  "ticket_returned": "Thợ trưởng trả lại phiếu",
+  "labor": "Định mức thời gian",
+  "labor_na": "không có trong sổ tay",
+  "labor_na_some": "các việc còn lại không có trong sổ tay"
  }
 }

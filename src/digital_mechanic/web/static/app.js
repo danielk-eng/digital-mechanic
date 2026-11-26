@@ -155,6 +155,9 @@ function renderCard(c) {
     h += `<div style="margin:.4em 0">${esc(r.conclusion)}</div><b>Работы:</b><ol>` + c.operations.map(o => `<li>${esc(o.text)} <span class="chip" data-doc="${o.doc_id}" data-page="${o.page}" data-q="${esc(o.quote)}">${esc(o.document.slice(0, 22))}, ${t("page")} ${o.page}</span></li>`).join("") + "</ol>";
     if (c.spare_parts.length) h += `<b>Запчасти:</b><ul>` + c.spare_parts.map(o => `<li>${esc(o.text)} <span class="chip" data-doc="${o.doc_id}" data-page="${o.page}" data-q="${esc(o.quote)}">${t("page")} ${o.page}</span></li>`).join("") + "</ul>";
     else h += `<div class="muted">Запчасти: не требуются по найденной процедуре</div>`;
+    if (c.labor) { const known = c.labor.filter(l => l.norm);
+      h += `<div class="muted" style="margin-top:.3em">⏱ ${t("labor")}: ` + (known.length ? known.map(l => `${esc(l.norm)} <span class="chip" data-doc="${esc(l.doc_id)}" data-page="${l.page}" data-q="${esc(l.norm)}">${t("page")} ${l.page}</span>`).join("; ") +
+        (known.length < c.labor.length ? `; ${t("labor_na_some")}` : "") : t("labor_na")) + `</div>`; }
     h += `<details><summary class="muted">JSON для ТОиР</summary><pre style="white-space:pre-wrap;font-size:.75em">${esc(JSON.stringify(r, null, 1))}</pre></details>`;
     const d = addMsg("bot", h + `<div class="row" style="margin-top:.6em"></div>`, "card");
     const row = d.querySelector(".row:last-child");
