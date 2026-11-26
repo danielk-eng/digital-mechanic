@@ -22,7 +22,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .. import pii, voice
+from .. import pii, privacy_laws, voice
 from ..agent.llm import LlmUnavailable
 from ..agent.prompts import VISION_PROMPT
 from ..bootstrap import build_agent
@@ -139,8 +139,21 @@ def manager_page() -> str:
 
 
 @app.get("/privacy", response_class=HTMLResponse)
-def privacy() -> str:
-    return (STATIC / "privacy.html").read_text(encoding="utf-8")
+def privacy(country: str = "", uid: str | None = Cookie(None)) -> str:
+    """Country-specific: the law, where data is stored, localization and how speech is recognised."""
+    u = STORE.user(uid) if uid else None
+    c = privacy_laws.COUNTRIES[privacy_laws.country(country or (u or {}).get("country"))]
+    where = ("При внедрении сервер и база данных размещаются на территории страны (требование локализации: " + c["localize_note"] + ")."
+             if c["localize"] else "Требование локализации: " + c["localize_note"] + ". Сервер размещается по выбору оператора с соблюдением правил трансграничной передачи.")
+    speech = ("речь распознаётся локально на сервере (Whisper), аудио не сохраняется и наружу не уходит; облачное распознавание — только если "
+              "локальное недоступно." if c["localize"] else "речь распознаётся на сервере (Whisper) или в облачном сервисе Deepgram (без использования аудио для обучения); аудио не сохраняется.")
+    return ((STATIC / "privacy.html").read_text(encoding="utf-8").replace("{{LAW}}", c["law"]).replace("{{WHERE}}", where)
+            .replace("{{SPEECH}}", speech).replace("{{COUNTRY}}", c["name"]["ru"]))
+
+
+@app.get("/api/countries")
+def countries(lang: str = "ru") -> dict:
+    return {"default": privacy_laws.DEFAULT, "countries": privacy_laws.public_list(lang_or_default(lang))}
 
 
 # ---------------------------------------------------------------- auth / profile
@@ -150,18 +163,20 @@ class LoginIn(BaseModel):
     lang: str = "ru"
     experience: str = "experienced"
     consent: bool = False
+    country: str = "RU"
 
 
 @app.post("/api/login")
 def login(body: LoginIn, response: Response) -> dict:
     if S.require_consent and not body.consent:
-        raise HTTPException(400, "consent required (152-FZ)")
+        raise HTTPException(400, f"consent required ({privacy_laws.COUNTRIES[privacy_laws.country(body.country)]['short']})")
     if time.time() - _LAST_PURGE[0] > 3600:
         _purge()
     uid = uuid.uuid4().hex
     role = "manager" if body.role == "manager" else "mechanic"
     u = STORE.upsert_user(uid, name=pii.mask(body.name.strip()[:60]) or "—", role=role, lang=lang_or_default(body.lang),
-                          experience=body.experience if body.experience in EXPERIENCE_LEVELS else "experienced", consent_at=time.time())
+                          experience=body.experience if body.experience in EXPERIENCE_LEVELS else "experienced", consent_at=time.time(),
+                          country=privacy_laws.country(body.country))
     response.set_cookie("uid", uid, httponly=True, samesite="lax", max_age=30 * 86400)
     set_profile_cookie(response, u)
     STORE.audit(user_id=uid, role=role, action="login", ok=1)
@@ -191,6 +206,7 @@ class ProfileIn(BaseModel):
     answer_lang: str | None = None
     big_font: bool | None = None
     voice_out: bool | None = None
+    country: str | None = None
 
 
 @app.post("/api/me")
@@ -205,6 +221,8 @@ def update_me(body: ProfileIn, response: Response, uid: str | None = Cookie(None
         raise HTTPException(422, "experience: novice | experienced | expert")
     if kw.get("detail") not in (None, *DETAIL_LEVELS):
         raise HTTPException(422, "detail: brief | detailed")
+    if "country" in kw:
+        kw["country"] = privacy_laws.country(kw["country"])
     for k in ("big_font", "voice_out"):
         if k in kw:
             kw[k] = int(kw[k])
@@ -531,7 +549,9 @@ async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), uid: str | 
     u = user_of(uid)
     data = await audio.read()
     try:
-        text, engine = voice.transcribe(data, audio.content_type or "audio/webm", LANGS[lang_or_default(lang)]["stt"], S)
+        # data-localization countries (RU, UZ, KZ): local Whisper first, cloud only if the local one is unavailable
+        text, engine = voice.transcribe(data, audio.content_type or "audio/webm", LANGS[lang_or_default(lang)]["stt"], S,
+                                        local_first=privacy_laws.requires_localization(u.get("country")))
     except voice.SttUnavailable as e:
         raise HTTPException(503, f"STT unavailable: {e}")
     STORE.audit(user_id=u["id"], role=u["role"], action="stt", input=f"{len(data)} bytes {lang}", output=pii.mask(text)[:500], tools=[{"tool": engine}], ok=1)

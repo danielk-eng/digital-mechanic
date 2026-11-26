@@ -152,13 +152,13 @@ def speech_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
     return postprocess(r.json()["text"].strip(), lang)
 
 
-def transcribe(audio: bytes, mime: str, lang: str, s: Settings) -> tuple[str, str]:
+def transcribe(audio: bytes, mime: str, lang: str, s: Settings, local_first: bool = False) -> tuple[str, str]:
     """Return (text, engine): local whisper service -> Deepgram (ru/hi/vi) -> in-process whisper."""
     errors = []
     chain = [("whisper-local", lambda: speech_stt(audio, mime, lang, s))]
     if lang in DEEPGRAM_LANGS:
         dg = ("deepgram", lambda: deepgram_stt(audio, mime, lang, s))
-        first = lang in DEEPGRAM_FIRST and s.stt_order == "cloud-first"  # local-first (strict 152-FZ): audio stays on the stand
+        first = lang in DEEPGRAM_FIRST and s.stt_order == "cloud-first" and not local_first  # local-first (strict 152-FZ): audio stays on the stand
         chain.insert(0, dg) if first else chain.append(dg)
     chain.append(("whisper", lambda: whisper_stt(audio, lang, s)))
     for name, fn in chain:

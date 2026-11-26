@@ -134,3 +134,19 @@ def test_session_restored_from_signed_cookie_on_another_instance():
     assert r and r["lang"] == "uz" and r["experience"] == "novice"
     assert web.restore_from_cookie("u-other", up) is None  # bound to its uid
     assert web.restore_from_cookie("u-restore-1", up[:-2] + "00") is None  # tampered
+
+
+def test_country_consent_and_privacy_page(client):
+    from digital_mechanic import privacy_laws
+    cs = client.get("/api/countries?lang=uz").json()
+    assert cs["default"] == "RU" and {c["code"] for c in cs["countries"]} == {"RU", "UZ", "KZ", "TJ", "IN", "VN"}
+    assert next(c for c in cs["countries"] if c["code"] == "UZ")["name"] == "Oʻzbekiston"
+    r = client.post("/api/login", json={"name": "A", "consent": False, "country": "KZ"})
+    assert r.status_code == 400 and "94-V" in r.json()["detail"]
+    u = client.post("/api/login", json={"name": "Алишер", "consent": True, "country": "UZ", "lang": "uz"}).json()["user"]
+    assert u["country"] == "UZ"
+    page = client.get("/privacy").text
+    assert "ЗРУ-547" in page and "{{" not in page and "локально" in page
+    assert "91/2025/QH15" in client.get("/privacy?country=VN").text and "152-ФЗ" in client.get("/privacy?country=RU").text
+    assert client.post("/api/me", json={"country": "IN"}).json()["user"]["country"] == "IN"
+    assert privacy_laws.country("xx") == "RU" and not privacy_laws.requires_localization("TJ")

@@ -66,3 +66,14 @@ def test_stt_route_per_language(monkeypatch):
     lf = Settings(stt_order="local-first", deepgram_api_key="k", speech_url="http://x")
     assert voice.transcribe(b"x", "audio/webm", "uz", lf) == ("wh", "whisper-local")  # strict 152-FZ: audio stays local
     assert voice.prompt_for("kk").startswith("Жүк") and "Диагностика" not in voice.prompt_for("uz")
+
+
+def test_localization_country_forces_local_first_stt(monkeypatch):
+    """RU/UZ/KZ require data localization: even with STT_ORDER=cloud-first the local Whisper goes first."""
+    from digital_mechanic import privacy_laws, voice
+    from digital_mechanic.config import Settings
+    monkeypatch.setattr(voice, "deepgram_stt", lambda a, m, lang, s: "dg")
+    monkeypatch.setattr(voice, "speech_stt", lambda a, m, lang, s: "wh")
+    cf = Settings(stt_order="cloud-first", deepgram_api_key="k", speech_url="http://x")
+    for c, engine in (("UZ", "whisper-local"), ("KZ", "whisper-local"), ("RU", "whisper-local"), ("IN", "deepgram"), ("VN", "deepgram")):
+        assert voice.transcribe(b"x", "audio/webm", "uz" if c != "IN" else "hi", cf, local_first=privacy_laws.requires_localization(c))[1] == engine, c

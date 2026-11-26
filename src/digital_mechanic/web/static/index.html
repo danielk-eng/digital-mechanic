@@ -15,7 +15,8 @@
     <div class="field"><span class="label" data-t="role">Роль</span>
       <div class="seg" id="l_role"><button data-v="mechanic" class="on" data-t="role_mechanic">Механик</button><button data-v="manager" data-t="role_manager">Главный механик</button></div></div>
     <div class="field"><label for="l_lang" data-t="language">Язык</label><select id="l_lang" class="input"></select></div>
-    <label class="check"><input id="l_consent" type="checkbox"><span><span data-t="consent">Согласие на обработку персональных данных</span> (<a href="/privacy" target="_blank" data-t="policy">политика</a>)</span></label>
+    <div class="field"><label for="l_country" data-t="country">Страна</label><select id="l_country" class="input"></select></div>
+    <label class="check"><input id="l_consent" type="checkbox"><span><span id="l_consent_t" data-t="consent">Согласие на обработку персональных данных</span> (<a id="l_policy" href="/privacy" target="_blank" data-t="policy">политика</a>)</span></label>
     <p class="note" data-t="privacy_note">Данные сессии хранятся на сервере заказчика. В языковую модель уходит только замаскированный текст запроса.</p>
     <button class="btn primary block" id="l_go" data-t="enter">Войти</button>
   </div>

@@ -235,7 +235,10 @@
   "econ_note": "Методика расчёта стоимости описана в docs/ЭКОНОМИКА.md.",
   "no_tickets": "Заявок пока нет",
   "writing": "Пишу ответ, цифры сверены с руководством",
-  "page_no_text": "На этой странице нет текста (рисунок или схема)."
+  "page_no_text": "На этой странице нет текста (рисунок или схема).",
+  "country": "Страна",
+  "consent_law": "Согласие на обработку персональных данных по закону {law}",
+  "stt_local": "Закон требует хранить данные в стране: речь распознаётся локально на сервере."
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -282,7 +285,7 @@
   "login_name": "Ismingiz",
   "role_mechanic": "Mexanik",
   "role_manager": "Bosh mexanik",
-  "consent": "Shaxsiy maʼlumotlarni qayta ishlashga roziman (152-FZ)",
+  "consent": "Shaxsiy maʼlumotlarni qayta ishlashga roziman",
   "enter": "Kirish",
   "manager": "Bosh mexanik paneli",
   "ready": "Ishga tayyor",
@@ -469,7 +472,10 @@
   "vehicle_card": "Mashina kartasi",
   "who": "Kim",
   "writing": "Javob yozilmoqda, raqamlar qoʻllanma bilan tekshirildi",
-  "page_no_text": "Bu sahifada matn yoʻq (rasm yoki sxema)."
+  "page_no_text": "Bu sahifada matn yoʻq (rasm yoki sxema).",
+  "country": "Mamlakat",
+  "consent_law": "{law} qonuniga muvofiq shaxsiy maʼlumotlarimni qayta ishlashga roziman",
+  "stt_local": "Qonun maʼlumotlarni mamlakatda saqlashni talab qiladi: nutq serverda mahalliy tanib olinadi."
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -516,7 +522,7 @@
   "login_name": "Номи шумо",
   "role_mechanic": "Механик",
   "role_manager": "Сармеханик",
-  "consent": "Ба коркарди маълумоти шахсӣ розӣ ҳастам (152-ФЗ)",
+  "consent": "Ба коркарди маълумоти шахсӣ розӣ ҳастам",
   "enter": "Даромад",
   "manager": "Панели сармеханик",
   "ready": "Ба кор тайёр",
@@ -703,7 +709,10 @@
   "vehicle_card": "Корти мошин",
   "who": "Кӣ",
   "writing": "Ҷавоб навишта мешавад, рақамҳо бо дастур санҷида шуданд",
-  "page_no_text": "Дар ин саҳифа матн нест (расм ё нақша)."
+  "page_no_text": "Дар ин саҳифа матн нест (расм ё нақша).",
+  "country": "Кишвар",
+  "consent_law": "Ба коркарди маълумоти шахсӣ мувофиқи қонуни {law} розӣ ҳастам",
+  "stt_local": "Қонун нигоҳдории маълумотро дар кишвар талаб мекунад: нутқ дар сервер маҳаллӣ шинохта мешавад."
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -750,7 +759,7 @@
   "login_name": "Атыңыз",
   "role_mechanic": "Механик",
   "role_manager": "Бас механик",
-  "consent": "Дербес деректерді өңдеуге келісемін (152-ФЗ)",
+  "consent": "Дербес деректерді өңдеуге келісемін",
   "enter": "Кіру",
   "manager": "Бас механик панелі",
   "ready": "Жұмысқа дайын",
@@ -937,7 +946,10 @@
   "vehicle_card": "Машина карточкасы",
   "who": "Кім",
   "writing": "Жауап жазылуда, сандар нұсқаулықпен тексерілді",
-  "page_no_text": "Бұл бетте мәтін жоқ (сурет немесе сызба)."
+  "page_no_text": "Бұл бетте мәтін жоқ (сурет немесе сызба).",
+  "country": "Ел",
+  "consent_law": "{law} заңы бойынша дербес деректерімді өңдеуге келісемін",
+  "stt_local": "Заң деректерді елде сақтауды талап етеді: сөз серверде жергілікті танылады."
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -984,7 +996,7 @@
   "login_name": "आपका नाम",
   "role_mechanic": "मैकेनिक",
   "role_manager": "मुख्य मैकेनिक",
-  "consent": "व्यक्तिगत डेटा के प्रसंस्करण के लिए सहमत हूँ (152-FZ)",
+  "consent": "व्यक्तिगत डेटा के प्रसंस्करण के लिए सहमत हूँ",
   "enter": "प्रवेश करें",
   "manager": "मुख्य मैकेनिक पैनल",
   "ready": "काम के लिए तैयार",
@@ -1171,7 +1183,10 @@
   "vehicle_card": "गाड़ी कार्ड",
   "who": "कौन",
   "writing": "उत्तर लिखा जा रहा है, संख्याएँ मैनुअल से जाँची गईं",
-  "page_no_text": "इस पृष्ठ पर पाठ नहीं है (चित्र या आरेख)।"
+  "page_no_text": "इस पृष्ठ पर पाठ नहीं है (चित्र या आरेख)।",
+  "country": "देश",
+  "consent_law": "{law} के अनुसार व्यक्तिगत डेटा के प्रसंस्करण के लिए सहमति",
+  "stt_local": "कानून डेटा देश में रखने की मांग करता है: आवाज़ सर्वर पर स्थानीय रूप से पहचानी जाती है।"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -1218,7 +1233,7 @@
   "login_name": "Tên của bạn",
   "role_mechanic": "Thợ máy",
   "role_manager": "Thợ máy trưởng",
-  "consent": "Tôi đồng ý xử lý dữ liệu cá nhân (152-FZ)",
+  "consent": "Tôi đồng ý xử lý dữ liệu cá nhân",
   "enter": "Đăng nhập",
   "manager": "Bảng điều khiển thợ máy trưởng",
   "ready": "Sẵn sàng hoạt động",
@@ -1405,6 +1420,9 @@
   "vehicle_card": "Thẻ xe",
   "who": "Ai",
   "writing": "Đang viết câu trả lời, số liệu đã đối chiếu với sách hướng dẫn",
-  "page_no_text": "Trang này không có văn bản (hình hoặc sơ đồ)."
+  "page_no_text": "Trang này không có văn bản (hình hoặc sơ đồ).",
+  "country": "Quốc gia",
+  "consent_law": "Tôi đồng ý xử lý dữ liệu cá nhân theo {law}",
+  "stt_local": "Luật yêu cầu lưu dữ liệu trong nước: giọng nói được nhận dạng cục bộ trên máy chủ."
  }
 }

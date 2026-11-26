@@ -30,6 +30,17 @@ function applyI18n() {
   $$("[data-t-aria]").forEach(el => { el.setAttribute("aria-label", t(el.dataset.tAria)); el.title = t(el.dataset.tAria); });
   document.documentElement.lang = (ME && ME.lang) || "ru";
   if (typeof VID !== "undefined" && !VID && $("#vehTitle")) $("#vehTitle").textContent = t("choose_vehicle");  // vehicle title is not an i18n label
+  if ($("#l_country")) loginCountry();
+}
+// Personal-data law by country: consent text names the law of the selected country, in the UI language.
+let COUNTRIES = null;
+async function loadCountries() { if (!COUNTRIES) COUNTRIES = (await (await fetch("/api/countries?lang=" + ((ME && ME.lang) || $("#l_lang")?.value || "ru"))).json()).countries; return COUNTRIES; }
+function countryOptions(sel, cur) { sel.innerHTML = (COUNTRIES || []).map(c => `<option value="${c.code}" ${c.code === cur ? "selected" : ""}>${esc(c.name)}</option>`).join(""); }
+function consentText(code) { const c = (COUNTRIES || []).find(x => x.code === code) || {short: "152-ФЗ"}; return t("consent_law").replace("{law}", c.short); }
+async function loginCountry() {
+  await loadCountries(); const sel = $("#l_country"); const cur = sel.value || "RU";
+  if (!sel.options.length) countryOptions(sel, cur);
+  $("#l_consent_t").textContent = consentText(sel.value); $("#l_policy").href = `/privacy?country=${sel.value}`;
 }
 function toast(text, ms = 3500) {
   const el = document.createElement("div"); el.className = "toast"; el.textContent = text; document.body.appendChild(el);
@@ -716,17 +727,21 @@ function settingsSheet() {
   sheet(t("settings"),
     `<div class="field"><label class="label" for="s_lang">${t("language")}</label><select id="s_lang" class="input"></select></div>` +
     `<div class="field"><label class="label" for="s_alang">${t("answer_lang")}</label><select id="s_alang" class="input"></select></div>` +
+    `<div class="field"><label class="label" for="s_country">${t("country")}</label><select id="s_country" class="input"></select><p class="small muted" id="s_law" style="margin-top:8px"></p></div>` +
     `<div class="field"><span class="label">${t("level")}</span>${segHtml("s_exp", [["novice", short(t("exp_novice"))], ["experienced", short(t("exp_expert"))], ["expert", short(t("exp_pro"))]], ME.experience || "experienced")}</div>` +
     `<div class="field"><span class="label">${t("detail")}</span>${segHtml("s_detail", [["brief", t("detail_brief")], ["detailed", t("detail_detailed")]], ME.detail || "brief")}</div>` +
     `<div class="field"><span class="label">${t("font_size")}</span>${segHtml("s_fs", [["n", "A"], ["l", "A+"], ["xl", "A++"]], A11Y.size())}</div>` +
     `<div class="field"><span class="label">${t("theme")}</span>${segHtml("s_theme", [["dark", t("theme_dark")], ["light", t("theme_light")], ["contrast", t("theme_contrast")]], A11Y.theme())}</div>` +
     `<label class="switch"><span>${t("voice_speaks")}</span><input type="checkbox" id="s_vtts" ${A11Y.voiceSpeaks() ? "checked" : ""}></label>` +
     `<label class="switch"><span>${t("captions")}</span><input type="checkbox" id="s_cc" ${A11Y.captions() ? "checked" : ""}></label>` +
-    `<div class="sep"></div><p class="small muted">${t("privacy_note")} <a href="/privacy" target="_blank">${t("policy")}</a></p>` +
+    `<div class="sep"></div><p class="small muted">${t("privacy_note")} <a href="/privacy?country=${esc(ME.country || "RU")}" target="_blank">${t("policy")}</a></p>` +
     `<div class="card-actions"><button class="btn ghost" id="s_logout">${icon("log-out", 18)}<span>${t("logout")}</span></button><button class="btn danger" id="s_delete">${t("delete_data")}</button></div>`, sh => {
     langOptions(sh.querySelector("#s_lang"), ME.lang); langOptions(sh.querySelector("#s_alang"), ME.answer_lang || "", true);
     sh.querySelector("#s_lang").onchange = async e => { await saveProfile({lang: e.target.value}); settingsSheet(); if (VID) loadChips(); else showEmpty(); };
     sh.querySelector("#s_alang").onchange = e => saveProfile({answer_lang: e.target.value});
+    loadCountries().then(() => { const sel = sh.querySelector("#s_country"); countryOptions(sel, ME.country || "RU");
+      const law = () => { const c = COUNTRIES.find(x => x.code === sel.value); sh.querySelector("#s_law").textContent = c ? `${c.law}. ${c.localize ? t("stt_local") : ""}` : ""; };
+      law(); sel.onchange = async () => { await saveProfile({country: sel.value}); law(); }; });
     bindSeg(sh, "s_exp", v => saveProfile({experience: v}));
     bindSeg(sh, "s_detail", v => saveProfile({detail: v}));
     bindSeg(sh, "s_fs", v => { A11Y.setSize(v); layout(); });
@@ -761,7 +776,7 @@ window.addEventListener("resize", layout);
 let ROLE = "mechanic";
 $$("#l_role button").forEach(b => b.onclick = () => { ROLE = b.dataset.v; $$("#l_role button").forEach(x => x.classList.toggle("on", x === b)); });
 $("#l_go").onclick = async () => {
-  const body = {name: $("#l_name").value.trim() || "—", role: ROLE, lang: $("#l_lang").value, experience: "experienced", consent: $("#l_consent").checked};
+  const body = {name: $("#l_name").value.trim() || "—", role: ROLE, lang: $("#l_lang").value, experience: "experienced", consent: $("#l_consent").checked, country: $("#l_country").value || "RU"};
   if (!body.consent) return toast(t("consent_needed"));
   try { ME = (await api("/api/login", {json: body})).user; } catch (e) { return toast(friendlyError(e)); }
   if (ME.role === "manager") location.href = "/manager"; else start();
@@ -774,5 +789,5 @@ async function start() {
   hydrateIcons();
   I18N = await (await fetch("/static/i18n.json")).json();
   try { ME = (await api("/api/session")).user; if (!ME) throw new Error("login"); start(); }
-  catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = applyI18n; applyI18n(); $("#login").classList.remove("hidden"); }
+  catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = () => { COUNTRIES = null; $("#l_country").innerHTML = ""; applyI18n(); }; $("#l_country").onchange = loginCountry; applyI18n(); $("#login").classList.remove("hidden"); }
 })();
