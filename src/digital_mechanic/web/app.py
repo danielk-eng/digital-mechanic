@@ -111,15 +111,81 @@ def restore_from_cookie(uid: str | None, up: str | None) -> dict | None:
 
 
 def set_profile_cookie(response: Response, u: dict) -> None:
-    response.set_cookie("up", profile_cookie(u), httponly=True, samesite="lax", max_age=30 * 86400)
+    response.set_cookie("up", profile_cookie(u), httponly=True, samesite="lax", max_age=400 * 86400)
+
+
+# Login session: the PIN is asked once. Cookie «s» = signed {uid, sid, iat}, httpOnly, ~400 days (the browser maximum),
+# renewed on every boot (/api/session), so it lasts until an explicit logout. Server side: table sessions (sid -> user,
+# revoked). On a serverless stand an instance that has not seen the sid yet accepts the signature and records it; logout
+# revokes the sid where it is recorded and deletes the cookie. A plain «uid» cookie is ignored (it was forgeable).
+SESSION_MAX_AGE = 400 * 86400
+
+
+def session_cookie(uid: str, sid: str | None = None) -> str:
+    raw = json.dumps({"u": uid, "s": sid or uuid.uuid4().hex, "t": int(time.time())}, separators=(",", ":")).encode()
+    b = base64.urlsafe_b64encode(raw).decode().rstrip("=")
+    return b + "." + hmac.new(_cookie_key(), ("s:" + b).encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def parse_session(value: str | None) -> dict | None:
+    if not value or "." not in value:
+        return None
+    b, sig = value.rsplit(".", 1)
+    if not hmac.compare_digest(sig, hmac.new(_cookie_key(), ("s:" + b).encode(), hashlib.sha256).hexdigest()[:40]):
+        return None
+    try:
+        d = json.loads(base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)))
+    except Exception:
+        return None
+    return d if d.get("u") and d.get("s") else None
+
+
+def start_session(response: Response, uid: str) -> None:
+    sid = uuid.uuid4().hex
+    STORE.x("INSERT OR REPLACE INTO sessions(sid,user_id,created,seen) VALUES(?,?,?,?)", (sid, uid, time.time(), time.time()))
+    response.set_cookie("s", session_cookie(uid, sid), httponly=True, samesite="lax", max_age=SESSION_MAX_AGE,
+                        secure=bool(os.environ.get("VERCEL")))
+
+
+def end_session(request, response: Response) -> None:
+    d = parse_session(request.cookies.get("s"))
+    if d:
+        STORE.x("INSERT INTO sessions(sid,user_id,created,seen,revoked) VALUES(?,?,?,?,?) ON CONFLICT(sid) DO UPDATE SET revoked=excluded.revoked",
+                (d["s"], d["u"], time.time(), time.time(), time.time()))
+    for k in ("s", "uid", "up"):
+        response.delete_cookie(k)
+
+
+def _session_uid(request) -> str | None:
+    d = parse_session(request.cookies.get("s"))
+    if not d:
+        return None
+    row = STORE.one("SELECT revoked FROM sessions WHERE sid=?", (d["s"],))
+    if row is None:  # another instance (Vercel) or a DB from before the redeploy: the signature is the proof
+        STORE.x("INSERT OR IGNORE INTO sessions(sid,user_id,created,seen) VALUES(?,?,?,?)", (d["s"], d["u"], d.get("t") or time.time(), time.time()))
+    elif row["revoked"]:
+        return None
+    return d["u"]
 
 
 @app.middleware("http")
 async def _restore_session(request, call_next):
-    uid, up = request.cookies.get("uid"), request.cookies.get("up")
+    uid = _session_uid(request)
+    up = request.cookies.get("up")
     if uid and up and not STORE.user(uid):
         restore_from_cookie(uid, up)
-    return await call_next(request)
+    # downstream endpoints read Cookie «uid»: replace whatever the browser sent with the verified one (or nothing)
+    hdr = [(k, v) for k, v in request.scope["headers"] if k != b"cookie"]
+    rest = "; ".join(f"{k}={v}" for k, v in request.cookies.items() if k != "uid")
+    cookie = "; ".join(x for x in (rest, f"uid={uid}" if uid else "") if x)
+    if cookie:
+        hdr.append((b"cookie", cookie.encode("latin-1", "ignore")))
+    request.scope["headers"] = hdr
+    response = await call_next(request)
+    if uid and request.url.path == "/api/session":  # sliding renewal: active users are never asked for the PIN again
+        response.set_cookie("s", request.cookies["s"], httponly=True, samesite="lax", max_age=SESSION_MAX_AGE,
+                            secure=bool(os.environ.get("VERCEL")))
+    return response
 
 
 def user_of(uid: str | None, manager: bool = False, roles: tuple[str, ...] | None = None) -> dict:
@@ -239,7 +305,7 @@ def login_demo(body: DemoLoginIn, response: Response) -> dict:
         if S.require_consent and not body.consent:
             raise HTTPException(400, f"consent required ({privacy_laws.COUNTRIES[privacy_laws.country(body.country)]['short']})")
         u = STORE.upsert_user(db["id"], consent_at=time.time(), **({"lang": lang_or_default(body.lang)} if db.get("onboarded") else {}))
-        response.set_cookie("uid", db["id"], httponly=True, samesite="lax", max_age=30 * 86400)
+        start_session(response, db["id"])
         set_profile_cookie(response, u)
         STORE.audit(user_id=db["id"], role=db["role"], action="login_pin", ok=1)
         return {"user": pub(u), "account": {"key": code, "title": db.get("title"), "vehicles": json.loads(db.get("vehicles") or "[]")}}
@@ -254,7 +320,7 @@ def login_demo(body: DemoLoginIn, response: Response) -> dict:
     if not STORE.user(a["uid"]):
         demo_seed.seed(STORE, AGENT.fleet, DEMO)
     u = STORE.upsert_user(a["uid"], lang=lang_or_default(body.lang), consent_at=time.time(), country=privacy_laws.country(body.country), role=a["role"])
-    response.set_cookie("uid", a["uid"], httponly=True, samesite="lax", max_age=30 * 86400)
+    start_session(response, a["uid"])
     set_profile_cookie(response, u)
     STORE.audit(user_id=a["uid"], role=a["role"], action="login_demo", ok=1)
     return {"user": pub(u), "account": {k: a.get(k) for k in ("key", "title", "vehicles")}}
@@ -357,15 +423,14 @@ def delete_me(response: Response, uid: str | None = Cookie(None)) -> dict:
     for f in STORE.media_files_of(uid):  # photos, frames and recordings are personal data too
         (Path(S.uploads_dir) / Path(f).name).unlink(missing_ok=True)
     STORE.delete_user_data(uid)
-    response.delete_cookie("uid")
-    response.delete_cookie("up")
+    for k in ("s", "uid", "up"):
+        response.delete_cookie(k)
     return {"deleted": True}
 
 
 @app.post("/api/logout")
-def logout(response: Response) -> dict:
-    response.delete_cookie("uid")
-    response.delete_cookie("up")
+def logout(request: Request, response: Response) -> dict:
+    end_session(request, response)
     return {"ok": True}
 
 

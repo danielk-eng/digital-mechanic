@@ -36,7 +36,7 @@ def test_profile_api_edit_and_delete(tmp_path):
     importlib.reload(web)
     web.STORE.upsert_user("u-prof", name="A", role="mechanic", consent_at=1.0,
                           profile=json.dumps({"terms": {"тнвд": 2, "щуп": 1}, "glossed": {}, "messages": 4, "expands": 0}))
-    c = TestClient(web.app); c.cookies.set("uid", "u-prof")
+    c = TestClient(web.app); c.cookies.set("s", web.session_cookie("u-prof"))
     assert c.get("/api/me").json()["profile"]["terms"] == ["тнвд", "щуп"]
     assert c.post("/api/me/profile", json={"remove_term": "щуп"}).json()["profile"]["terms"] == ["тнвд"]
     assert c.post("/api/me/profile", json={"reset": True}).json()["profile"]["terms"] == []

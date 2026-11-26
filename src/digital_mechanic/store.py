@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS handoffs(
 CREATE TABLE IF NOT EXISTS media(
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user_id TEXT, vehicle_id TEXT, kind TEXT, files TEXT,
   description TEXT, features TEXT, note TEXT);
+CREATE TABLE IF NOT EXISTS sessions(
+  sid TEXT PRIMARY KEY, user_id TEXT, created REAL, seen REAL, revoked REAL);
 CREATE INDEX IF NOT EXISTS media_v ON media(vehicle_id, ts);
 CREATE INDEX IF NOT EXISTS diag_v ON diagnoses(vehicle_id, ts);
 CREATE INDEX IF NOT EXISTS tick_v ON tickets(vehicle_id, ts);
@@ -104,7 +106,7 @@ class Store:
         return self.one("SELECT * FROM users WHERE id=?", (uid,))
 
     def delete_user_data(self, uid: str) -> None:
-        for t in ("messages", "audit", "handoffs", "media"):
+        for t in ("messages", "audit", "handoffs", "media", "sessions"):
             self.x(f"DELETE FROM {t} WHERE user_id=?", (uid,))
         for t in ("diagnoses", "tickets", "repairs"):
             self.x(f"UPDATE {t} SET user_id=NULL WHERE user_id=?", (uid,))  # keep fleet records, unlink person
