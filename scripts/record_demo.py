@@ -27,7 +27,7 @@ with sync_playwright() as p:
     pg.wait_for_function("document.body.innerText.includes('TKT-')", timeout=30000); pg.wait_for_timeout(2500)
     # scenario 2
     pg.type("#t", question, delay=45); pg.keyboard.press("Enter")
-    pg.wait_for_function("document.querySelectorAll('.m.a').length>=7", timeout=120000); pg.wait_for_timeout(5000)
+    pg.wait_for_timeout(1000); pg.wait_for_function("![...document.querySelectorAll('.m.a')].some(e=>e.textContent.trim()==='…')", timeout=120000); pg.wait_for_timeout(5000)
     # scenario 3
     pg.select_option("#chk", failed); pg.wait_for_timeout(800)
     pg.click("#get")
