@@ -138,4 +138,5 @@ python scripts/smoke.py <URL>           # вход → машины → диаг
 FastAPI, Uvicorn, Pydantic, httpx, openai-python, pypdf, PyYAML, snowballstemmer (BSD/MIT/Apache-2.0); poppler-utils
 (GPL, вызывается как внешняя программа для текста и картинок страниц); опционально faster-whisper (MIT), Silero TTS
 (лицензия CC BY-NC-SA — только для некоммерческого демо), Opik (Apache-2.0). Внешние API: TokenRouter (LLM), Deepgram (STT).
+Интерфейс: шрифт Inter (SIL OFL 1.1, локально в `web/static/fonts/`), иконки Lucide (ISC, подмножество в `web/static/icons.js`).
 Заглушки ML/ТОиР в `vendor/neurodvs_mock/` — материалы Заказчика без изменений (добавлен только Dockerfile).

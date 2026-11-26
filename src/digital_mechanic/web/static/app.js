@@ -75,7 +75,7 @@ const Player = {
   },
 };
 let SERVER_TTS = true;
-function plain(text) { return String(text || "").replace(/\[[^\]]*\b(S|X)\d+\b[^\]]*\]/g, "").replace(/<[^>]+>/g, " ").replace(/[*#•_]/g, "").replace(/\s+/g, " ").trim().slice(0, 1200); }
+function plain(text) { return String(text || "").replace(/\[[^\]]*\b(S|X)\d+\b[^\]]*\]/g, "").replace(/<[^>]+>/g, " ").replace(/[*#•_]/g, "").replace(/\s+/g, " ").replace(/ ([.,;:!?)])/g, "$1").trim().slice(0, 1200); }
 function caption(text, ms = 0) {
   const el = $("#caption"); if (!el) return;
   if (!text || !A11Y.captions() || !$("#voice").classList.contains("hidden")) { el.classList.add("hidden"); return; }
@@ -548,7 +548,7 @@ async function printTurn(turn) {
     .pg{page-break-before:always}.muted{color:#555;font-size:.9em}.noprint{font:600 11pt Inter,system-ui,sans-serif;background:#2f6fe0;color:#fff;border:0;border-radius:8px;padding:10px 18px;cursor:pointer;margin-bottom:12pt}@media print{.noprint{display:none}}`;
   w.document.open();
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(t("app_title"))}, ${esc(veh)}</title><link rel="stylesheet" href="/static/fonts/fonts.css"><style>${css}</style></head><body>
-    <p class="noprint"><button onclick="print()">${t("print")}</button></p><h1>${esc(t("app_title"))}</h1><p class="muted">${esc(veh)}, ${new Date().toLocaleString()}, ${esc((ME && ME.name) || "")}</p>
+    <p><button class="noprint" onclick="print()">${t("print")}</button></p><h1>${esc(t("app_title"))}</h1><p class="muted">${esc(veh)}, ${new Date().toLocaleString("ru-RU", {dateStyle: "short", timeStyle: "short"})}, ${esc((ME && ME.name) || "")}</p>
     ${factsHtml(turn.facts)}<div>${md(turn.text, turn.sources)}</div>${lab}<p class="muted">${t("print_note")}</p>${pages.join("")}</body></html>`);
   w.document.close();
   await Promise.all([...w.document.images].map(i => i.complete ? 1 : new Promise(r => { i.onload = i.onerror = r; })));
