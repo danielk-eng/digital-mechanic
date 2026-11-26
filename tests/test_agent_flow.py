@@ -183,3 +183,14 @@ def test_alternatives_and_hypothesis_events(make_agent):
     assert "Другие варианты" in str(a.llm.calls[-1]["messages"])
     a.handle(c, {"lang": "ru"}, "прокладка ГБЦ", event="hypothesis")
     assert "Проверь гипотезу механика: «прокладка ГБЦ»" in str(a.llm.calls[-1]["messages"])
+
+
+def test_start_chips_and_bare_fault_code(make_agent):
+    from digital_mechanic.agent import suggest
+    a = make_agent([msg("Код F02 — низкое давление масла.")])
+    c = a.conv("u1", "M333YK47")
+    chips = suggest.build(a.index, c.vehicle, None, [], None, None, False)
+    kinds = [ch.kind for ch in chips]
+    assert "code" in kinds and kinds.count("symptom") >= 2
+    a.handle(c, {"lang": "ru"}, "F02")
+    assert "Код неисправности F02 «Низкое давление масла»" in str(a.llm.calls[-1]["messages"])

@@ -91,6 +91,16 @@ def hydraulic_lifters(index, engine: str) -> bool:
     return _hydro_cache[engine]
 
 
+# Start of a visit without a check: symptom or fault code first, no long interview (Bosch / Mercedes style).
+SYMPTOMS = [("стук двигатель", "Стучит двигатель — что проверить?"),
+            ("давление масла низкое", "Низкое давление масла — что проверить?"),
+            ("перегрев двигателя охлаждающей", "Перегревается — что проверить?"),
+            ("дымление дым отработавших", "Сильно дымит — в чём причина?"),
+            ("пуск двигателя затруднен", "Плохо заводится — что проверить?"),
+            ("двигатель не развивает мощность", "Не тянет, падает мощность — что проверить?")]
+CODE_CHIP = "Ввести код ошибки F…"
+
+
 def build(index, vehicle, check, history: list, repair: dict | None, draft: dict | None, has_ticket: bool,
           experience: str = "experienced", limit: int = 5) -> list[Chip]:
     eng = vehicle.engine_model
@@ -140,6 +150,12 @@ def build(index, vehicle, check, history: list, repair: dict | None, draft: dict
             chips.append(Chip("Начать ремонт по шагам", "action"))
     elif status == "normal":
         manual(SERVICE)
+    elif status is None and not (repair and repair.get("status") == "open"):
+        for q, text in SYMPTOMS:
+            p = grounded_page(index, eng, q)
+            if p and len(chips) < 4:
+                chips.append(Chip(text, "symptom", p.doc_id, p.page))
+        chips.append(Chip(CODE_CHIP, "code"))
     # 3) history: repeated fault or growing score
     prev = [h for h in history if getattr(h.status, "value", h.status) == "anomaly" and (not check or h.session_id != check.session_id)]
     if check and status == "anomaly" and any(h.anomaly_type == check.anomaly_type for h in prev):

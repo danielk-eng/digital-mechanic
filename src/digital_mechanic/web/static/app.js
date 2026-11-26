@@ -32,7 +32,7 @@ async function loadChips() {
     (r.chips || []).forEach(ch => {
       const b = document.createElement("button"); b.textContent = ch.text; b.className = `qc ${ch.kind}`;
       if (ch.page) b.title = `${ch.doc} · ${t("page")} ${ch.page}`;
-      b.onclick = () => send(ch.text); q.appendChild(b);
+      b.onclick = ch.kind === "code" ? () => { $("#txt").value = "F0"; $("#txt").focus(); } : () => send(ch.text); q.appendChild(b);
     });
   } catch (_) { /* chips are optional */ }
 }

@@ -499,6 +499,11 @@ class Agent:
         masked = pii.mask(raw) if self.pii_masking else raw
         if event == "expand":
             return self._expand(c, user, raw, turn)
+        m = re.fullmatch(r"(?:код\s*(?:ошибки\s*)?)?(F\d{2})\.?", raw, re.I)
+        if m and c.vehicle and not event:  # bare fault code typed or spoken -> grounded explanation by code
+            code = m.group(1).upper()
+            title = self.fleet.fault_types.get(code)
+            raw = masked = f"Код неисправности {code}" + (f" «{title}»" if title else "") + ": что это значит для этого двигателя и что проверить по руководству?"
         if event in ("alternatives", "hypothesis") and c.vehicle:
             raw = masked = (ALT_PROMPT if event == "alternatives" else HYPOTHESIS_PROMPT.format(h=masked[:300]))
             event = None
