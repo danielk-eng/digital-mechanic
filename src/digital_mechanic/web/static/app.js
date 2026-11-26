@@ -581,16 +581,20 @@ function rms() { const buf = new Uint8Array(VOICE.an.fftSize); VOICE.an.getByteT
 // VAD = level above an ADAPTIVE noise floor AND most energy in the voice band (300–3400 Hz).
 // Engine rumble (low) and compressor hiss (high) raise the floor but do not count as speech.
 function voiceBand() {
-  const an = VOICE.an, f = new Uint8Array(an.frequencyBinCount); an.getByteFrequencyData(f);
+  // share of POWER (not dB) in 300–3400 Hz among 80–8000 Hz
+  const an = VOICE.an, f = new Float32Array(an.frequencyBinCount); an.getFloatFrequencyData(f);
   const hz = VOICE.ctx.sampleRate / an.fftSize; let band = 0, all = 0;
-  for (let i = 1; i < f.length; i++) { const e = f[i] * f[i]; all += e; if (i * hz >= 300 && i * hz <= 3400) band += e; }
+  for (let i = 1; i < f.length; i++) {
+    const fr = i * hz; if (fr < 80 || fr > 8000 || !isFinite(f[i])) continue;
+    const p = Math.pow(10, f[i] / 10); all += p; if (fr >= 300 && fr <= 3400) band += p;
+  }
   return all ? band / all : 0;
 }
 function isSpeech(r, k = 2.2, min = 7) {
   const floor = VOICE.floor || 4, thr = Math.max(min, floor * k + 2);
-  const sp = r > thr && voiceBand() > 0.5;
-  if (!sp) VOICE.floor = 0.97 * floor + 0.03 * Math.min(r, floor * 3);  // track background only when not speaking
-  return sp;
+  const b = r > thr ? voiceBand() : 0; VOICE.band = b;
+  if (r < thr) VOICE.floor = Math.min(12, 0.98 * floor + 0.02 * r);  // background level; capped so speech never becomes "noise"
+  return r > thr && b > 0.45;
 }
 function meter() {
   if (!VOICE.on) return;
