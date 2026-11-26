@@ -44,7 +44,7 @@ async function trace(id) {
 }
 async function mcp() {
   const r = await api("/api/eng/mcp");
-  $("#tab-mcp").innerHTML = `<div class="panel"><div class="pad"><div class="pin-row" style="grid-template-columns:1fr 2fr 1fr 1fr auto;align-items:end">` +
+  $("#tab-mcp").innerHTML = `<div class="panel"><div class="pad"><div class="mcp-form">` +
     `<div><label class="label" for="m_name">Название</label><input id="m_name" class="input" placeholder="toir-prod"></div><div><label class="label" for="m_url">URL</label><input id="m_url" class="input" placeholder="https://…/mcp"></div>` +
     `<div><label class="label" for="m_tr">Транспорт</label><select id="m_tr" class="input"><option>http</option><option>sse</option></select></div>` +
     `<div><label class="label" for="m_env">Ключ из env</label><input id="m_env" class="input" placeholder="TOIR_MCP_TOKEN"></div><button class="btn primary" id="m_add">Добавить</button></div>` +
