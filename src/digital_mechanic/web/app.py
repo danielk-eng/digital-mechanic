@@ -881,12 +881,20 @@ def _page(doc_id: str, page: int):
     raise HTTPException(404, "page not found")
 
 
+_FOOTER_RE = re.compile(r"\n[ \t]*(\d{1,4}|Страница \d{1,4}|- ?\d{1,4} ?-)[ \t]*\s*$")
+
+
+def view_text(text: str) -> str:
+    """Page text for the viewer without the printed page number (or «Страница N») on its last line."""
+    return _FOOTER_RE.sub("", text or "").rstrip()
+
+
 @app.get("/api/page/{doc_id}/{page}")
 def page_json(doc_id: str, page: int, uid: str | None = Cookie(None)) -> dict:
     user_of(uid)
     p, extra = _page(doc_id, page)
     meta = AGENT.docs.get(doc_id, {})
-    return {"doc_id": doc_id, "document": p.document, "full_title": meta.get("full_title", p.document), "page": page, "text": p.text, "extra": extra,
+    return {"doc_id": doc_id, "document": p.document, "full_title": meta.get("full_title", p.document), "page": page, "text": view_text(p.text), "extra": extra,
             "has_image": bool((not extra and (Path(S.manuals_dir) / meta.get("filename", "_")).exists() and shutil.which("pdftoppm")) or (extra and p.image))}
 
 
@@ -899,8 +907,9 @@ def section_json(doc_id: str, page: int, q: str = "", uid: str | None = Cookie(N
     meta = AGENT.docs.get(doc_id, {})
     pdf = not extra and (Path(S.manuals_dir) / meta.get("filename", "_")).exists()
     imgs = bool((pdf and shutil.which("pdftoppm")) or (extra and p.image and (Path(S.extra_images_dir) / p.image).exists()))
-    return {"document": p.document, "full_title": meta.get("full_title", p.document), "extra": extra, "pdf": pdf, "has_image": imgs,
-            **(sec.as_dict() if sec else {"pages": [{"page": page, "text": p.text}], "start_page": page, "end_page": page, "span": str(page), "title": "", "label": ""})}
+    d = sec.as_dict() if sec else {"pages": [{"page": page, "text": p.text}], "start_page": page, "end_page": page, "span": str(page), "title": "", "label": ""}
+    d["pages"] = [{**x, "text": view_text(x.get("text", ""))} for x in d.get("pages", [])]
+    return {"document": p.document, "full_title": meta.get("full_title", p.document), "extra": extra, "pdf": pdf, "has_image": imgs, **d}
 
 
 class ExtractIn(BaseModel):

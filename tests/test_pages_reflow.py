@@ -119,3 +119,9 @@ def test_three_column_table_symptom_on_its_own_line_and_prose_after_table():
                                     "4 Шум", "а) износ — Заменить муфту",
                                     "Нажимной и ведомый диски сцепления процессе эксплуатации не", "руются, а при их непригодности заменяются новыми."]
 
+
+def test_viewer_text_drops_the_printed_page_number():
+    from digital_mechanic.web.app import view_text
+    assert view_text("Причина — Способ\nстрока\n190") == "Причина — Способ\nстрока"
+    assert view_text("текст\nСтраница 3\n") == "текст"
+    assert view_text("Рис. 5\nтекст 12") == "Рис. 5\nтекст 12"
