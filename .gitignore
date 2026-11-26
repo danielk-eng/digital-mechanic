@@ -1,10 +1,36 @@
+# --- env / secrets (never publish) ---
+.env
+.env.*
+!.env.example
+*.key
+*_key
+.tokenrouter_key
+secrets/
+# --- python / tooling ---
 .venv/
 __pycache__/
 *.pyc
-.env
 .cache/
+.pytest_cache/
 runs/
-*.key
+# --- runtime data (users, audit, uploads: 152-FZ) ---
 var/
+*.db
+*.db-wal
+*.db-shm
+*.log.jsonl
+# --- customer / third-party materials not for the public repo ---
+materials/
 data/manuals/*.pdf
 data/extra/images/
+*.m4a
+*.mp3
+*.wav
+*.webm
+*.mp4
+*.sqlite
+*.part
+*.zip
+# KAMAZ manual from an unofficial mirror: excluded by owner decision 26.11
+*kamaz*
+*KAMAZ*

@@ -149,6 +149,11 @@ class ExtraIndex:
         return None
 
 
+# Sources excluded by the owner (unverified redistribution rights), never loaded even if present in a file.
+EXCLUDED_EXTRA_SOURCES = {"avtoalfa.com"}
+EXCLUDED_EXTRA_DOCS = {"EXTRA-KAMAZ4350-RE"}
+
+
 def load_extra(path: str) -> list[ExtraPage]:
     import gzip, json
     from pathlib import Path
@@ -159,6 +164,8 @@ def load_extra(path: str) -> list[ExtraPage]:
     with gzip.open(path, "rt", encoding="utf-8") as f:
         for line in f:
             r = json.loads(line)
+            if r.get("doc_id") in EXCLUDED_EXTRA_DOCS or r.get("source") in EXCLUDED_EXTRA_SOURCES:
+                continue
             r["models"] = tuple(r.get("models") or ())
             out.append(ExtraPage(**r))
     return out

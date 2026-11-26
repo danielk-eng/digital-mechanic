@@ -29,3 +29,12 @@ def test_main_bearing_torque_found(index, engine, doc, page, needle):
 def test_references_use_official_designations(pages):
     titles = {p.document for p in pages}
     assert "236.01.01 РК" in titles and "536.3902150 РЭ" in titles
+
+
+def test_kamaz_mirror_excluded():
+    import gzip, json
+    from digital_mechanic.retrieval.bm25 import load_extra
+    pages = load_extra("data/index/extra_pages.jsonl.gz")
+    assert pages and all(p.make != "КАМАЗ" and p.source != "avtoalfa.com" for p in pages)
+    raw = [json.loads(l) for l in gzip.open("data/index/extra_pages.jsonl.gz", "rt", encoding="utf-8")]
+    assert not any("KAMAZ" in r["doc_id"] for r in raw)
