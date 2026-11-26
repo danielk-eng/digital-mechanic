@@ -1,0 +1,42 @@
+"""Side figure captions are moved out of the text column (page viewer showed 'отверРис. 28')."""
+from digital_mechanic.ingest.pages import _pick, reflow_side_captions
+
+
+def _line(y, words):
+    ws = "".join(f'<word xMin="{x0}" yMin="{y}" xMax="{x1}" yMax="{y + 8}">{w}</word>' for x0, x1, w in words)
+    return f'<line xMin="0" yMin="{y}" xMax="0" yMax="{y + 8}">{ws}</line>'
+
+
+PAGE = "".join([
+    _line(100, [(68, 120, "Перед"), (124, 200, "установкой")]),
+    _line(274, [(225, 300, "вставить"), (305, 352, "отвер-")]),
+    _line(279, [(77, 95, "Рис."), (97, 110, "28."), (112, 158, "Крепление")]),
+    _line(287, [(225, 244, "стие"), (249, 288, "передней")]),
+    _line(290, [(114, 123, "на"), (126, 171, "двигателе:")]),
+    _line(298, [(225, 244, "тора")]),
+])
+
+
+def test_side_caption_is_separated():
+    t = reflow_side_captions(PAGE)
+    assert t is not None
+    body, cap = t.split("\n\n")
+    assert body.split("\n") == ["Перед установкой", "вставить отвер-", "стие передней", "тора"]
+    assert cap == "Рис. 28. Крепление\nна двигателе:"
+
+
+def test_no_side_caption_keeps_pdftotext():
+    page = _line(100, [(68, 120, "Рис."), (124, 140, "5.")]) + _line(120, [(68, 200, "текст")])
+    assert reflow_side_captions(page) is None
+    assert _pick("plain text", None) == "plain text"
+
+
+def test_word_loss_falls_back_to_plain():
+    assert _pick("a b c d e f g h i j", "a b") == "a b c d e f g h i j"
+
+
+def test_glued_word_parts_are_joined():
+    page = _line(10, [(68, 98, "выклю"), (98, 125, "чатель")]) + _line(10, [(225, 260, "текст")]) + _line(20, [(68, 90, "Рис."), (92, 100, "1.")])
+    page += _line(20, [(225, 260, "дальше")])
+    t = reflow_side_captions(page)
+    assert t.startswith("выключатель текст")

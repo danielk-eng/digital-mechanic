@@ -7,7 +7,9 @@ index committed to the repo, so the running app does not need the PDFs to answer
 from __future__ import annotations
 
 import gzip
+import html
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
@@ -52,9 +54,112 @@ def _extract_pypdf(pdf: Path) -> list[str]:
     return [(p.extract_text() or "") for p in PdfReader(str(pdf)).pages]
 
 
+# ---------------------------------------------------------------- figure captions beside the text column
+# On A5 manuals a figure and its caption often sit in one column and the procedure text in the other.
+# pdftotext orders lines by height across both columns, so caption lines end up inside the text
+# ("вставить болт 2 в отверРис. 28. Крепление генератора стие передней лапы ..."). We re-read such pages
+# with word boxes, pull the side caption out of the flow and append it as its own paragraph.
+CAPTION_RE = re.compile(r"^(Рис\.|Рисунок|Fig\.)\s*\d")
+_WORD_RE = re.compile(r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</word>')
+GAP_SPLIT = 14.0  # pt between words that starts a new segment (another column)
+
+
+@dataclass
+class _Seg:
+    x0: float
+    y0: float
+    x1: float
+    y1: float
+    words: list
+
+    @property
+    def text(self) -> str:
+        out, prev = "", None
+        for x0, x1, w in self.words:
+            out += ("" if prev is not None and x0 - prev < 0.6 else (" " if out else "")) + w
+            prev = x1
+        return out
+
+
+def _segments(page_xml: str) -> list[_Seg]:
+    segs: list[_Seg] = []
+    for line in re.findall(r"<line [^>]*>(.*?)</line>", page_xml, re.S):
+        cur = None
+        for m in _WORD_RE.finditer(line):
+            x0, y0, x1, y1 = map(float, m.groups()[:4])
+            w = html.unescape(m.group(5))
+            if cur is None or x0 - cur.x1 > GAP_SPLIT:
+                cur = _Seg(x0, y0, x1, y1, [])
+                segs.append(cur)
+            cur.words.append((x0, x1, w))
+            cur.x1, cur.y0, cur.y1 = max(cur.x1, x1), min(cur.y0, y0), max(cur.y1, y1)
+    return segs
+
+
+def _beside(a: _Seg, others: list[_Seg]) -> list[_Seg]:
+    """Segments of another column that share height with a (horizontally disjoint, vertically overlapping)."""
+    return [o for o in others if o is not a and (o.x0 > a.x1 + 4 or o.x1 < a.x0 - 4) and o.y0 < a.y1 + 30 and o.y1 > a.y0 - 30]
+
+
+def reflow_side_captions(page_xml: str) -> str | None:
+    """Text of the page with side captions moved out of the text flow, or None when the page has none."""
+    segs = sorted(_segments(page_xml), key=lambda s: (round(s.y0), s.x0))
+    captions: list[list[_Seg]] = []
+    taken: set[int] = set()
+    for i, s in enumerate(segs):
+        if id(s) in taken or not CAPTION_RE.match(s.text):
+            continue
+        side = _beside(s, segs)
+        if not side:
+            continue
+        left = side[0].x0 > s.x1  # caption column is left of the text column
+        border = min(o.x0 for o in side) - 2 if left else max(o.x1 for o in side) + 2
+        block, last = [s], s
+        for t in segs[i + 1:]:
+            if t.y0 - last.y1 > 9:
+                break
+            inside = (t.x1 <= border and t.x0 >= s.x0 - 14) if left else (t.x0 >= border and t.x1 <= s.x1 + 40)
+            if inside and id(t) not in taken:
+                block.append(t)
+                last = t
+        captions.append(block)
+        taken.update(id(t) for t in block)
+    if not captions:
+        return None
+    lines: list[list[_Seg]] = []
+    for s in segs:
+        if id(s) in taken:
+            continue
+        if lines and abs(lines[-1][0].y0 - s.y0) < 2.5:
+            lines[-1].append(s)
+        else:
+            lines.append([s])
+    body = "\n".join(" ".join(t.text for t in sorted(ln, key=lambda t: t.x0)) for ln in lines)
+    return body + "".join("\n\n" + "\n".join(t.text for t in b) for b in captions)
+
+
+def _extract_bbox_pages(pdf: Path) -> list[str]:
+    out = subprocess.run(["pdftotext", "-enc", "UTF-8", "-bbox-layout", str(pdf), "-"], capture_output=True, check=True).stdout.decode("utf-8", "replace")
+    return re.findall(r"<page [^>]*>(.*?)</page>", out, re.S)
+
+
+def _pick(plain: str, reflowed: str | None) -> str:
+    """Reflowed text only when it keeps the words (rotated or odd pages lose them: keep pdftotext)."""
+    if not reflowed:
+        return plain
+    return reflowed if len(reflowed.split()) >= 0.95 * len(plain.split()) else plain
+
+
 def extract_pdf(pdf: Path) -> list[str]:
     if shutil.which("pdftotext"):
-        return _extract_pdftotext(pdf)
+        pages = _extract_pdftotext(pdf)
+        try:
+            boxes = _extract_bbox_pages(pdf)
+        except (subprocess.CalledProcessError, OSError):
+            boxes = []
+        if len(boxes) == len(pages):
+            pages = [_pick(t, reflow_side_captions(b)) for t, b in zip(pages, boxes)]
+        return pages
     return _extract_pypdf(pdf)
 
 
