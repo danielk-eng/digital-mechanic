@@ -70,8 +70,27 @@ async function openVehicle(vid) {
 }
 
 function pageLink(x) {
-  const href = x.extra ? `/page/${encodeURIComponent(x.doc_id)}/${x.page}.png` : `/manuals/${encodeURIComponent(x.doc_id)}.pdf#page=${x.page}`;
-  return `<a class="cite" target="_blank" href="${href}" title="${esc(x.document)}">${t("page_short")} ${x.page}</a>`;
+  return `<button class="cite" data-doc="${esc(x.doc_id)}" data-page="${x.page}" title="${esc(x.document)}">${t("page_short")} ${x.page}</button>`;
+}
+// In-app page viewer (same as the mechanic's): page text from the manual index + page image; PDF only as a small secondary link.
+async function pageViewer(doc, page) {
+  let v = $("#pv");
+  if (!v) { v = document.createElement("div"); v.id = "pv"; v.className = "viewer"; document.body.appendChild(v); }
+  const s = await api(`/api/section/${encodeURIComponent(doc)}/${page}`).catch(() => null);
+  const pages = s ? [...new Set([...s.pages.map(p => p.page), page])].sort((a, b) => a - b) : [page];
+  const show = async n => {
+    const p = await api(`/api/page/${encodeURIComponent(doc)}/${n}`).catch(() => ({text: ""}));
+    const i = pages.indexOf(n), prev = pages[i - 1], next = pages[i + 1];
+    v.innerHTML = `<div class="vhd"><button class="icon-btn" id="pvClose">${icon("arrow-left")}</button><div class="t"><b>${t("page")} ${n}</b><span>${esc(p.full_title || "")}</span></div></div>` +
+      `<div class="vbd"><div class="wrap"><div class="pages">${pages.map(k => `<button data-pg="${k}" class="${k === n ? "on" : ""}">${t("page_short")} ${k}</button>`).join("")}</div>` +
+      `<section class="pageview"><div class="pagetext">${esc(p.text || "")}</div>${p.has_image ? `<img class="pageimg" src="/page/${encodeURIComponent(doc)}/${n}.png" alt="">` : ""}</section>` +
+      `<div class="pnav"><button class="btn ghost sm" data-pg="${prev ?? ""}" ${prev == null ? "disabled" : ""}>${icon("chevron-left", 18)}${t("page_short")} ${prev ?? "—"}</button>` +
+      `<button class="btn ghost sm" data-pg="${next ?? ""}" ${next == null ? "disabled" : ""}>${t("page_short")} ${next ?? "—"}${icon("chevron-right", 18)}</button></div>` +
+      (s && s.pdf ? `<p class="pdflink"><a target="_blank" rel="noopener" href="/manuals/${encodeURIComponent(doc)}.pdf#page=${n}">${icon("external-link", 14)}${t("open_pdf")}</a></p>` : "") + `</div></div>`;
+    v.querySelector("#pvClose").onclick = () => v.remove();
+    v.querySelectorAll("[data-pg]").forEach(b => { if (b.dataset.pg) b.onclick = () => show(+b.dataset.pg); });
+  };
+  await show(+page);
 }
 function mdl(s) { return esc(s || "").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>"); }
 function attHtml(a) {
@@ -156,10 +175,10 @@ $("#logout").onclick = async () => { await fetch("/api/logout", {method: "POST"}
 const TH_IC = {dark: "moon", light: "sun", contrast: "contrast"};
 function themeIcon() { $("#theme").innerHTML = icon(TH_IC[A11Y.theme()]); }
 $("#theme").onclick = () => { const th = A11Y.THEMES; A11Y.setTheme(th[(th.indexOf(A11Y.theme()) + 1) % th.length]); themeIcon(); };
-document.addEventListener("keydown", e => { if (e.key === "Escape") closeSide(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { if ($("#pv")) $("#pv").remove(); else closeSide(); } });
 document.addEventListener("click", e => {
   const ch = e.target.closest("button.cite[data-doc]"); if (!ch) return;
-  window.open(`/page/${encodeURIComponent(ch.dataset.doc)}/${ch.dataset.page}.png`, "_blank");
+  e.preventDefault(); pageViewer(ch.dataset.doc, +ch.dataset.page);
 });
 (async () => {
   document.querySelectorAll("[data-icon]").forEach(el => el.innerHTML = icon(el.dataset.icon));

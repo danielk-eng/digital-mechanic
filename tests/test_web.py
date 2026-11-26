@@ -91,3 +91,10 @@ def test_vehicle_title_not_overwritten_by_i18n():
     from pathlib import Path
     html = (Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static/index.html").read_text(encoding="utf-8")
     assert 'id="vehTitle" data-t=' not in html  # applyI18n() used to reset the plate to «Выберите машину» after a settings change
+
+
+def test_manual_pdf_served_inline():
+    import inspect
+    from digital_mechanic.web import app as web
+    src = inspect.getsource(web.manual_pdf)
+    assert 'content_disposition_type="inline"' in src

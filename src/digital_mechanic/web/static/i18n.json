@@ -234,7 +234,8 @@
   "tokens_per_call": "Токенов на вызов",
   "econ_note": "Методика расчёта стоимости описана в docs/ЭКОНОМИКА.md.",
   "no_tickets": "Заявок пока нет",
-  "writing": "Пишу ответ, цифры сверены с руководством"
+  "writing": "Пишу ответ, цифры сверены с руководством",
+  "page_no_text": "На этой странице нет текста (рисунок или схема)."
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -467,7 +468,8 @@
   "trend": "Dinamika",
   "vehicle_card": "Mashina kartasi",
   "who": "Kim",
-  "writing": "Javob yozilmoqda, raqamlar qoʻllanma bilan tekshirildi"
+  "writing": "Javob yozilmoqda, raqamlar qoʻllanma bilan tekshirildi",
+  "page_no_text": "Bu sahifada matn yoʻq (rasm yoki sxema)."
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -700,7 +702,8 @@
   "trend": "Динамика",
   "vehicle_card": "Корти мошин",
   "who": "Кӣ",
-  "writing": "Ҷавоб навишта мешавад, рақамҳо бо дастур санҷида шуданд"
+  "writing": "Ҷавоб навишта мешавад, рақамҳо бо дастур санҷида шуданд",
+  "page_no_text": "Дар ин саҳифа матн нест (расм ё нақша)."
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -933,7 +936,8 @@
   "trend": "Динамика",
   "vehicle_card": "Машина карточкасы",
   "who": "Кім",
-  "writing": "Жауап жазылуда, сандар нұсқаулықпен тексерілді"
+  "writing": "Жауап жазылуда, сандар нұсқаулықпен тексерілді",
+  "page_no_text": "Бұл бетте мәтін жоқ (сурет немесе сызба)."
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -1166,7 +1170,8 @@
   "trend": "गतिशीलता",
   "vehicle_card": "गाड़ी कार्ड",
   "who": "कौन",
-  "writing": "उत्तर लिखा जा रहा है, संख्याएँ मैनुअल से जाँची गईं"
+  "writing": "उत्तर लिखा जा रहा है, संख्याएँ मैनुअल से जाँची गईं",
+  "page_no_text": "इस पृष्ठ पर पाठ नहीं है (चित्र या आरेख)।"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -1399,6 +1404,7 @@
   "trend": "Xu hướng",
   "vehicle_card": "Thẻ xe",
   "who": "Ai",
-  "writing": "Đang viết câu trả lời, số liệu đã đối chiếu với sách hướng dẫn"
+  "writing": "Đang viết câu trả lời, số liệu đã đối chiếu với sách hướng dẫn",
+  "page_no_text": "Trang này không có văn bản (hình hoặc sơ đồ)."
  }
 }

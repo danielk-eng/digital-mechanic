@@ -15,6 +15,7 @@ from pathlib import Path
 
 from fastapi import Cookie, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -32,6 +33,24 @@ AGENT = build_agent(S)
 STORE = AGENT.store
 STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="Цифровой механик", version="1.0")
+
+
+class TextGZip:
+    """Gzip only text (HTML/JS/CSS/JSON): PDFs, page images and audio pass through untouched (range requests, streaming)."""
+
+    SKIP = (".pdf", ".png", ".jpg", ".jpeg", ".woff2", ".wav", ".mp3")
+
+    def __init__(self, app_):
+        self.app, self.gz = app_, GZipMiddleware(app_, minimum_size=1000)
+
+    async def __call__(self, scope, receive, send):
+        p = scope.get("path", "") if scope["type"] == "http" else ""
+        if scope["type"] != "http" or p.endswith(self.SKIP) or p.startswith(("/api/tts", "/api/page", "/api/pdf", "/api/doc", "/api/upload", "/api/stt")):
+            return await self.app(scope, receive, send)
+        return await self.gz(scope, receive, send)
+
+
+app.add_middleware(TextGZip)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 Path(S.log_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -591,7 +610,9 @@ def manual_pdf(doc_id: str, uid: str | None = Cookie(None)):
     meta = AGENT.docs.get(doc_id)
     if not meta or not (Path(S.manuals_dir) / meta["filename"]).exists():
         raise HTTPException(404)
-    return FileResponse(Path(S.manuals_dir) / meta["filename"], media_type="application/pdf")
+    # inline: open in the browser's viewer, never as a download (mobile used to offer «Скачать»)
+    return FileResponse(Path(S.manuals_dir) / meta["filename"], media_type="application/pdf", filename=f"{doc_id}.pdf",
+                        content_disposition_type="inline", headers={"Cache-Control": "private, max-age=3600"})
 
 
 # ---------------------------------------------------------------- audit / ops

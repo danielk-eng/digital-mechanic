@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from .. import pii, policy
+from . import answer_post
 from ..clients import Fleet, MlClient, ServiceError, ToirClient
 from ..i18n import LANGS, answer_lang, lang_or_default
 from ..retrieval.bm25 import ExtraIndex, ManualIndex, snippet
@@ -101,10 +102,11 @@ class Turn:
     ok: bool = True
     facts: list[dict] = field(default_factory=list)
     understood: list = field(default_factory=list)  # [(original, manual term)] "did you mean"
+    actions: list[dict] = field(default_factory=list)  # contextual buttons under the answer (instead of offer-questions in the text)
 
     def as_dict(self) -> dict:
         return {"text": self.text, "cards": self.cards, "sources": self.sources, "tools": self.tools, "facts": self.facts,
-                "understood": self.understood}
+                "understood": self.understood, "actions": self.actions}
 
 
 ALT_PROMPT = ("Другие варианты: предложи до 3 других возможных причин, которые мы ещё НЕ обсуждали, и как проверить каждую — "
@@ -533,12 +535,47 @@ class Agent:
             if c.preface:  # deterministic part (e.g. triage order by the TZ urgency rules), not subject to LLM grounding
                 turn.text = c.preface + ("\n\n" + turn.text if turn.text else "")
                 c.preface = ""
+            if turn.text:
+                turn.text, intents = answer_post.clean(turn.text)
+                labels = set(cited_labels(turn.text))
+                turn.sources = [s for s in turn.sources if s["label"] in labels]
+                if c.vehicle:
+                    turn.actions = self.answer_actions(c, turn, intents)
             if turn.text and turn.sources and not turn.text.startswith("LLM временно недоступна"):
                 from .facts import key_facts
 
                 frags = [{"label": l, **c.frags[l]} for l in cited_labels(turn.text) if l in c.frags and not c.frags[l].get("extra")]
                 turn.facts = key_facts(frags, text, turn.text)
             return turn
+
+    def answer_actions(self, c: Conv, turn: Turn, intents: set[str]) -> list[dict]:
+        """Buttons under an answer, from the conversation state (+ what the LLM tried to offer in words).
+        kind=send: post `text` as the mechanic's message; open: page viewer; handoff: handoff sheet."""
+        if any(cd.get("kind") in ("ticket_draft", "repair") for cd in turn.cards):
+            return []  # those cards carry their own buttons
+        vid = c.vehicle.vehicle_id
+        rep = self.repair_card(vid)
+        rep_open = bool(rep and rep.get("status") == "open")
+        has_ticket = bool(self.store.tickets(vid))
+        st = getattr(c.check, "status", None)
+        status = getattr(st, "value", st)
+        out: list[dict] = []
+        if rep_open:
+            out.append({"id": "next_step", "kind": "send", "label": "Следующий шаг", "text": "Готово, следующий шаг"})
+        elif c.draft:
+            out.append({"id": "confirm_ticket", "kind": "send", "label": "Подтвердить заявку", "text": "Подтверждаю заявку"})
+        elif status == "anomaly" and not has_ticket:
+            out.append({"id": "create_ticket", "kind": "send", "label": "Создать заявку", "text": "Создать заявку на дефектовку"})
+        elif has_ticket and ("repair" in intents or status == "anomaly"):
+            out.append({"id": "start_repair", "kind": "send", "label": "Начать ремонт по шагам", "text": "Начать ремонт по шагам"})
+        elif "ticket" in intents and status != "normal":
+            out.append({"id": "create_ticket", "kind": "send", "label": "Создать заявку", "text": "Создать заявку на дефектовку"})
+        src = next((s for s in turn.sources if not s.get("extra")), turn.sources[0] if turn.sources else None)
+        if src:
+            out.append({"id": "show_section", "kind": "open", "label": "Показать раздел", "doc_id": src["doc_id"], "page": src["page"]})
+        if "handoff" in intents or (status == "anomaly" and (has_ticket or rep_open)):
+            out.append({"id": "handoff", "kind": "handoff", "label": "Передать главному"})
+        return out[:3]
 
     def _handle(self, c: Conv, user: dict, text: str, image_note: str | None, event: str | None) -> Turn:
         turn = Turn()

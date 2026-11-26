@@ -2,7 +2,7 @@
 // Mechanic app. Vanilla JS, no build step. Sections: core · i18n · audio player · rendering · vehicle · chat · citation viewer · voice mode · sheets · settings · login.
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-let I18N = {}, ME = null, VID = localStorage.getItem("vid") || "", VEH = null, VLIST = [], BUSY = false, LAST_Q = "", HYP = false;
+let I18N = {}, ME = null, VID = new URLSearchParams(location.search).get("v") || localStorage.getItem("vid") || "", VEH = null, VLIST = [], BUSY = false, LAST_Q = "", HYP = false;
 const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN"};
 const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt"};
 const t = k => (I18N[(ME && ME.lang) || $("#l_lang")?.value || "ru"] || I18N.ru || {})[k] || (I18N.ru || {})[k] || k;
@@ -115,6 +115,18 @@ function md(text, sources) {
   flushP(); flushL();
   return out;
 }
+const ACT_ICON = {create_ticket: "file-text", confirm_ticket: "check", next_step: "check", start_repair: "wrench", show_section: "book-open", handoff: "forward"};
+function answerActionsHtml(actions) {
+  if (!actions || !actions.length) return "";
+  return `<div class="answer-actions">` + actions.map((a, i) => `<button class="btn sm ${i === 0 && a.kind === "send" ? "primary" : "ghost"}" data-ai="${i}">${icon(ACT_ICON[a.id] || "chevron-right", 16)}<span>${esc(a.label)}</span></button>`).join("") + `</div>`;
+}
+function bindAnswerActions(d, actions) {
+  (actions || []).forEach((a, i) => { const b = d.querySelector(`[data-ai="${i}"]`); if (!b) return;
+    b.onclick = ev => { ev.stopPropagation();
+      if (a.kind === "send") { d.querySelector(".answer-actions")?.remove(); send(a.text); }
+      else if (a.kind === "open") openCitation(a.doc_id, a.page, "");
+      else if (a.kind === "handoff") handoffSheet(); }; });
+}
 function sourcesHtml(sources) {
   if (!sources || !sources.length) return "";
   const seen = new Set();
@@ -169,7 +181,8 @@ function renderTurn(turn, expanded = false) {
     const actions = [];
     if (hasSrc && !expanded && (ME.detail || "brief") === "brief") actions.push({label: t("expand"), onclick: (ev, b) => { b.remove(); eventTurn("expand", turn.text, null, true); }});
     if (hasSrc && VID) actions.push({icon: "ellipsis", aria: t("more_actions"), onclick: () => turnMenu(turn)});
-    addMsg("bot", und + factsHtml(turn.facts) + md(turn.text, turn.sources) + sourcesHtml(turn.sources), {speak: turn.text, actions});
+    const d = addMsg("bot", und + factsHtml(turn.facts) + md(turn.text, turn.sources) + answerActionsHtml(turn.actions), {speak: turn.text, actions});
+    bindAnswerActions(d, turn.actions);
   }
   loadChips();
   return turn;
@@ -346,7 +359,7 @@ async function selectVehicle(vid) {
   drawVehicle(r, lv);
   for (const m of r.messages) {
     (m.meta.cards || []).forEach(renderCard);
-    if (m.text) m.role === "user" ? addMsg("user", esc(m.text)) : addMsg("bot", md(m.text, m.meta.sources) + sourcesHtml(m.meta.sources), {speak: m.text});
+    if (m.text) m.role === "user" ? addMsg("user", esc(m.text)) : addMsg("bot", md(m.text, m.meta.sources), {speak: m.text});
   }
   if (r.draft && !r.messages.some(m => (m.meta.cards || []).some(c => c.kind === "ticket_draft"))) renderCard(r.draft);
   if (!r.messages.length && r.repair) renderCard({...r.repair, kind: "repair"});
@@ -509,31 +522,57 @@ function hl(txt, q) {
   const re = new RegExp(`(${words.map(w => w.slice(0, Math.max(5, w.length - 2)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[\\p{L}]*`, "giu");
   return txt.replace(re, m => `<mark>${m}</mark>`);
 }
+// Page viewer: every page link opens in-app (text from the manual index + page image when the stand has it).
+// A raw PDF is never the default; «Открыть PDF» is a small secondary link (served inline).
+let VIEW = null;
+// PDF text layer has hard line breaks: join a line with the next one when the sentence clearly continues.
+const reflow = x => String(x || "").replace(/([а-яё])-\n(?=[а-яё])/g, "$1").replace(/([^\n.:;!?])\n(?=[a-zа-яё(«])/g, "$1 ");
 async function openCitation(doc, page, q) {
-  Player.stop();
+  Player.stop(); page = +page;
   $("#viewer").classList.remove("hidden"); document.body.style.overflow = "hidden";
   $("#mTitle").textContent = `${t("page")} ${page}`; $("#mSub").textContent = ""; $("#mPdf").classList.add("hidden");
   $("#mBody").innerHTML = `<div class="extract skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div>`;
   try {
     const s = await api(`/api/section/${encodeURIComponent(doc)}/${page}?q=${encodeURIComponent(q || LAST_Q)}`);
+    const texts = Object.fromEntries(s.pages.map(p => [p.page, p.text]));
+    const pages = [...new Set([...s.pages.map(p => p.page), page])].sort((a, b) => a - b);
+    VIEW = {doc, s, q, pages, texts, cur: page};
     $("#mTitle").textContent = s.label || `${t("page")} ${page}`; $("#mSub").textContent = s.full_title;
-    if (s.pdf) { $("#mPdf").href = `/manuals/${encodeURIComponent(doc)}.pdf#page=${page}`; $("#mPdf").classList.remove("hidden"); }
-    const pages = s.pages.map(p => p.page);
-    const link = n => s.pdf ? `<a target="_blank" href="/manuals/${encodeURIComponent(doc)}.pdf#page=${n}" class="${n === page ? "on" : ""}">${t("page_short")} ${n} ${icon("external-link", 14)}</a>`
-      : `<button data-img="${n}" class="${n === page ? "on" : ""}">${t("page_short")} ${n}</button>`;
     $("#mBody").innerHTML = (s.extra ? `<p class="small muted">* ${t("extra_src")}</p>` : "") +
-      `<div class="extract" id="mExtract"><div class="h">${t("extract")}</div><div class="skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div></div>` +
-      `<div class="label">${t("pages")}</div><div class="pages">${pages.map(link).join("")}</div>` +
-      `<details class="sec"><summary>${icon("chevron-right", 18)}<span>${t("full_section")}, ${t("page_short")} ${esc(s.span)}</span></summary><div class="in">` +
-      s.pages.map(p => `<div class="pagehead">${t("page")} ${p.page}</div><div class="pagetext">${hl(esc(p.text), q)}</div>`).join("") + `</div></details>` +
-      (s.has_image ? `<details class="sec" id="mImgBox"><summary>${icon("chevron-right", 18)}<span id="mImgT">${t("page_image")} ${page}</span></summary><div class="in"><img id="mImg" class="pageimg" loading="lazy" src="/page/${encodeURIComponent(doc)}/${page}.png" alt="${esc(t("page"))} ${page}"></div></details>` : "");
-    $("#mBody").querySelectorAll("[data-img]").forEach(c => c.onclick = () => { const n = c.dataset.img;
-      if ($("#mImg")) { $("#mImg").src = `/page/${encodeURIComponent(doc)}/${n}.png`; $("#mImgBox").open = true; $("#mImgT").textContent = `${t("page_image")} ${n}`; } });
+      `<div class="extract" id="mExtract"><div class="h">${t("extract")}, ${t("page_short")} ${page}</div><div class="skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div></div>` +
+      `<div class="label">${t("pages")}</div><div class="pages" id="mPages">${pages.map(n => `<button data-pg="${n}">${t("page_short")} ${n}</button>`).join("")}</div>` +
+      `<section class="pageview" id="mPage" aria-live="polite"></section>` +
+      `<div class="pnav"><button class="btn ghost sm" id="mPrev">${icon("chevron-left", 18)}<span></span></button><button class="btn ghost sm" id="mNext"><span></span>${icon("chevron-right", 18)}</button></div>` +
+      (pages.length > 1 ? `<details class="sec"><summary>${icon("chevron-right", 18)}<span>${t("full_section")}, ${t("page_short")} ${esc(s.span)}</span></summary><div class="in">` +
+        s.pages.map(p => `<div class="pagehead">${t("page")} ${p.page}</div><div class="pagetext">${hl(esc(reflow(p.text)), q)}</div>`).join("") + `</div></details>` : "") +
+      (s.pdf ? `<p class="pdflink"><a id="mPdfLink" target="_blank" rel="noopener">${icon("external-link", 14)}${t("open_pdf")}</a></p>` : "");
+    $("#mPages").querySelectorAll("[data-pg]").forEach(b => b.onclick = () => showPage(+b.dataset.pg, true));
+    $("#mPrev").onclick = () => showPage(VIEW.pages[VIEW.pages.indexOf(VIEW.cur) - 1], true);
+    $("#mNext").onclick = () => showPage(VIEW.pages[VIEW.pages.indexOf(VIEW.cur) + 1], true);
+    await showPage(page, false);
     api("/api/extract", {json: {doc_id: doc, page, q, question: LAST_Q}}).then(x => {
       const box = $("#mExtract"); if (!box) return;
-      box.innerHTML = `<div class="h">${t("extract")}</div>` + (x.ok ? md(x.text) : `<p class="muted">${t("extract_na")}</p>`);
+      box.innerHTML = `<div class="h">${t("extract")}, ${t("page_short")} ${page}</div>` + (x.ok ? md(x.text) : `<p class="muted">${t("extract_na")}</p>`);
     }).catch(() => { const box = $("#mExtract"); if (box) box.innerHTML = `<div class="h">${t("extract")}</div><p class="muted">${t("extract_na")}</p>`; });
   } catch (err) { $("#mBody").innerHTML = `<p class="err">${esc(friendlyError(err))}</p>`; }
+}
+async function showPage(n, scroll) {
+  if (!VIEW || n == null) return;
+  const {doc, s, q, pages} = VIEW; VIEW.cur = n;
+  $("#mPages").querySelectorAll("[data-pg]").forEach(b => b.classList.toggle("on", +b.dataset.pg === n));
+  const i = pages.indexOf(n), prev = pages[i - 1], next = pages[i + 1];
+  $("#mPrev").disabled = prev == null; $("#mPrev").querySelector("span").textContent = prev == null ? t("page_short") + " —" : `${t("page_short")} ${prev}`;
+  $("#mNext").disabled = next == null; $("#mNext").querySelector("span").textContent = next == null ? t("page_short") + " —" : `${t("page_short")} ${next}`;
+  const box = $("#mPage");
+  box.innerHTML = `<div class="pv-head">${t("page")} ${n}<span class="muted"> · ${i + 1} / ${pages.length}</span></div><div class="skeleton"><div class="line"></div><div class="line"></div></div>`;
+  if (scroll) box.scrollIntoView({behavior: "smooth", block: "start"});
+  let txt = VIEW.texts[n], img = s.has_image;
+  if (txt == null) { try { const p = await api(`/api/page/${encodeURIComponent(doc)}/${n}`); txt = VIEW.texts[n] = p.text; img = p.has_image; } catch (_) { txt = ""; } }
+  if (VIEW.cur !== n) return;
+  box.innerHTML = `<div class="pv-head">${t("page")} ${n}<span class="muted"> · ${i + 1} / ${pages.length}</span></div>` +
+    `<div class="pagetext">${txt ? hl(esc(reflow(txt)), q) : `<span class="muted">${t("page_no_text")}</span>`}</div>` +
+    (img ? `<img class="pageimg" id="mImg" loading="lazy" src="/page/${encodeURIComponent(doc)}/${n}.png" alt="${esc(t("page_image"))} ${n}">` : "");
+  const a = $("#mPdfLink"); if (a) a.href = `/manuals/${encodeURIComponent(doc)}.pdf#page=${n}`;
 }
 function closeViewer() { $("#viewer").classList.add("hidden"); document.body.style.overflow = ""; }
 
