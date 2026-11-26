@@ -92,8 +92,10 @@ def test_history_scoped_to_current_check(make_agent):
     ctx = a._context(c)
     later = [s.session_id for s in a.fleet.sessions("M333YK47")]
     later = later[later.index("S-0005") + 1:]
+    hist = ctx.split("ИСТОРИЯ МАШИНЫ")[1]
+    assert "S-0005" in hist
     for sid in later:
-        assert sid not in ctx.split("Проверки этой машины до текущей включительно:")[1].split("\n")[0]
+        assert sid not in hist
 
 
 def test_manager_tools_only_for_manager(make_agent):

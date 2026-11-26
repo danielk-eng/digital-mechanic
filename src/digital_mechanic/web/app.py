@@ -253,6 +253,16 @@ def progress(vehicle_id: str | None = None, uid: str | None = Cookie(None)) -> d
     return {"steps": AGENT.progress.get(f"{u['id']}:{vehicle_id or '-'}", [])}
 
 
+@app.get("/api/history/{vid}")
+def vehicle_history(vid: str, uid: str | None = Cookie(None)) -> dict:
+    user_of(uid)
+    try:
+        AGENT.fleet.get(vid)
+    except KeyError:
+        raise HTTPException(404, "unknown vehicle")
+    return AGENT.timeline(vid)
+
+
 @app.get("/api/suggest")
 def suggest_chips(vehicle_id: str | None = None, uid: str | None = Cookie(None)) -> dict:
     u = user_of(uid)

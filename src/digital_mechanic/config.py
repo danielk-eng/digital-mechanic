@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     extra_index_path: str = "data/index/extra_pages.jsonl.gz"
     extra_images_dir: str = "data/extra"
     extra_kb_enabled: bool = True
+    demo_history_path: str = "data/demo_history.json"  # synthetic past tickets/repairs/parts for the timeline demo; "" to disable
     db_path: str = "var/app.db"
     uploads_dir: str = "var/uploads"
     page_cache_dir: str = "var/page_png"

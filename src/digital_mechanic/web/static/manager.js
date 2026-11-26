@@ -52,8 +52,8 @@ async function openVehicle(vid) {
   const v = h.vehicle, row = FLEET.vehicles.find(r => r.vehicle_id === vid) || {};
   $("#dTitle").textContent = `${v.vehicle_id} · ${v.model && v.model.startsWith(v.make) ? v.model : (v.make + " " + (v.model || ""))} · ${v.engine_model}`;
   let b = `<div class="card">${badge(row.status, row.in_repair)} · тренд anomaly_score: <b>${esc(h.anomaly_score_trend)}</b>${row.urgency_basis && row.urgency_basis.length ? `<div class="muted">Приоритет ${row.urgency}: ${row.urgency_basis.map(esc).join("; ")}</div>` : ""}</div>`;
-  b += `<div class="card"><b>${t("history")}</b><br>${chart(h.checks)}<table><tr><th>Проверка</th><th>Дата</th><th>Статус</th><th>Тип</th><th>Оценка</th><th>Уверенность</th><th>Запись</th></tr>` +
-    h.checks.map(c => `<tr><td>${c.session_id}</td><td>${(c.checked_at || "").slice(0, 16).replace("T", " ")}</td><td>${c.status}</td><td>${esc((c.anomaly_type || "") + " " + (c.anomaly_title || ""))}</td><td>${c.anomaly_score ?? "—"}</td><td>${c.confidence ?? "—"}</td><td>${c.signal_quality}</td></tr>`).join("") + "</table></div>";
+  try { const tl = await api(`/api/history/${encodeURIComponent(vid)}`); b += `<div class="card"><b>${t("history")}</b>${renderTimeline(tl)}</div>`; }
+  catch (_) { b += `<div class="card"><b>${t("history")}</b><br>${chart(h.checks)}</div>`; }
   b += `<div class="card"><b>${t("tickets")}</b>` + (h.tickets.length ? "<ul>" + h.tickets.map(x => `<li><b>${esc(x.ticket_id)}</b> ${esc(x.urgency)} · ${esc(x.at)} — ${esc(x.conclusion)}</li>`).join("") + "</ul>" : `<div class="muted">нет</div>`) + "</div>";
   if (h.repair) b += `<div class="card"><b>🛠 ${esc(h.repair.title)}</b> — ${h.repair.status === "done" ? t("repair_done") : `${t("step")} ${h.repair.current + 1} ${t("of")} ${h.repair.steps.length}`}<ol class="steps">${h.repair.steps.map((s, i) => `<li class="${s.done ? "done" : i === h.repair.current ? "cur" : ""}">${esc(s.text)}</li>`).join("")}</ol></div>`;
   $("#dBody").innerHTML = b; $("#drawer").classList.remove("hidden");
@@ -111,3 +111,9 @@ $("#logout").onclick = async () => { await fetch("/api/logout", {method: "POST"}
   await loadFleet();
   setInterval(loadFleet, 30000);
 })();
+
+// manual page links inside the timeline: open the page image (or the manual text page) in a new tab
+document.addEventListener("click", e => {
+  const ch = e.target.closest(".chip[data-doc]"); if (!ch) return;
+  window.open(`/page/${encodeURIComponent(ch.dataset.doc)}/${ch.dataset.page}.png`, "_blank");
+});

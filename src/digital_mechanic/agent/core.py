@@ -23,6 +23,7 @@ from ..i18n import LANGS, lang_or_default
 from ..retrieval.bm25 import ExtraIndex, ManualIndex, snippet
 from ..schemas import CheckResult, CheckStatus, PolicyDecision, Reference, TicketRequest, Urgency, Vehicle
 from ..store import Store
+from ..history import summary_for_agent as hist_summary, timeline as build_timeline
 from .grounding import cited_labels, quote_in_text, unverified_numbers
 from .llm import Llm, LlmUnavailable
 from .prompts import DETAIL, EXPAND_PROMPT, EXPERIENCE, MANAGER_SYSTEM, MECHANIC_SYSTEM
@@ -131,6 +132,13 @@ class Agent:
         chips = [ch.as_dict() for ch in suggest.build(
             self.index, c.vehicle, c.check, hist, self.repair_card(c.vehicle.vehicle_id), c.draft,
             bool(self.store.tickets(c.vehicle.vehicle_id)), user.get("experience") or "experienced")]
+        if c.check and c.check.anomaly_type:
+            tl = self.timeline(c.vehicle.vehicle_id, until=c.check.checked_at)
+            past = [e for e in tl["entries"][1:] if e["anomaly_type"] == c.check.anomaly_type and (e["repair"] or e["ticket"])]
+            if past:
+                tk = (past[0]["ticket"] or {}).get("ticket_id", past[0]["session_id"])
+                chips = [{"text": f"После ремонта по {tk} дефект повторился — что проверить ещё?", "kind": "history", "doc": None, "page": None}] + \
+                        [ch for ch in chips if "уже был" not in ch["text"]][:4]
         lang = lang_or_default(user.get("lang"))
         if lang != "ru" and chips and self.llm.available:
             chips = self._translate_chips(chips, lang)
@@ -220,7 +228,8 @@ class Agent:
                 ids = [h.session_id for h in hist]
                 if c.check.session_id in ids:
                     hist = hist[: ids.index(c.check.session_id) + 1]
-            lines.append("Проверки этой машины до текущей включительно: " + "; ".join(f"{s.session_id} {str(s.checked_at)[:10]} {s.status.value} {s.anomaly_type or ''} score={s.anomaly_score}" for s in hist))
+            tl = self.timeline(v.vehicle_id, until=c.check.checked_at if c.check else None)
+            lines.append(f"ИСТОРИЯ МАШИНЫ (до текущей проверки включительно; дней с прошлой проверки: {tl['days_since_last_check']}; пробег — демо):\n" + hist_summary(tl))
             tks = self.store.tickets(v.vehicle_id)
             if tks:
                 lines.append("Заявки в ТОиР: " + "; ".join(f"{t['ticket_id']} {t['anomaly_type']} {t['urgency']} {time.strftime('%d.%m %H:%M', time.localtime(t['ts']))}" for t in tks[:5]))
@@ -298,11 +307,17 @@ class Agent:
             out.append({"label": lab, "document": p.document + " [доп. источник, не база Заказчика]", "pdf_page": p.page, "text": snippet(p.text, query, 1500)})
         return {"fragments": out, "caveat": "Дополнительный источник по автомобилю, модели могут отличаться; нормативы двигателя брать только из S#."}
 
+    demo: dict = {}
+
+    def timeline(self, vehicle_id: str, until: str | None = None) -> dict:
+        v = self.fleet.get(vehicle_id)
+        return build_timeline(v, self.fleet.sessions(vehicle_id), self.store, self.demo, until=until)
+
     def tool_history(self, vehicle_id: str) -> dict:
         ss = self.fleet.sessions(vehicle_id)
         scores = [s.anomaly_score for s in ss if s.anomaly_score is not None]
         trend = "растёт" if len(scores) >= 2 and scores[-1] - scores[0] > 0.15 else "снижается" if len(scores) >= 2 and scores[0] - scores[-1] > 0.15 else "стабильно"
-        return {"vehicle_id": vehicle_id, "checks": [s.model_dump(mode="json") for s in ss], "anomaly_score_trend": trend,
+        return {"vehicle_id": vehicle_id, "timeline": hist_summary(self.timeline(vehicle_id)), "checks": [s.model_dump(mode="json") for s in ss], "anomaly_score_trend": trend,
                 "tickets": [{"ticket_id": t["ticket_id"], "urgency": t["urgency"], "anomaly_type": t["anomaly_type"], "conclusion": t["payload"]["conclusion"],
                              "at": time.strftime("%d.%m.%Y %H:%M", time.localtime(t["ts"]))} for t in self.store.tickets(vehicle_id)],
                 "repairs": [{"title": r["title"], "status": r["status"], "step": r["current"] + 1, "steps": len(r["steps"])} for r in self.store.q(

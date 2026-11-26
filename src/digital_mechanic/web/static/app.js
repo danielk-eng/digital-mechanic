@@ -196,7 +196,13 @@ async function selectVehicle(vid) {
   const v = r.vehicle;
   $("#vehInfo").classList.remove("hidden");
   $("#vehInfo").innerHTML = `<b>${esc(v.vehicle_id)}</b> · ${esc(v.model && v.model.startsWith(v.make) ? v.model : v.make + " " + (v.model || ""))} · ${esc(v.vehicle_type)}<br>⚙️ <b>${esc(v.engine_model)}</b> (${esc(v.fuel)}) · гараж. ${esc(v.garage_no)}<div class="muted">📚 ${r.manuals.map(m => esc(m.title)).join(" · ")}</div>` +
-    (r.tickets.length ? `<div class="muted">${t("tickets")}: ${r.tickets.slice(0, 3).map(x => esc(x.ticket_id)).join(", ")}</div>` : "");
+    (r.tickets.length ? `<div class="muted">${t("tickets")}: ${r.tickets.slice(0, 3).map(x => esc(x.ticket_id)).join(", ")}</div>` : "") +
+    `<button id="btnHist" class="expand">🗂 ${t("history")}</button><div id="histBox" class="hidden"></div>`;
+  $("#btnHist").onclick = async () => {
+    const box = $("#histBox");
+    if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }
+    box.innerHTML = renderTimeline(await api(`/api/history/${encodeURIComponent(vid)}`)); box.classList.remove("hidden");
+  };
   $("#sess").innerHTML = r.sessions.slice().reverse().map((s, i) => `<option value="${s.session_id}">${s.session_id}${i === 0 ? " (" + t("latest") + ")" : ""} · ${s.checked_at.slice(5, 10)}</option>`).join("");
   for (const m of r.messages) {
     (m.meta.cards || []).forEach(renderCard);

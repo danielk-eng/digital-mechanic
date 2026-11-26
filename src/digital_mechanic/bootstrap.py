@@ -37,5 +37,9 @@ def build_agent(settings: Settings | None = None) -> Agent:
     pages = load_pages(s.index_path, s.engine_docs_path, s.manuals_dir)
     extra = ExtraIndex(load_extra(s.extra_index_path)) if s.extra_kb_enabled else None
     docs = load_engine_docs(s.engine_docs_path)["documents"]
-    return Agent(Fleet(s.vehicles_path, s.fault_types_path), ml, toir,
+    agent = Agent(Fleet(s.vehicles_path, s.fault_types_path), ml, toir,
                  ManualIndex(pages), extra, Llm(s), Store(s.db_path), docs, s.llm_max_tool_rounds, s.pii_masking)
+    from .history import load_demo
+
+    agent.demo = load_demo(s.demo_history_path) if s.demo_history_path else {}
+    return agent
