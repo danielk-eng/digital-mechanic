@@ -9,6 +9,7 @@ works in the browser (Web Speech API) when the server has no STT configured.
 from __future__ import annotations
 
 import io
+import re
 import tempfile
 import threading
 
@@ -28,14 +29,28 @@ class SttUnavailable(Exception):
 def deepgram_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
     if not s.deepgram_api_key:
         raise SttUnavailable("no deepgram key")
-    params = {"model": s.deepgram_model, "language": lang, "smart_format": "true", "punctuate": "true",
-              "mip_opt_out": "true"}  # do not let the provider keep audio for model training
+    params = [("model", s.deepgram_model), ("language", lang), ("smart_format", "true"), ("punctuate", "true"),
+              ("mip_opt_out", "true")]  # do not let the provider keep audio for model training
+    if lang == "ru" and s.deepgram_model.startswith("nova-3"):
+        params += [("keyterm", k) for k in KEYTERMS_RU]  # keyterm prompting: brands and workshop words
     r = httpx.post("https://api.deepgram.com/v1/listen", params=params, content=audio,
                    headers={"Authorization": f"Token {s.deepgram_api_key}", "Content-Type": mime or "audio/webm"}, timeout=30)
     if r.status_code != 200:
         raise SttUnavailable(f"deepgram {r.status_code}")
     alts = r.json()["results"]["channels"][0]["alternatives"]
-    return (alts[0].get("transcript") or "").strip() if alts else ""
+    return fix_terms((alts[0].get("transcript") or "").strip()) if alts else ""
+
+
+KEYTERMS_RU = ["ЯМЗ", "ЗМЗ", "КамАЗ", "МАЗ", "УАЗ", "ПАЗ", "ТНВД", "ГРМ", "ГБЦ", "форсунка", "турбокомпрессор", "гидронатяжитель",
+               "стучит", "свистит", "троит", "антифриз", "заявка"]
+
+
+def fix_terms(text: str) -> str:
+    """Cloud STT spells brands letter by letter: «Я М З 536» -> «ЯМЗ-536», «ЗМЗ 409» -> «ЗМЗ-409»."""
+    text = re.sub(r"(?i)(?<![а-яё])я\s*м\s*з(?![а-яё])", "ЯМЗ", text)
+    text = re.sub(r"(?i)(?<![а-яё])з\s*м\s*з(?![а-яё])", "ЗМЗ", text)
+    text = re.sub(r"(?i)(?<![а-яё])т\s*н\s*в\s*д(?![а-яё])", "ТНВД", text)
+    return re.sub(r"\b(ЯМЗ|ЗМЗ)[\s-]*(\d{3})", r"\1-\2", text)
 
 
 def whisper_stt(audio: bytes, lang: str, s: Settings) -> str:
