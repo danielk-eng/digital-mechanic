@@ -931,8 +931,10 @@ function settingsSheet() {
     `<label class="switch"><span>${t("captions")}</span><input type="checkbox" id="s_cc" ${A11Y.captions() ? "checked" : ""}></label>` +
     `<div class="sep"></div><div class="field"><span class="label">${t("style_title")}</span><div id="s_style">${t("loading")}</div></div>` +
     `<div class="sep"></div><div class="field"><span class="label">${t("my_profile")}</span><div id="s_prof" class="small muted">${t("loading")}</div></div>` +
+    (ME.login || ME.chief || /^demo-/.test(ME.id || "") ? `<div class="sep"></div><div class="field"><span class="label">Вход на другом устройстве</span><div id="s_qr"></div></div>` : "") +
     `<div class="sep"></div><p class="small muted">${t("privacy_note")} <a href="/privacy?country=${esc(ME.country || "RU")}" target="_blank">${t("policy")}</a></p>` +
     `<div class="card-actions"><button class="btn ghost" id="s_logout">${icon("log-out", 18)}<span>${t("logout")}</span></button><button class="btn danger" id="s_delete">${t("delete_data")}</button></div>`, sh => {
+    if (sh.querySelector("#s_qr") && window.QRLink) QRLink.mount(sh.querySelector("#s_qr"), {email: ME.email});
     langOptions(sh.querySelector("#s_lang"), ME.lang); langOptions(sh.querySelector("#s_alang"), ME.answer_lang || "", true);
     sh.querySelector("#s_lang").onchange = async e => { await saveProfile({lang: e.target.value}); settingsSheet(); if (VID) loadChips(); else showEmpty(); };
     sh.querySelector("#s_alang").onchange = e => saveProfile({answer_lang: e.target.value});

@@ -4,7 +4,7 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-let ME = null, LAST = 0, ROWS = [], POLL = 0;
+let ME = null, LAST = 0, ROWS = [], POLL = 0, COS = [], LCO = "";
 async function api(p, o = {}) {
   if (o.json) { o.method = "POST"; o.headers = {"Content-Type": "application/json"}; o.body = JSON.stringify(o.json); }
   const r = await fetch(p, {credentials: "same-origin", ...o});
@@ -24,12 +24,17 @@ async function logs() {
   const r = await api(`/api/eng/logs?after=${LAST}&limit=200`);
   ROWS = [...r.rows, ...ROWS].slice(0, 300); LAST = r.last;
   if ($("#tab-logs").classList.contains("hidden")) return;
-  $("#tab-logs").innerHTML = `<div class="filters"><span class="small muted" style="align-self:center">Обновляется каждые 3 с. Нажмите на строку, чтобы открыть трассу запроса.</span></div>` +
+  if (!COS.length) { try { COS = (await api("/api/eng/companies")).companies; } catch (_) {} }
+  const rows = ROWS.filter(a => !LCO || (LCO === "-" ? !a.company_id : a.company_id === LCO));
+  $("#tab-logs").innerHTML = `<div class="filters"><select class="input" id="l_co" aria-label="Компания" style="max-width:260px;min-height:40px"><option value="">Все компании</option>` +
+    COS.map(c => `<option value="${esc(c.id)}" ${LCO === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("") + `<option value="-" ${LCO === "-" ? "selected" : ""}>Инженеры</option></select>` +
+    `<span class="small muted" style="align-self:center">Обновляется каждые 3 с. Нажмите на строку, чтобы открыть трассу запроса.</span></div>` +
     `<div class="panel" style="overflow:auto"><table class="tbl"><thead><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Запрос</th><th class="hide-m">Инструменты</th><th>мс</th></tr></thead><tbody>` +
-    ROWS.map(a => `<tr class="click" data-id="${a.id}"><td class="sub">${time(a.ts)}</td><td>${esc(a.user_name || "")}<div class="sub">${esc(a.role || "")}</div></td>` +
+    rows.map(a => `<tr class="click" data-id="${a.id}"><td class="sub">${time(a.ts)}</td><td>${esc(a.user_name || "")}<div class="sub">${esc(a.role || "")}</div></td>` +
       `<td>${esc(a.action)}${a.ok ? "" : ` <span class="err">ошибка</span>`}<div class="sub mono">${esc(a.vehicle_id || "")}</div></td><td class="small">${esc(a.input)}</td>` +
       `<td class="hide-m sub">${(a.tools || []).map(esc).join(", ")}</td><td class="num">${a.latency_ms ?? ""}</td></tr>`).join("") + `</tbody></table></div>`;
   $$("#tab-logs tr[data-id]").forEach(tr => tr.onclick = () => trace(tr.dataset.id));
+  $("#l_co").onchange = e => { LCO = e.target.value; logs(); };
 }
 function side(title, html) {
   $("#layer").innerHTML = `<div class="scrim" id="scrim"></div><aside class="side" role="dialog" aria-modal="true"><div class="vhd"><b>${esc(title)}</b><button class="icon-btn" id="sClose" aria-label="close">${icon("x")}</button></div><div class="vbd">${html}</div></aside>`;
@@ -106,13 +111,58 @@ async function ask(textIn) {
   catch (e) { th.querySelector(".b").textContent = e.message; }
   delete th.dataset.busy;
 }
+// ---------------------------------------------------------------- companies (tenants): the engineer sees and manages all
+const PRIM = {"": "как на стенде", auto: "Cloud.ru для РФ-региона (152-ФЗ)", tokenrouter: "основная модель", cloudru: "Cloud.ru (РФ)"};
+async function companies() {
+  const r = await api("/api/eng/companies"); COS = r.companies;
+  const vOwner = {}; r.companies.forEach(c => c.vehicles.forEach(v => vOwner[v] = c.name));
+  $("#tab-companies").innerHTML = `<div class="panel"><div class="pad"><div class="mcp-form"><div><label class="label" for="c_name">Новая компания</label><input id="c_name" class="input" autocomplete="off"></div>` +
+    `<div><label class="label" for="c_prim">Языковая модель</label><select id="c_prim" class="input">${r.llm_primary.map(o => `<option value="${o}">${esc(PRIM[o] || o)}</option>`).join("")}</select></div>` +
+    `<button class="btn primary" id="c_add">Создать</button></div></div></div>` +
+    `<div class="panel"><table class="tbl"><thead><tr><th>Компания</th><th>Главный механик</th><th class="hide-m">Машин / людей</th><th class="hide-m">Расход LLM</th><th>Модель</th></tr></thead><tbody>` +
+    r.companies.map(c => `<tr class="click" data-c="${esc(c.id)}"><td><b>${esc(c.name)}</b><div class="sub mono">${esc(c.id)}</div>${c.active ? "" : `<span class="pill attention">выключена</span>`}</td>` +
+      `<td>${c.chiefs.length ? c.chiefs.map(x => `${esc(x.name)} <span class="sub mono">${esc(x.login || "")}</span>`).join("<br>") : `<span class="muted">нет</span>`}</td>` +
+      `<td class="hide-m num">${c.vehicles.length} / ${c.staff}</td><td class="hide-m small">${c.usage.calls} запросов, ${c.usage.tokens} ток.<div class="sub">${c.usage.cost_rub} ₽, ср. ${c.usage.avg_seconds} с</div></td>` +
+      `<td class="small">${esc(PRIM[c.llm_primary || ""] || c.llm_primary)}</td></tr>`).join("") + `</tbody></table></div>`;
+  $("#c_add").onclick = async () => { const name = $("#c_name").value.trim(); if (!name) return;
+    try { await api("/api/eng/companies", {json: {name, llm_primary: $("#c_prim").value}}); companies(); } catch (e) { alert(e.message); } };
+  $$("#tab-companies tr[data-c]").forEach(tr => tr.onclick = () => companyCard(r, tr.dataset.c, vOwner));
+}
+function companyCard(r, id, vOwner) {
+  const c = r.companies.find(x => x.id === id);
+  side(c.name, `<div class="field"><label class="label" for="cc_name">Название</label><input id="cc_name" class="input" value="${esc(c.name)}"></div>` +
+    `<div class="field"><label class="label" for="cc_prim">Языковая модель для компании</label><select id="cc_prim" class="input">${r.llm_primary.map(o => `<option value="${o}" ${o === (c.llm_primary || "") ? "selected" : ""}>${esc(PRIM[o] || o)}</option>`).join("")}</select></div>` +
+    `<label class="switch"><span>Компания активна</span><input type="checkbox" id="cc_act" ${c.active ? "checked" : ""}></label>` +
+    `<div class="field"><span class="label">Машины компании (отметка переносит машину сюда)</span><div class="vpick">${r.all_vehicles.map(v => `<label><input type="checkbox" value="${esc(v)}" ${c.vehicles.includes(v) ? "checked disabled" : ""}> <span class="mono">${esc(v)}</span>${c.vehicles.includes(v) ? "" : ` <span class="sub">${esc(vOwner[v] || "")}</span>`}</label>`).join("")}</div></div>` +
+    `<div class="card-actions"><button class="btn primary" id="cc_save">Сохранить</button></div>` +
+    `<div class="section-label">Главный механик</div>` + (c.chiefs.length ? `<p class="small">${c.chiefs.map(x => `${esc(x.name)}, код <b class="mono">${esc(x.login || "")}</b>`).join("<br>")}</p>` : "") +
+    `<div class="field"><label class="label" for="ch_name">Имя</label><input id="ch_name" class="input" autocomplete="off"></div>` +
+    `<div class="field"><label class="label" for="ch_pin">PIN (4–8 цифр, пусто — придумаем)</label><input id="ch_pin" class="input" inputmode="numeric" autocomplete="off"></div>` +
+    `<div class="field"><label class="label" for="ch_email">Почта</label><input id="ch_email" class="input" type="email" autocomplete="off"></div>` +
+    `<div class="field"><label class="label" for="ch_form">Обращение</label><select id="ch_form" class="input"><option value="vy">на «вы»</option><option value="ty">на «ты»</option></select></div>` +
+    `<div class="field"><label class="label" for="ch_style">Как помощник с ним говорит</label><textarea id="ch_style" class="input" rows="3" style="padding:12px 16px"></textarea></div>` +
+    `<div class="card-actions"><button class="btn primary" id="ch_go">Создать главного механика</button></div><div id="ch_out"></div>`);
+  $("#cc_save").onclick = async () => {
+    try { await api(`/api/eng/companies/${id}`, {json: {name: $("#cc_name").value.trim(), llm_primary: $("#cc_prim").value, active: $("#cc_act").checked,
+      vehicles: $$(".vpick input:checked:not(:disabled)").map(x => x.value)}}); $("#layer").innerHTML = ""; companies(); } catch (e) { alert(e.message); }
+  };
+  $("#ch_go").onclick = async () => {
+    const name = $("#ch_name").value.trim(); if (!name) return;
+    try {
+      const x = await api(`/api/eng/companies/${id}/chief`, {json: {name, pin: $("#ch_pin").value.trim(), email: $("#ch_email").value.trim(), formality: $("#ch_form").value, style: $("#ch_style").value.trim()}});
+      $("#ch_out").innerHTML = `<div class="panel"><div class="pad"><p>Создан: код <b class="mono">${esc(x.login)}</b>, PIN <b class="mono">${esc(x.pin)}</b></p><p class="small muted">PIN показан один раз.</p><div id="ch_qr"></div></div></div>`;
+      QRLink.mount($("#ch_qr"), {userId: x.user.id, email: x.user.email}); $("#ch_go").disabled = true; companies();
+    } catch (e) { $("#ch_out").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  };
+}
 function tab(name) {
   $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   $$("section[id^=tab-]").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
-  ({logs, mcp, models}[name] || (() => {}))();
+  ({logs, mcp, models, companies}[name] || (() => {}))();
 }
 $$("#tabs button").forEach(b => b.onclick = () => tab(b.dataset.tab));
 $("#esend").onclick = () => ask(); $("#emic").onclick = micToggle; $("#etxt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } };
+$("#myqr").onclick = () => { side("Мой вход по QR", `<div id="my_qr"></div>`); QRLink.mount($("#my_qr"), {email: ME.email}); };
 $("#logout").onclick = async () => { await fetch("/api/logout", {method: "POST"}); location.href = "/"; };
 (async () => {
   document.querySelectorAll("[data-icon]").forEach(el => el.innerHTML = icon(el.dataset.icon));

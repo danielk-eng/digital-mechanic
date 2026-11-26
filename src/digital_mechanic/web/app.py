@@ -8,6 +8,7 @@ import hmac
 import os
 import csv
 import io
+import html
 import json
 import re
 import shutil
@@ -25,7 +26,8 @@ from pydantic import BaseModel
 
 from .. import media as umedia, pii, privacy_laws, voice
 from ..translate import Translator
-from ..agent.llm import REQUEST_COUNTRY
+from ..agent.llm import REQUEST_COUNTRY, REQUEST_PRIMARY
+from .. import tenancy
 from ..agent import profile as uprofile, style as ustyle, memory as umemory
 from ..agent.briefing import Briefing
 from .. import demo_seed
@@ -43,6 +45,8 @@ TR = Translator(AGENT.llm, AGENT.store, os.environ.get("I18N_DIR", "data/i18n"))
 for _lang, _pages in TR.pages.items():  # human translations of the manuals: search in the user's language, cite the original page
     AGENT.index.add_translations(_lang, _pages)
 STORE = AGENT.store
+tenancy.ensure_seed(STORE)
+AGENT.fleet = tenancy.ScopedFleet(AGENT.fleet)  # each request sees only its company's trucks (engineer: all)
 DEMO = demo_seed.load(os.environ.get("DEMO_USERS", "data/demo_users.json"))
 AGENT.briefing = Briefing(AGENT, DEMO)
 try:
@@ -82,7 +86,7 @@ def jlog(**kw) -> None:
 # Signed profile cookie: on serverless stands (Vercel) every instance has its own /tmp DB, so a session created on one
 # instance is unknown on the next. The cookie carries the user's own profile (no other data), HMAC-signed with a key
 # derived from the stand's secret; an unknown uid is restored from it.
-_PROFILE_KEYS = ("name", "role", "lang", "experience", "detail", "answer_lang", "big_font", "voice_out", "consent_at", "country")
+_PROFILE_KEYS = ("name", "role", "lang", "experience", "detail", "answer_lang", "big_font", "voice_out", "consent_at", "country", "company_id")
 
 
 def _cookie_key() -> bytes:
@@ -184,6 +188,10 @@ async def _restore_session(request, call_next):
     request.scope["headers"] = hdr
     me = STORE.user(uid) if uid else None
     REQUEST_COUNTRY.set((me or {}).get("country"))  # LLM provider by the person's country (152-FZ: RU -> Cloud.ru)
+    co = tenancy.company_of(me) if me else None
+    tenancy.SCOPE.set(tenancy.scope_for(STORE, AGENT.fleet.all_ids(), co) if me else None)
+    crow = STORE.one("SELECT llm_primary FROM companies WHERE id=?", (co,)) if co else None
+    REQUEST_PRIMARY.set((crow or {}).get("llm_primary") or None)  # the engineer may switch the provider per company
     response = await call_next(request)
     if uid and request.url.path == "/api/session":  # sliding renewal: active users are never asked for the PIN again
         response.set_cookie("s", request.cookies["s"], httponly=True, samesite="lax", max_age=SESSION_MAX_AGE,
@@ -593,7 +601,10 @@ def proven(vehicle_id: str, code: str | None = None, uid: str | None = Cookie(No
 def tickets_list(uid: str | None = Cookie(None)) -> dict:
     user_of(uid, manager=True)
     out = []
+    mine = set(AGENT.fleet.ids())
     for t in STORE.tickets():
+        if t["vehicle_id"] not in mine:
+            continue
         p = t["payload"]
         out.append({"ticket_id": t["ticket_id"], "vehicle_id": t["vehicle_id"], "urgency": t["urgency"], "anomaly_type": t["anomaly_type"],
                     "at": time.strftime("%d.%m.%Y %H:%M", time.localtime(t["ts"])), "conclusion": p.get("conclusion", ""),
@@ -612,7 +623,8 @@ def review_ticket(ticket_id: str, body: ReviewIn, uid: str | None = Cookie(None)
     u = user_of(uid, manager=True)
     if body.decision not in ("approved", "returned"):
         raise HTTPException(400, "decision")
-    if not STORE.one("SELECT id FROM tickets WHERE ticket_id=?", (ticket_id,)):
+    row = STORE.one("SELECT vehicle_id FROM tickets WHERE ticket_id=?", (ticket_id,))
+    if not row or row["vehicle_id"] not in AGENT.fleet.ids():
         raise HTTPException(404)
     rev = {"decision": body.decision, "comment": pii.mask(body.comment)[:500], "by": mask_name(u.get("name") or ""), "at": time.time()}
     STORE.set_ticket_review(ticket_id, rev, body.decision)
@@ -622,8 +634,10 @@ def review_ticket(ticket_id: str, body: ReviewIn, uid: str | None = Cookie(None)
 
 @app.get("/api/handoffs")
 def handoffs(status: str | None = None, uid: str | None = Cookie(None)) -> dict:
-    user_of(uid, manager=True)
-    rows = STORE.handoffs(status)
+    me_ = user_of(uid, manager=True)
+    mine, co = set(AGENT.fleet.ids()), tenancy.company_of(me_)
+    staff = {u["id"] for u in STORE.q("SELECT id, company_id, role FROM users") if tenancy.company_of(u) == co}
+    rows = [r for r in STORE.handoffs(status) if ((r.get("vehicle_id") in mine) if r.get("vehicle_id") else (r.get("user_id") in staff))]
     # the chief sees his own staff by name (as on the «Сотрудники» tab); the name is the account name, not free text
     who = {u["id"]: u for u in STORE.q("SELECT id, name, title, role FROM users")}
     for r in rows:
@@ -642,6 +656,9 @@ def resolve_handoff(hid: int, body: ResolveIn, uid: str | None = Cookie(None)) -
     u = user_of(uid, manager=True)
     if body.status not in ("taken", "closed", "open"):
         raise HTTPException(400, "status")
+    h = STORE.one("SELECT vehicle_id FROM handoffs WHERE id=?", (hid,))
+    if not h or (h["vehicle_id"] and h["vehicle_id"] not in AGENT.fleet.ids()):
+        raise HTTPException(404)
     STORE.resolve_handoff(hid, u["id"], body.status, pii.mask(body.comment)[:500])
     return {"ok": True}
 
@@ -1062,10 +1079,17 @@ def manual_pdf(doc_id: str, uid: str | None = Cookie(None)):
 
 
 # ---------------------------------------------------------------- audit / ops
+def _staff_ids(company_id: str | None) -> set[str]:
+    """Accounts of one company (None: everybody)."""
+    return {u["id"] for u in STORE.q("SELECT id, role, company_id FROM users") if company_id is None or tenancy.company_of(u) == company_id}
+
+
 @app.get("/api/audit")
 def audit(limit: int = 200, uid: str | None = Cookie(None)) -> dict:
-    user_of(uid, manager=True)
-    rows = STORE.q("SELECT a.*, u.name AS user_name FROM audit a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT ?", (min(limit, 2000),))
+    me_ = user_of(uid, manager=True)
+    staff = _staff_ids(tenancy.company_of(me_))
+    rows = [r for r in STORE.q("SELECT a.*, u.name AS user_name FROM audit a LEFT JOIN users u ON u.id=a.user_id ORDER BY a.id DESC LIMIT 5000")
+            if r["user_id"] in staff][:min(limit, 2000)]
     for r in rows:
         r["user_id"] = (r["user_id"] or "")[:8]
         for k in ("tools", "sources"):
@@ -1078,8 +1102,9 @@ def audit(limit: int = 200, uid: str | None = Cookie(None)) -> dict:
 
 @app.get("/api/audit.csv")
 def audit_csv(uid: str | None = Cookie(None)):
-    user_of(uid, manager=True)
-    rows = STORE.q("SELECT id, datetime(ts,'unixepoch','localtime') AS time, substr(user_id,1,8) AS user, role, vehicle_id, action, input, output, sources, latency_ms, tokens, ok FROM audit ORDER BY id DESC LIMIT 5000")
+    me_ = user_of(uid, manager=True)
+    staff = _staff_ids(tenancy.company_of(me_))
+    rows = [{k: v for k, v in r.items() if k != "user_id"} for r in STORE.q("SELECT id, datetime(ts,'unixepoch','localtime') AS time, user_id, substr(user_id,1,8) AS user, role, vehicle_id, action, input, output, sources, latency_ms, tokens, ok FROM audit ORDER BY id DESC LIMIT 5000") if r["user_id"] in staff]
     buf = io.StringIO()
     if rows:
         w = csv.DictWriter(buf, fieldnames=list(rows[0]))
@@ -1098,8 +1123,20 @@ def health() -> dict:
 
 @app.get("/api/usage")
 def usage(uid: str | None = Cookie(None)) -> dict:
-    user_of(uid, manager=True)
-    return AGENT.llm.usage.as_dict()
+    me_ = user_of(uid, manager=True)
+    return company_usage(tenancy.company_of(me_))
+
+
+def company_usage(company_id: str | None) -> dict:
+    """Per-company LLM use from the audit log (each request records its tokens). Cost = tokens × LLM_PRICE_RUB_PER_M
+    (0 for the free models used now)."""
+    staff = _staff_ids(company_id)
+    rows = [r for r in STORE.q("SELECT user_id, tokens, latency_ms FROM audit WHERE tokens > 0") if r["user_id"] in staff]
+    tok = sum(int(r["tokens"] or 0) for r in rows)
+    price = float(os.environ.get("LLM_PRICE_RUB_PER_M", "0") or 0)
+    return {"calls": len(rows), "prompt_tokens": tok, "completion_tokens": 0, "tokens": tok,
+            "avg_seconds": round(sum((r["latency_ms"] or 0) for r in rows) / len(rows) / 1000, 1) if rows else 0,
+            "cost_rub": round(tok * price / 1e6, 2)}
 
 
 # ---------------------------------------------------------------- engineer menu (role "engineer" only)
@@ -1133,14 +1170,19 @@ def engineer_page() -> str:
 
 
 @app.get("/api/eng/logs")
-def eng_logs(after: int = 0, limit: int = 100, action: str | None = None, uid: str | None = Cookie(None)) -> dict:
+def eng_logs(after: int = 0, limit: int = 100, action: str | None = None, company: str | None = None, uid: str | None = Cookie(None)) -> dict:
     """Live log / query history: audit rows newer than `after` (the page polls)."""
     user_of(uid, roles=("engineer",))
-    q = "SELECT a.id, a.ts, a.role, a.vehicle_id, a.action, a.input, a.output, a.tools, a.latency_ms, a.tokens, a.ok, u.name AS user_name FROM audit a LEFT JOIN users u ON u.id=a.user_id WHERE a.id>?"
+    q = "SELECT a.id, a.ts, a.role, a.vehicle_id, a.action, a.input, a.output, a.tools, a.latency_ms, a.tokens, a.ok, a.user_id, u.name AS user_name, u.company_id AS company_id FROM audit a LEFT JOIN users u ON u.id=a.user_id WHERE a.id>?"
     args: list = [after]
     if action:
         q += " AND a.action=?"; args.append(action)
-    rows = STORE.q(q + " ORDER BY a.id DESC LIMIT ?", (*args, min(limit, 500)))
+    rows = STORE.q(q + " ORDER BY a.id DESC LIMIT ?", (*args, 5000 if company else min(limit, 500)))
+    for r in rows:
+        r["company_id"] = None if r["role"] == "engineer" else (r["company_id"] or tenancy.SEED_ID)
+        r.pop("user_id", None)
+    if company:
+        rows = [r for r in rows if r["company_id"] == company][:min(limit, 500)]
     for r in rows:
         r["input"], r["output"] = (r["input"] or "")[:200], (r["output"] or "")[:240]
         try:
@@ -1308,6 +1350,7 @@ def eng_mcp_edit(sid: int, body: McpPatch, uid: str | None = Cookie(None)) -> di
 # ---------------------------------------------------------------- users (the chief manages employees)
 class NewUserIn(BaseModel):
     name: str
+    email: str = ""
     role: str = "mechanic"
     experience: str = "experienced"
     title: str = ""
@@ -1317,6 +1360,7 @@ class NewUserIn(BaseModel):
 
 
 class UserPatch(BaseModel):
+    email: str | None = None
     active: bool | None = None
     vehicles: list[str] | None = None
     experience: str | None = None
@@ -1345,7 +1389,7 @@ def _new_pin() -> str:
 
 def _user_row(u: dict) -> dict:
     p = uprofile.load(u)
-    return {"id": u["id"], "login": u.get("login"), "name": u["name"], "role": u["role"], "title": u.get("title"), "experience": u.get("experience"),
+    return {"id": u["id"], "login": u.get("login"), "name": u["name"], "role": u["role"], "title": u.get("title"), "experience": u.get("experience"), "email": u.get("email"),
             "lang": u.get("lang"), "country": u.get("country"), "active": bool(u.get("active", 1)), "onboarded": bool(u.get("onboarded", 1)),
             "vehicles": json.loads(u.get("vehicles") or "[]"), "style": ustyle.public(p, u)["text"], "style_v": ustyle.public(p, u)["v"],
             "persona": ustyle.public(p, u)["persona"], "created_by": (u.get("created_by") or "")[:12]}
@@ -1353,9 +1397,10 @@ def _user_row(u: dict) -> dict:
 
 @app.get("/api/admin/users")
 def admin_users(uid: str | None = Cookie(None)) -> dict:
-    chief_of(uid)
-    rows = STORE.q("SELECT * FROM users WHERE login IS NOT NULL ORDER BY role, name")
-    return {"users": [_user_row(u) for u in rows], "roles": ["mechanic", "manager", "engineer"], "levels": list(EXPERIENCE_LEVELS),
+    me_ = chief_of(uid)
+    co = tenancy.company_of(me_)
+    rows = [u for u in STORE.q("SELECT * FROM users WHERE login IS NOT NULL ORDER BY role, name") if tenancy.company_of(u) == co and u["role"] != "engineer"]
+    return {"users": [_user_row(u) for u in rows], "roles": ["mechanic", "manager"], "levels": list(EXPERIENCE_LEVELS),
             "vehicles": AGENT.fleet.ids()}
 
 
@@ -1363,7 +1408,7 @@ def admin_users(uid: str | None = Cookie(None)) -> dict:
 def admin_create_user(body: NewUserIn, uid: str | None = Cookie(None)) -> dict:
     """Only the chief creates accounts. The PIN is shown once in the answer (stored as a salted hash)."""
     me_ = chief_of(uid)
-    if body.role not in ("mechanic", "manager", "engineer") or body.experience not in EXPERIENCE_LEVELS:
+    if body.role not in ("mechanic", "manager") or body.experience not in EXPERIENCE_LEVELS:  # engineers are not company staff
         raise HTTPException(400, "bad role or level")
     bad = [v for v in body.vehicles if v not in AGENT.fleet.ids()]
     if bad:
@@ -1374,7 +1419,7 @@ def admin_create_user(body: NewUserIn, uid: str | None = Cookie(None)) -> dict:
     pin = _new_pin()
     STORE.upsert_user(new, name=name, role=body.role, experience=body.experience, title=body.title[:80], vehicles=json.dumps(body.vehicles),
                       lang=lang_or_default(body.lang), country=privacy_laws.country(body.country), login=login, pin_hash=_pin_hash(pin), active=1,
-                      onboarded=0, created_by=me_["id"])
+                      onboarded=0, created_by=me_["id"], company_id=tenancy.company_of(me_), email=_email_or_none(body.email))
     STORE.audit(user_id=me_["id"], role=me_["role"], action="admin_user_create", input=f"{login} {body.role}", ok=1)
     return {"user": _user_row(STORE.user(new)), "login": login, "pin": pin, "invite": f"/?login={login}"}
 
@@ -1388,7 +1433,7 @@ def secrets_suffix() -> str:
 def admin_edit_user(user_id: str, body: UserPatch, uid: str | None = Cookie(None)) -> dict:
     me_ = chief_of(uid)
     u = STORE.user(user_id)
-    if not u:
+    if not u or u["role"] == "engineer" or tenancy.company_of(u) != tenancy.company_of(me_):
         raise HTTPException(404, "no such user")
     if user_id == me_["id"] and body.active is False:
         raise HTTPException(400, "cannot deactivate yourself")
@@ -1402,11 +1447,13 @@ def admin_edit_user(user_id: str, body: UserPatch, uid: str | None = Cookie(None
         if bad:
             raise HTTPException(400, f"unknown vehicles: {', '.join(bad)}")
         kw["vehicles"] = json.dumps(body.vehicles)
+    if body.email is not None:
+        kw["email"] = _email_or_none(body.email)
     if body.experience in EXPERIENCE_LEVELS:
         kw["experience"] = body.experience
     if body.title is not None:
         kw["title"] = body.title[:80]
-    if body.role in ("mechanic", "manager", "engineer"):
+    if body.role in ("mechanic", "manager"):
         kw["role"] = body.role
     pin = None
     if body.new_pin:
@@ -1420,9 +1467,9 @@ def admin_edit_user(user_id: str, body: UserPatch, uid: str | None = Cookie(None
 @app.get("/api/admin/users/{user_id}")
 def admin_user_card(user_id: str, uid: str | None = Cookie(None)) -> dict:
     """Profile card by user ID: style, interests and typical topics, trucks worked on, history."""
-    chief_of(uid)
+    me_ = chief_of(uid)
     u = STORE.user(user_id)
-    if not u:
+    if not u or u["role"] == "engineer" or tenancy.company_of(u) != tenancy.company_of(me_):
         raise HTTPException(404, "no such user")
     p = uprofile.load(u)
     acc = next((a for a in DEMO["accounts"] if a["uid"] == user_id), {})
@@ -1490,6 +1537,299 @@ def my_assignments(uid: str | None = Cookie(None)) -> dict:
         if h.get("kind") == "assign" and p.get("assignee_uid") == u["id"] and h.get("status") != "closed":
             out.append({"id": h["id"], "vehicle_id": h["vehicle_id"], "ticket_id": p.get("ticket_id"), "summary": h.get("summary"), "ts": h["ts"]})
     return {"assignments": out}
+
+
+# ---------------------------------------------------------------- companies (tenants): engineer only
+def _email_or_none(e: str | None) -> str | None:
+    e = (e or "").strip()[:120]
+    return e if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", e) else None
+
+
+LLM_PRIMARY_OPTS = ("", "auto", "tokenrouter", "cloudru")
+
+
+class CompanyIn(BaseModel):
+    name: str
+    llm_primary: str = ""
+    note: str = ""
+
+
+class CompanyPatch(BaseModel):
+    name: str | None = None
+    llm_primary: str | None = None
+    active: bool | None = None
+    note: str | None = None
+    vehicles: list[str] | None = None  # trucks of this company (moved from wherever they were)
+
+
+class ChiefIn(BaseModel):
+    name: str
+    pin: str = ""
+    style: str = ""  # how the assistant talks to him («на вы, коротко, цифры с единицами»)
+    formality: str = ""  # "ty" | "vy"
+    email: str = ""
+    title: str = "Главный механик"
+
+
+def _company_view(c: dict) -> dict:
+    vc = tenancy.vehicle_company(STORE, AGENT.fleet.all_ids())
+    staff = [u for u in STORE.q("SELECT id, name, role, login, company_id, active FROM users") if u["role"] != "engineer" and tenancy.company_of(u) == c["id"]]
+    return {**c, "vehicles": sorted(v for v, k in vc.items() if k == c["id"]), "chiefs": [{"id": u["id"], "name": u["name"], "login": u["login"]} for u in staff if u["role"] == "manager"],
+            "staff": len(staff), "usage": company_usage(c["id"])}
+
+
+@app.get("/api/eng/companies")
+def eng_companies(uid: str | None = Cookie(None)) -> dict:
+    user_of(uid, roles=("engineer",))
+    return {"companies": [_company_view(c) for c in STORE.q("SELECT * FROM companies ORDER BY created")], "llm_primary": list(LLM_PRIMARY_OPTS),
+            "all_vehicles": AGENT.fleet.all_ids()}
+
+
+@app.post("/api/eng/companies")
+def eng_company_create(body: CompanyIn, uid: str | None = Cookie(None)) -> dict:
+    me_ = user_of(uid, roles=("engineer",))
+    name = body.name.strip()[:80]
+    if not name or body.llm_primary not in LLM_PRIMARY_OPTS:
+        raise HTTPException(400, "name / llm_primary")
+    cid = "c" + uuid.uuid4().hex[:8]
+    STORE.x("INSERT INTO companies(id, name, created, llm_primary, note) VALUES (?,?,?,?,?)", (cid, name, time.time(), body.llm_primary, body.note[:300]))
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="company_create", input=f"{cid} {name}", ok=1)
+    return {"company": _company_view(STORE.one("SELECT * FROM companies WHERE id=?", (cid,)))}
+
+
+@app.post("/api/eng/companies/{cid}")
+def eng_company_edit(cid: str, body: CompanyPatch, uid: str | None = Cookie(None)) -> dict:
+    me_ = user_of(uid, roles=("engineer",))
+    if not STORE.one("SELECT id FROM companies WHERE id=?", (cid,)):
+        raise HTTPException(404)
+    if body.name is not None and body.name.strip():
+        STORE.x("UPDATE companies SET name=? WHERE id=?", (body.name.strip()[:80], cid))
+    if body.llm_primary is not None:
+        if body.llm_primary not in LLM_PRIMARY_OPTS:
+            raise HTTPException(400, "llm_primary")
+        STORE.x("UPDATE companies SET llm_primary=? WHERE id=?", (body.llm_primary, cid))
+    if body.active is not None:
+        STORE.x("UPDATE companies SET active=? WHERE id=?", (int(body.active), cid))
+    if body.note is not None:
+        STORE.x("UPDATE companies SET note=? WHERE id=?", (body.note[:300], cid))
+    if body.vehicles is not None:
+        bad = [v for v in body.vehicles if v not in AGENT.fleet.all_ids()]
+        if bad:
+            raise HTTPException(400, f"unknown vehicles: {', '.join(bad)}")
+        for v in body.vehicles:
+            STORE.x("INSERT OR REPLACE INTO company_vehicles(vehicle_id, company_id) VALUES (?,?)", (v, cid))
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="company_edit", input=f"{cid} {sorted(k for k, v in body.model_dump().items() if v is not None)}", ok=1)
+    return {"company": _company_view(STORE.one("SELECT * FROM companies WHERE id=?", (cid,)))}
+
+
+@app.post("/api/eng/companies/{cid}/chief")
+def eng_company_chief(cid: str, body: ChiefIn, uid: str | None = Cookie(None)) -> dict:
+    """The engineer creates the company's chief mechanic (name, PIN, how to talk to him). The chief then creates his own staff."""
+    me_ = user_of(uid, roles=("engineer",))
+    if not STORE.one("SELECT id FROM companies WHERE id=?", (cid,)):
+        raise HTTPException(404)
+    pin = body.pin.strip() or _new_pin()
+    if not re.fullmatch(r"\d{4,8}", pin):
+        raise HTTPException(400, "PIN: 4-8 digits")
+    name = pii.mask(body.name.strip()[:60]) or "—"
+    new = "u" + uuid.uuid4().hex[:10]
+    login = f"{re.sub(r'[^a-z0-9]', '', name.lower().translate(str.maketrans('абвгдеёжзийклмнопрстуфхцчшщъыьэюя', 'abvgdeejziiklmnoprstufhccss_y_eua'))) or 'chief'}{secrets_suffix()}"
+    u = STORE.upsert_user(new, name=name, role="manager", experience="expert", title=body.title[:80], vehicles="[]", lang="ru", country="RU", login=login,
+                          pin_hash=_pin_hash(pin), active=1, onboarded=0 if not (body.style or body.formality) else 1, created_by=me_["id"],
+                          company_id=cid, email=_email_or_none(body.email))
+    if body.style or body.formality in ("ty", "vy"):
+        p = uprofile.load(u)
+        ustyle.set_text(p, u, pii.mask(body.style) if body.style.strip() else ustyle.seed_text(u, body.formality or None), "engineer")
+        STORE.upsert_user(new, profile=uprofile.dump(p))
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="company_chief_create", input=f"{cid} {login}", ok=1)
+    return {"user": _user_row(STORE.user(new)), "login": login, "pin": pin, "invite": f"/?login={login}"}
+
+
+# ---------------------------------------------------------------- device linking by QR: a 24 h link + the person's PIN
+QR_TTL = int(os.environ.get("QR_TTL_S", str(24 * 3600)))
+QR_MAX_FAILS = 5
+
+
+def _public_base(request: Request) -> str:
+    """Origin the QR should point to: PUBLIC_URL if set, else the host the user came through (https behind a tunnel/proxy)."""
+    if os.environ.get("PUBLIC_URL"):
+        return os.environ["PUBLIC_URL"]
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    return f"{proto.split(',')[0].strip()}://{host}/"
+
+
+def _qr_sig(tok: str) -> str:
+    return hmac.new(_cookie_key(), ("qr:" + tok).encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def _qr_hash(tok: str) -> str:
+    return hashlib.sha256(("dm-qr:" + tok).encode()).hexdigest()
+
+
+def _may_issue_for(me_: dict, target: dict) -> bool:
+    if me_["id"] == target["id"] or me_["role"] == "engineer":
+        return True
+    return me_["role"] == "manager" and target["role"] != "engineer" and tenancy.company_of(target) == tenancy.company_of(me_)
+
+
+def _pin_of(u: dict) -> tuple[str | None, str | None]:
+    """(hash, plain demo PIN): what the QR screen checks."""
+    a = next((a for a in DEMO.get("accounts", []) if a["uid"] == u["id"]), None)
+    return u.get("pin_hash"), (a or {}).get("pin")
+
+
+class QrIn(BaseModel):
+    user_id: str | None = None
+    email: str | None = None
+
+
+def _qr_target(me_: dict, user_id: str | None) -> dict:
+    t = STORE.user(user_id) if user_id else me_
+    if not t or not _may_issue_for(me_, t):
+        raise HTTPException(404, "no such user")
+    if not any(_pin_of(t)):
+        raise HTTPException(400, "this account has no PIN")
+    return t
+
+
+def _qr_issue(me_: dict, t: dict, base: str) -> dict:
+    import secrets
+    import segno
+    STORE.x("UPDATE login_tokens SET revoked=1 WHERE user_id=? AND revoked=0", (t["id"],))  # one live link per person
+    tok = secrets.token_urlsafe(18)
+    exp = time.time() + QR_TTL
+    STORE.x("INSERT INTO login_tokens(hash, user_id, created, expires, issued_by) VALUES (?,?,?,?,?)", (_qr_hash(tok), t["id"], time.time(), exp, me_["id"]))
+    link = f"{base.rstrip('/')}/q/{tok}.{_qr_sig(tok)}"
+    buf = io.BytesIO()
+    segno.make(link, error="m").save(buf, kind="png", scale=8, border=2)
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="qr_issue", input=t["id"][:8], ok=1)
+    return {"link": link, "expires": exp, "qr_png": "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode(), "user": t["name"], "email": t.get("email")}
+
+
+@app.post("/api/qr/issue")
+def qr_issue(body: QrIn, request: Request, uid: str | None = Cookie(None)) -> dict:
+    """New QR for me (or, for the chief / engineer, for a person of the staff). The previous link stops working."""
+    me_ = user_of(uid)
+    return _qr_issue(me_, _qr_target(me_, body.user_id), _public_base(request))
+
+
+@app.post("/api/qr/revoke")
+def qr_revoke(body: QrIn, uid: str | None = Cookie(None)) -> dict:
+    me_ = user_of(uid)
+    t = _qr_target(me_, body.user_id)
+    n = STORE.x("UPDATE login_tokens SET revoked=1 WHERE user_id=? AND revoked=0", (t["id"],)).rowcount
+    return {"ok": True, "revoked": n}
+
+
+def _smtp_ready() -> bool:
+    return bool(os.environ.get("SMTP_HOST") and os.environ.get("SMTP_FROM"))
+
+
+def send_mail(to: str, subject: str, text: str, png: bytes) -> None:
+    """SMTP from .env: SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_SSL=1 for port 465."""
+    import smtplib
+    from email.message import EmailMessage
+    m = EmailMessage()
+    m["From"], m["To"], m["Subject"] = os.environ["SMTP_FROM"], to, subject
+    m.set_content(text)
+    m.add_attachment(png, maintype="image", subtype="png", filename="qr.png")
+    port = int(os.environ.get("SMTP_PORT", "587"))
+    cls = smtplib.SMTP_SSL if os.environ.get("SMTP_SSL") == "1" or port == 465 else smtplib.SMTP
+    with cls(os.environ["SMTP_HOST"], port, timeout=20) as srv:
+        if cls is smtplib.SMTP:
+            srv.starttls()
+        if os.environ.get("SMTP_USER"):
+            srv.login(os.environ["SMTP_USER"], os.environ.get("SMTP_PASSWORD", ""))
+        srv.send_message(m)
+
+
+@app.post("/api/qr/email")
+def qr_email(body: QrIn, request: Request, uid: str | None = Cookie(None)) -> dict:
+    """«Отправить на почту»: a fresh QR + link to the person's own e-mail (from the profile). Without SMTP: mailto + PNG download."""
+    me_ = user_of(uid)
+    t = _qr_target(me_, body.user_id)
+    if body.email is not None and (me_["id"] == t["id"] or me_["role"] in ("manager", "engineer")):
+        if not _email_or_none(body.email):
+            raise HTTPException(400, "e-mail")
+        t = STORE.upsert_user(t["id"], email=_email_or_none(body.email))
+    if not t.get("email"):
+        raise HTTPException(400, "no e-mail in the profile")
+    q = _qr_issue(me_, t, _public_base(request))
+    text = (f"Вход в «Цифровой механик» на новом устройстве: откройте ссылку или наведите камеру на QR-код во вложении, затем введите свой PIN.\n\n"
+            f"{q['link']}\n\nСсылка действует 24 часа. Если вы её не запрашивали, сообщите главному механику.")
+    if not _smtp_ready():
+        from urllib.parse import quote
+        return {**q, "sent": False, "mailto": f"mailto:{t['email']}?subject={quote('Вход в «Цифровой механик»')}&body={quote(text)}"}
+    try:
+        send_mail(t["email"], "Вход в «Цифровой механик»", text, base64.b64decode(q["qr_png"].split(",", 1)[1]))
+    except Exception as e:  # noqa: BLE001 - mail server down: the person can still use the QR on screen
+        jlog(event="smtp_error", error=type(e).__name__)
+        raise HTTPException(502, "mail server error")
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="qr_email", input=t["id"][:8], ok=1)
+    return {**q, "sent": True}
+
+
+def _qr_row(token: str) -> dict | None:
+    tok, _, sig = (token or "").partition(".")
+    if not tok or not hmac.compare_digest(sig, _qr_sig(tok)):
+        return None
+    r = STORE.one("SELECT * FROM login_tokens WHERE hash=?", (_qr_hash(tok),))
+    if not r or r["revoked"] or r["expires"] < time.time():
+        return None
+    return r
+
+
+@app.get("/q/{token}", response_class=HTMLResponse)
+def qr_page(token: str) -> HTMLResponse:
+    """The QR opens this screen: whose link it is, and a PIN field. Nothing happens without the PIN."""
+    r = _qr_row(token)
+    u = STORE.user(r["user_id"]) if r else None
+    if not u or not u.get("active", 1):
+        return HTMLResponse(QR_HTML.replace("{{body}}", "<h1>Ссылка не действует</h1><p>Срок истёк или ссылку заменили на новую. Попросите новый QR-код в профиле.</p>"), status_code=410)
+    body = (f"<h1>Вход на этом устройстве</h1><p>{html.escape(u['name'])}</p>"
+            f"<form id='f'><label for='pin'>Ваш PIN</label><input id='pin' inputmode='numeric' autocomplete='one-time-code' pattern='[0-9]*' maxlength='8' required autofocus>"
+            f"<button>Войти</button><p id='e' class='err'></p></form>"
+            f"<script>document.getElementById('f').onsubmit=async e=>{{e.preventDefault();const r=await fetch('/api/qr/redeem',{{method:'POST',headers:{{'Content-Type':'application/json'}},"
+            f"body:JSON.stringify({{token:{json.dumps(token)},pin:document.getElementById('pin').value}})}});const d=await r.json().catch(()=>({{}}));"
+            f"if(r.ok)location.href=d.redirect;else document.getElementById('e').textContent=r.status===429?'Слишком много попыток, подождите 10 минут':'Неверный PIN';}}</script>")
+    return HTMLResponse(QR_HTML.replace("{{body}}", body))
+
+
+QR_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Вход · Цифровой механик</title><link rel="stylesheet" href="/static/app.css"><style>main{max-width:360px;margin:12vh auto;padding:24px}
+form{display:flex;flex-direction:column;gap:12px}input{min-height:52px;font-size:1.4rem;letter-spacing:.3em;text-align:center;border-radius:12px;border:1px solid var(--border);background:var(--surface-2);color:var(--text)}
+button{min-height:52px;border-radius:12px;border:0;background:var(--accent);color:#fff;font-weight:600;font-size:1rem}.err{color:var(--danger);min-height:1.2em}</style></head>
+<body><main>{{body}}</main></body></html>"""
+
+
+class QrRedeemIn(BaseModel):
+    token: str
+    pin: str
+
+
+@app.post("/api/qr/redeem")
+def qr_redeem(body: QrRedeemIn, response: Response) -> dict:
+    """Link + the person's PIN -> the usual long session on this device. The link stays valid for other devices until it expires."""
+    r = _qr_row(body.token)
+    u = STORE.user(r["user_id"]) if r else None
+    if not u or not u.get("active", 1):
+        raise HTTPException(410, "link expired")
+    if r["locked_until"] and r["locked_until"] > time.time():
+        raise HTTPException(429, "too many attempts")
+    h, plain = _pin_of(u)
+    ok = (bool(h) and _pin_ok(body.pin, h)) or (bool(plain) and hmac.compare_digest(body.pin.strip(), plain))
+    if not ok:
+        fails = (r["fails"] or 0) + 1
+        STORE.x("UPDATE login_tokens SET fails=?, locked_until=? WHERE hash=?", (0 if fails >= QR_MAX_FAILS else fails, time.time() + 600 if fails >= QR_MAX_FAILS else 0, r["hash"]))
+        STORE.audit(user_id=u["id"], role=u["role"], action="qr_login", ok=0)
+        raise HTTPException(429 if fails >= QR_MAX_FAILS else 403, "too many attempts" if fails >= QR_MAX_FAILS else "wrong PIN")
+    STORE.x("UPDATE login_tokens SET fails=0, used=? WHERE hash=?", (time.time(), r["hash"]))
+    u = STORE.upsert_user(u["id"], consent_at=u.get("consent_at") or time.time())
+    start_session(response, u["id"])
+    set_profile_cookie(response, u)
+    STORE.audit(user_id=u["id"], role=u["role"], action="qr_login", ok=1)
+    return {"ok": True, "redirect": {"manager": "/manager", "engineer": "/engineer"}.get(u["role"], "/")}
 
 
 @app.exception_handler(Exception)

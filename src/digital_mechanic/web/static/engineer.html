@@ -1,22 +1,25 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Инженер · Цифровой механик</title><link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/static/app.css"><script src="/static/a11y.js"></script><script src="/static/icons.js"></script></head>
+<link rel="stylesheet" href="/static/app.css"><script src="/static/a11y.js"></script><script src="/static/icons.js"></script><script src="/static/qr.js" defer></script></head>
 <body>
 <header class="mgr-bar">
   <h1>Меню инженера</h1>
   <span class="small muted" id="whoami"></span>
+  <button class="btn ghost sm" id="myqr">QR-вход</button>
   <button class="icon-btn" id="logout" aria-label="logout" data-icon="log-out"></button>
 </header>
 <main class="mgr-main">
   <div class="kpis" id="health"></div>
   <nav class="tabs" id="tabs">
     <button data-tab="logs" class="on">Живой журнал</button>
+    <button data-tab="companies">Компании</button>
     <button data-tab="mcp">MCP-серверы</button>
     <button data-tab="models">Модели</button>
     <button data-tab="ask">Агент</button>
   </nav>
   <section id="tab-logs"></section>
+  <section id="tab-companies" class="hidden"></section>
   <section id="tab-mcp" class="hidden"></section>
   <section id="tab-models" class="hidden"></section>
   <section id="tab-ask" class="hidden"><div class="panel"><div class="pad"><div id="echat" class="chat mchat"></div>

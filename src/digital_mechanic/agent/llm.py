@@ -47,6 +47,7 @@ class Usage:
 
 # Country of the person behind the current request (set by the web layer): picks the primary provider.
 REQUEST_COUNTRY: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_country", default=None)
+REQUEST_PRIMARY: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_primary", default=None)  # per-company switch
 
 
 class Llm:
@@ -82,7 +83,7 @@ class Llm:
     def order(self, country: str | None = None) -> list[str]:
         """Providers to try, primary first. Only those with a key."""
         have = [n for n in ("cloudru", "tokenrouter") if self._provider(n)[1]]
-        prim = (self.s.llm_primary or "auto").lower()
+        prim = (REQUEST_PRIMARY.get() or self.s.llm_primary or "auto").lower()
         if prim == "auto":
             c = (country if country is not None else REQUEST_COUNTRY.get()) or ""
             ru = {x.strip().upper() for x in self.s.cloudru_countries.split(",") if x.strip()}

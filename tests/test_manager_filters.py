@@ -70,3 +70,20 @@ def test_url_keys_and_no_demo_placeholders():
     for k, v in ru.items():
         if k.endswith("_ph") or "placeholder" in k:
             assert not re.search(r"например|Покажи", v), k
+
+
+def test_every_agent_input_has_a_mic():
+    """Mic audit: each chat/agent textarea on every role's page sits next to a voice button."""
+    import re
+    from pathlib import Path
+    st = Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static"
+    for page, ta in (("index.html", "txt"), ("manager.html", "mtxt"), ("engineer.html", "etxt")):
+        html = (st / page).read_text(encoding="utf-8")
+        box = re.search(r'<[^>]*class="inputbox"[^>]*>.*?</div>|<footer class="composer.*?</footer>', html, re.S)
+        found = [m for m in re.finditer(r'<textarea id="(\w+)"', html)]
+        assert any(m.group(1) == ta for m in found), page
+        seg = html[html.index(f'id="{ta}"'):html.index(f'id="{ta}"') + 600]
+        assert "mic-btn" in seg, page
+    assert "QRLink.mount" in (st / "app.js").read_text(encoding="utf-8")
+    assert "QRLink.mount" in (st / "manager.js").read_text(encoding="utf-8")
+    assert "companies()" in (st / "engineer.js").read_text(encoding="utf-8")

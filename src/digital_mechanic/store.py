@@ -67,10 +67,17 @@ class Store:
         for col, ddl in (("country", "TEXT DEFAULT 'RU'"), ("profile", "TEXT DEFAULT ''"),
                          # accounts the chief manages: login code + PIN hash, job title, assigned trucks, active flag, onboarding done
                          ("login", "TEXT"), ("pin_hash", "TEXT"), ("title", "TEXT"), ("vehicles", "TEXT"), ("active", "INTEGER DEFAULT 1"),
-                         ("onboarded", "INTEGER DEFAULT 1"), ("created_by", "TEXT")):  # data-law country; adaptive profile (JSON)
+                         ("onboarded", "INTEGER DEFAULT 1"), ("created_by", "TEXT"),
+                         ("company_id", "TEXT"), ("email", "TEXT")):  # tenant (engineer: none = all companies); own e-mail for the login QR  # data-law country; adaptive profile (JSON)
             if col not in cols:
                 self._con.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
                 self._con.commit()
+        # tenants: companies, which trucks belong to which company (unlisted trucks: the seed company), one-time login links (QR)
+        self._con.executescript("""
+            CREATE TABLE IF NOT EXISTS companies(id TEXT PRIMARY KEY, name TEXT, created REAL, llm_primary TEXT DEFAULT '', active INTEGER DEFAULT 1, note TEXT DEFAULT '');
+            CREATE TABLE IF NOT EXISTS company_vehicles(vehicle_id TEXT PRIMARY KEY, company_id TEXT);
+            CREATE TABLE IF NOT EXISTS login_tokens(hash TEXT PRIMARY KEY, user_id TEXT, created REAL, expires REAL, used REAL, revoked INTEGER DEFAULT 0, issued_by TEXT, fails INTEGER DEFAULT 0, locked_until REAL DEFAULT 0);
+        """)
         tcols = {r[1] for r in self._con.execute("PRAGMA table_info(tickets)")}
         for col in ("attachments", "review"):  # ticket package (answer, pages, photos, summary) and chief's approval
             if col not in tcols:
@@ -98,7 +105,7 @@ class Store:
             self.x("INSERT INTO users(id, created_at) VALUES (?,?)", (uid, time.time()))
         for k, v in kw.items():
             if k in {"name", "role", "lang", "experience", "detail", "answer_lang", "big_font", "voice_out", "consent_at", "country", "profile",
-                     "login", "pin_hash", "title", "vehicles", "active", "onboarded", "created_by"}:
+                     "login", "pin_hash", "title", "vehicles", "active", "onboarded", "created_by", "company_id", "email"}:
                 self.x(f"UPDATE users SET {k}=? WHERE id=?", (v, uid))
         return self.one("SELECT * FROM users WHERE id=?", (uid,))
 
@@ -106,6 +113,7 @@ class Store:
         return self.one("SELECT * FROM users WHERE id=?", (uid,))
 
     def delete_user_data(self, uid: str) -> None:
+        self.x("DELETE FROM login_tokens WHERE user_id=?", (uid,))
         for t in ("messages", "audit", "handoffs", "media", "sessions"):
             self.x(f"DELETE FROM {t} WHERE user_id=?", (uid,))
         for t in ("diagnoses", "tickets", "repairs"):
