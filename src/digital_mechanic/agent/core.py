@@ -62,6 +62,11 @@ TOOLS_MANAGER = [
 ]
 
 
+PROGRESS = {"search_manual": "🔎 Ищу в руководстве", "search_extra_docs": "📗 Доп. руководство", "get_diagnosis": "🎧 Запрашиваю ML-диагностику",
+            "get_vehicle_history": "🗂 Смотрю историю машины", "prepare_ticket": "📝 Готовлю заявку", "start_repair": "🛠 Составляю план ремонта",
+            "update_repair": "✔ Отмечаю шаг", "fleet_overview": "📊 Сводка по парку"}
+
+
 @dataclass
 class Conv:
     cid: str
@@ -95,6 +100,7 @@ class Agent:
         self.fleet, self.ml, self.toir, self.index, self.extra = fleet, ml, toir, index, extra
         self.llm, self.store, self.docs, self.max_rounds, self.pii_masking = llm, store, engine_docs, max_rounds, pii_masking
         self.convs: dict[str, Conv] = {}
+        self.progress: dict[str, list[str]] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ state
@@ -337,6 +343,7 @@ class Agent:
 
     def _handle(self, c: Conv, user: dict, text: str, image_note: str | None, event: str | None) -> Turn:
         turn = Turn()
+        self.progress[c.cid] = []
         manager = user.get("role") == "manager" and c.vehicle is None
         raw = (text or "").strip()
         masked = pii.mask(raw) if self.pii_masking else raw
@@ -457,6 +464,7 @@ class Agent:
             res = {"error": f"сервис {e.service} недоступен или ответил {e.status}: {e.detail[:200]}"}
         except KeyError as e:
             res = {"error": f"не найдено: {e}"}
+        self.progress.setdefault(c.cid, []).append(PROGRESS.get(name, name) + (f": {args.get('query')}" if args.get("query") else ""))
         log = {"tool": name, "args": {k: (v if len(json.dumps(v, ensure_ascii=False)) < 300 else "…") for k, v in args.items()}, "ms": int((time.time() - t0) * 1000), "ok": "error" not in res}
         if "fragments" in res:
             log["hits"] = [f"{f['label']}:{f['document']} стр.{f['pdf_page']}" for f in res["fragments"]]

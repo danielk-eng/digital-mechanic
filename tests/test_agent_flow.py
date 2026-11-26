@@ -1,148 +1,103 @@
-"""Agent flow with fake ML/TOIR/LLM: policy gates, grounding, confirm-before-ticket."""
-from pathlib import Path
-
-import pytest
-
-from digital_mechanic.agent.llm import Llm, LlmUnavailable
-from digital_mechanic.agent.orchestrator import MechanicAgent
-from digital_mechanic.clients import Fleet
-from digital_mechanic.config import Settings
-from digital_mechanic.ingest.pages import ingest_manuals
-from digital_mechanic.retrieval.bm25 import ManualIndex
-from digital_mechanic.schemas import CheckResult, CheckStatus, RecordingQuality, TicketAck
-
-ROOT = Path(__file__).resolve().parents[1]
+from conftest import msg, tool_call
 
 
-class FakeMl:
-    def __init__(self, check):
-        self.check = check
-
-    def list_checks(self, vid):
-        return [{"session_id": self.check.session_id, "datetime": "2026-11-01T00:00:00"}]
-
-    def get_check(self, vid, sid):
-        return self.check
+def first_failed(agent):
+    for v in agent.fleet.all():
+        for s in agent.fleet.sessions(v.vehicle_id):
+            if s.status.value == "check_failed":
+                return v.vehicle_id, s.session_id
 
 
-class FakeToir:
-    def __init__(self):
-        self.posted = []
-
-    def create_ticket(self, d):
-        self.posted.append(d)
-        return TicketAck(ticket_id="TKT-0001")
-
-
-class FakeLlm(Llm):
-    def __init__(self, answers):
-        super().__init__(Settings(llm_api_key="x"))
-        self.answers = list(answers)
-
-    def json(self, step, system, user, max_tokens=0, attempt=0):
-        a = self.answers.pop(0)
-        if isinstance(a, Exception):
-            raise a
-        return a
+def test_check_failed_no_diagnosis_no_llm(make_agent):
+    a = make_agent([])
+    vid, sid = first_failed(a)
+    c = a.conv("u1", vid)
+    card = a.diagnose(c, sid)
+    assert card["status"] == "check_failed" and card["light"] == "repeat"
+    turn = a.handle(c, {"lang": "ru"}, "", event="explain_diagnosis")
+    assert "Повторите запись" in turn.text and a.llm.calls == []
+    res = a.tool_prepare_ticket(c, {"conclusion": "x", "operations": [], "spare_parts": []})
+    assert "error" in res
 
 
-@pytest.fixture(scope="module")
-def index():
-    pages = ingest_manuals(ROOT / "data/mock/manuals", ROOT / "data/engine_docs.yaml")
-    return ManualIndex(pages)
+def test_agent_picks_tools_and_ticket_goes_through_gate(make_agent):
+    def ticket_call(messages):
+        # find the label of page 269 (valve clearance) among search results
+        import json
+        for m in messages:
+            if m.get("role") == "tool":
+                for f in json.loads(m["content"]).get("fragments", []):
+                    if f["pdf_page"] == 269:
+                        return msg(None, [tool_call("prepare_ticket", {"conclusion": "Стук, дефектовка", "operations": [
+                            {"text": "Проверить тепловые зазоры", "source": f["label"], "quote": "Проверить и подрегулировать тепловые зазоры клапанного механизма"},
+                            {"text": "Выдуманная работа", "source": f["label"], "quote": "этого текста на странице нет вообще"}], "spare_parts": []}, 2)])
+        raise AssertionError("page 269 not retrieved")
+
+    a = make_agent([
+        msg(None, [tool_call("search_manual", {"query": "регулировка тепловых зазоров клапанов"}, 1)]),
+        ticket_call,
+        msg("Черновик готов [S1]"),
+    ])
+    c = a.conv("u1", "M333YK47")
+    a.diagnose(c, "S-0005")
+    turn = a.handle(c, {"lang": "ru"}, "Создать заявку")
+    assert [t["tool"] for t in turn.tools] == ["search_manual", "prepare_ticket"]
+    assert c.draft and len(c.draft["operations"]) == 1 and c.draft["rejected"]
+    assert any(cd["kind"] == "ticket_draft" for cd in turn.cards)
+    assert a.toir.sent == []  # nothing sent before confirmation
+    turn2 = a.handle(c, {"lang": "ru"}, "Подтверждаю")
+    assert "TKT-" in turn2.text and len(a.toir.sent) == 1
+    sent = a.toir.sent[0]
+    assert sent["references"][0] == {"manual": "236.01.01 РК", "pdf_page": 269}
+    assert set(sent) == {"vehicle_id", "session_id", "anomaly_type", "conclusion", "urgency", "operations", "spare_parts", "references"}
 
 
-def make(index, check, llm_answers):
-    fleet = Fleet(ROOT / "data/mock/vehicles.json")
-    toir = FakeToir()
-    a = MechanicAgent(fleet, FakeMl(check), toir, index, FakeLlm(llm_answers))
-    a.select_vehicle("s", check.vehicle_id)
-    return a, toir
+def test_invented_numbers_are_removed(make_agent):
+    a = make_agent([
+        msg(None, [tool_call("search_manual", {"query": "момент затяжки болтов крышек коренных подшипников"}, 1)]),
+        msg("Момент 421-461 Н·м [S1]. Ещё момент 999 Н·м [S1]."),
+        msg("Момент 421-461 Н·м [S1]. Ещё момент 999 Н·м [S1]."),  # fix attempt keeps the bad number
+    ])
+    c = a.conv("u1", "M333YK47")
+    turn = a.handle(c, {"lang": "ru"}, "Какой момент затяжки крышек коренных подшипников?")
+    assert "421-461" in turn.text and "999" not in turn.text
+    assert turn.sources and turn.sources[0]["document"] in ("236.01.01 РК", "236-3902150-Б РЭ")
 
 
-def anomaly(**kw):
-    base = dict(vehicle_id="A123BC77", session_id="SES-0001", status=CheckStatus.anomaly, fault_code="F02", fault_title="Стуки клапанного механизма",
-                anomaly_score=0.86, confidence=0.91, quality=RecordingQuality.good, symptoms="стук в головке блока")
-    base.update(kw)
-    return CheckResult(**base)
+def test_repair_session_voice_next(make_agent):
+    def start(messages):
+        import json
+        for m in messages:
+            if m.get("role") == "tool":
+                f = json.loads(m["content"])["fragments"][0]
+                q = f["text"].split("\n")[0][:40]
+                return msg(None, [tool_call("start_repair", {"title": "Регулировка", "steps": [
+                    {"text": "Шаг А", "source": f["label"], "quote": q}, {"text": "Шаг Б", "source": f["label"], "quote": q}]}, 2)])
+    a = make_agent([msg(None, [tool_call("search_manual", {"query": "регулировка тепловых зазоров"}, 1)]), start, msg("План готов")])
+    c = a.conv("u1", "M333YK47")
+    a.diagnose(c, "S-0005")
+    t = a.handle(c, {"lang": "ru"}, "Начать ремонт")
+    assert any(cd["kind"] == "repair" for cd in t.cards)
+    t2 = a.handle(c, {"lang": "ru"}, "готово")
+    assert t2.text.startswith("Шаг 2 из 2")
+    t3 = a.handle(c, {"lang": "ru"}, "дальше")
+    assert "завершён" in t3.text
+    assert a.store.repair_open("M333YK47") is None
 
 
-def page_quote(index, engine, doc_id, page, n=60):
-    p = index.get_page(engine, doc_id, page)
-    line = next(l.strip() for l in p.text.splitlines() if len(l.strip()) > n)
-    return line[:n + 20]
+def test_history_scoped_to_current_check(make_agent):
+    a = make_agent([])
+    c = a.conv("u1", "M333YK47")
+    a.diagnose(c, "S-0005")
+    ctx = a._context(c)
+    later = [s.session_id for s in a.fleet.sessions("M333YK47")]
+    later = later[later.index("S-0005") + 1:]
+    for sid in later:
+        assert sid not in ctx.split("Проверки этой машины до текущей включительно:")[1].split("\n")[0]
 
 
-def good_llm(index):
-    q = page_quote(index, "ЯМЗ-236М2", "YAMZ-236M2-RM", 5)
-    # pick the page where the quote lives via search to stay robust
-    hit = index.search("ЯМЗ-236М2", "стуки клапанного механизма", 1)[0].page
-    q = next(l.strip() for l in hit.text.splitlines() if len(l.strip()) > 40)
-    labelled = {"risk": "", "works": [{"title": "Работа", "scope": "specific", "source": "S1", "quote": q}], "parts": []}
-    return labelled
-
-
-def test_failed_recording_never_creates_ticket(index):
-    a, toir = make(index, anomaly(status=CheckStatus.check_failed, quality=RecordingQuality.bad), [])
-    r = a.run_check("s", "SES-0001")
-    assert r["card"]["kind"] == "failed" and r["pending_draft_id"] is None
-    a.chat("s", "подтверждаю")
-    assert toir.posted == []
-
-
-def test_bad_quality_blocks_even_with_anomaly(index):
-    a, toir = make(index, anomaly(quality=RecordingQuality.bad), [])
-    assert a.run_check("s")["card"]["kind"] == "failed"
-
-
-def test_normal_no_ticket(index):
-    a, toir = make(index, anomaly(status=CheckStatus.normal, fault_code=None, fault_title=None), [])
-    assert a.run_check("s")["card"]["kind"] == "normal"
-
-
-def test_ticket_only_after_confirmation(index):
-    a, toir = make(index, anomaly(), [good_llm(index)])
-    r = a.run_check("s")
-    assert r["pending_draft_id"] and toir.posted == []
-    r2 = a.chat("s", "подтверждаю")
-    assert r2["card"]["kind"] == "ticket" and len(toir.posted) == 1
-
-
-def test_hallucinated_quote_is_dropped_and_no_ticket(index):
-    bad = {"works": [{"title": "Выдумка", "scope": "specific", "source": "S1", "quote": "этой фразы нет ни в одном руководстве совсем"}], "parts": []}
-    a, toir = make(index, anomaly(), [bad])
-    r = a.run_check("s")
-    assert r["card"]["kind"] == "no_basis" and r["pending_draft_id"] is None
-    a.chat("s", "подтверждаю")
-    assert toir.posted == []
-
-
-def test_llm_down_falls_back_to_extractive(index):
-    a, toir = make(index, anomaly(), [LlmUnavailable("down")])
-    r = a.run_check("s")
-    assert r["card"]["kind"] == "anomaly" and r["card"]["draft"]["works"]
-
-
-def test_changed_draft_id_rejected(index):
-    a, toir = make(index, anomaly(), [good_llm(index)])
-    a.run_check("s")
-    r = a.confirm("s", "wrong")
-    assert "изменился" in r["text"] and toir.posted == []
-
-
-def test_validate_rejects_other_engine_page(index):
-    a, toir = make(index, anomaly(), [good_llm(index)])
-    a.run_check("s")
-    s = a.session("s")
-    other = next(p for p in index.pages if "ЗМЗ-5234.10" in p.engine_types and len(p.text) > 200)
-    s.draft.works[0].source.document = other.document
-    s.draft.works[0].source.page = other.page
-    assert a.validate_draft(s.vehicle, s.draft)
-    assert a.confirm("s", s.draft_id)["card"] is None and toir.posted == []
-
-
-def test_answer_without_valid_citation_says_not_found(index):
-    a, _ = make(index, anomaly(), [])
-    a.llm.answers = [{"found": True, "answer": "Момент 99 Нм", "citations": [{"source": "S1", "quote": "полностью выдуманная цитата из руководства"}]}]
-    r = a.chat("s", "Какой момент затяжки?")
-    assert r["card"]["found"] is False and "99" not in r["text"]
+def test_manager_tools_only_for_manager(make_agent):
+    a = make_agent([msg("ok")])
+    c = a.conv("m1", None)
+    a.handle(c, {"lang": "ru", "role": "manager"}, "Сколько машин в карантине?")
+    assert a.llm.calls[0]["tools"] == ["fleet_overview", "get_vehicle_history"]

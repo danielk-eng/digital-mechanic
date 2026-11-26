@@ -201,7 +201,12 @@ async function ask(text, event = null) {
   if (BUSY) return; BUSY = true;
   const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
   const t0 = Date.now();
-  const tick = setInterval(() => th.querySelector(".thinking").textContent = `${t("thinking")} ${Math.round((Date.now() - t0) / 1000)} c`, 1000);
+  let steps = [];
+  const tick = setInterval(async () => {
+    const sec = Math.round((Date.now() - t0) / 1000);
+    if (sec % 2 === 0) { try { steps = (await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`)).steps; } catch (_) {} }
+    const el = th.querySelector(".thinking"); if (el) el.innerHTML = `${t("thinking")} ${sec} c` + (steps.length ? "<br>" + steps.slice(-3).map(esc).join("<br>") : "");
+  }, 1000);
   try {
     const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event}});
     th.remove(); renderTurn(r);

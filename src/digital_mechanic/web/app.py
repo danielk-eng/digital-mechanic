@@ -230,6 +230,12 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
     return {**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000)}
 
 
+@app.get("/api/progress")
+def progress(vehicle_id: str | None = None, uid: str | None = Cookie(None)) -> dict:
+    u = user_of(uid)
+    return {"steps": AGENT.progress.get(f"{u['id']}:{vehicle_id or '-'}", [])}
+
+
 PLATE_MAP = str.maketrans("АВЕКМНОРСТУХ", "ABEKMHOPCTYX")
 
 
