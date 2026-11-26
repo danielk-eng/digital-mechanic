@@ -136,6 +136,15 @@ def user_of(uid: str | None, manager: bool = False, roles: tuple[str, ...] | Non
     return u
 
 
+def pub(u: dict | None) -> dict | None:
+    """User row for the browser: never the PIN hash; «chief» tells the UI whether the staff tab is allowed."""
+    if not u:
+        return u
+    d = {k: v for k, v in u.items() if k != "pin_hash"}
+    d["chief"] = bool(u.get("role") == "manager" and (u.get("login") or u.get("id") in {a["uid"] for a in DEMO["accounts"]}))
+    return d
+
+
 _LAST_PURGE = [0.0]
 
 
@@ -233,7 +242,7 @@ def login_demo(body: DemoLoginIn, response: Response) -> dict:
         response.set_cookie("uid", db["id"], httponly=True, samesite="lax", max_age=30 * 86400)
         set_profile_cookie(response, u)
         STORE.audit(user_id=db["id"], role=db["role"], action="login_pin", ok=1)
-        return {"user": u, "account": {"key": code, "title": db.get("title"), "vehicles": json.loads(db.get("vehicles") or "[]")}}
+        return {"user": pub(u), "account": {"key": code, "title": db.get("title"), "vehicles": json.loads(db.get("vehicles") or "[]")}}
     a = demo_seed.account(DEMO, code)
     if not a or body.pin != a["pin"]:
         STORE.audit(user_id=None, role=None, action="login_demo", input=code, ok=0)
@@ -248,7 +257,7 @@ def login_demo(body: DemoLoginIn, response: Response) -> dict:
     response.set_cookie("uid", a["uid"], httponly=True, samesite="lax", max_age=30 * 86400)
     set_profile_cookie(response, u)
     STORE.audit(user_id=a["uid"], role=a["role"], action="login_demo", ok=1)
-    return {"user": u, "account": {k: a.get(k) for k in ("key", "title", "vehicles")}}
+    return {"user": pub(u), "account": {k: a.get(k) for k in ("key", "title", "vehicles")}}
 
 
 @app.get("/api/session")
@@ -256,7 +265,7 @@ def session(uid: str | None = Cookie(None)) -> dict:
     """Boot check without a 401 in the browser console: {"user": null} when not logged in."""
     u = STORE.user(uid) if uid else None
     # server_tts: false -> the browser speaks itself (no POST /api/tts that can only answer 404)
-    return {"user": u, "langs": {k: v["name"] for k, v in LANGS.items()}, "server_tts": bool(S.speech_url or S.silero_enabled)}
+    return {"user": pub(u), "langs": {k: v["name"] for k, v in LANGS.items()}, "server_tts": bool(S.speech_url or S.silero_enabled)}
 
 
 @app.get("/api/me")
@@ -264,7 +273,7 @@ def me(uid: str | None = Cookie(None)) -> dict:
     u = user_of(uid)
     p = uprofile.load(u)
     acc = next((a for a in DEMO["accounts"] if a["uid"] == u["id"]), None)
-    return {"user": u, "profile": uprofile.public(p), "style": ustyle.public(p, u), "langs": {k: v["name"] for k, v in LANGS.items()},
+    return {"user": pub(u), "profile": uprofile.public(p), "style": ustyle.public(p, u), "langs": {k: v["name"] for k, v in LANGS.items()},
             "account": {k: acc.get(k) for k in ("key", "title", "vehicles")} if acc else None}
 
 
@@ -339,7 +348,7 @@ def update_me(body: ProfileIn, response: Response, uid: str | None = Cookie(None
             kw[k] = int(kw[k])
     u = STORE.upsert_user(uid, **kw)
     set_profile_cookie(response, u)
-    return {"user": u}
+    return {"user": pub(u)}
 
 
 @app.delete("/api/me")
@@ -1219,6 +1228,19 @@ class UserPatch(BaseModel):
     new_pin: bool = False
 
 
+def _demo_uids() -> set[str]:
+    return {a["uid"] for a in DEMO["accounts"]}
+
+
+def chief_of(uid: str | None) -> dict:
+    """Employees are managed only by a chief who signed in with a code + PIN (demo «chief» or an account the chief
+    created). A name-only «Главный механик» session from the open login screen sees the fleet but not the staff."""
+    u = user_of(uid, manager=True)
+    if not (u.get("login") or u["id"] in _demo_uids()):
+        raise HTTPException(403, "chief account only (code + PIN)")
+    return u
+
+
 def _new_pin() -> str:
     import secrets
     return f"{secrets.randbelow(9000) + 1000}"
@@ -1234,7 +1256,7 @@ def _user_row(u: dict) -> dict:
 
 @app.get("/api/admin/users")
 def admin_users(uid: str | None = Cookie(None)) -> dict:
-    user_of(uid, manager=True)
+    chief_of(uid)
     rows = STORE.q("SELECT * FROM users WHERE login IS NOT NULL ORDER BY role, name")
     return {"users": [_user_row(u) for u in rows], "roles": ["mechanic", "manager", "engineer"], "levels": list(EXPERIENCE_LEVELS),
             "vehicles": AGENT.fleet.ids()}
@@ -1243,7 +1265,7 @@ def admin_users(uid: str | None = Cookie(None)) -> dict:
 @app.post("/api/admin/users")
 def admin_create_user(body: NewUserIn, uid: str | None = Cookie(None)) -> dict:
     """Only the chief creates accounts. The PIN is shown once in the answer (stored as a salted hash)."""
-    me_ = user_of(uid, manager=True)
+    me_ = chief_of(uid)
     if body.role not in ("mechanic", "manager", "engineer") or body.experience not in EXPERIENCE_LEVELS:
         raise HTTPException(400, "bad role or level")
     bad = [v for v in body.vehicles if v not in AGENT.fleet.ids()]
@@ -1267,12 +1289,14 @@ def secrets_suffix() -> str:
 
 @app.post("/api/admin/users/{user_id}")
 def admin_edit_user(user_id: str, body: UserPatch, uid: str | None = Cookie(None)) -> dict:
-    me_ = user_of(uid, manager=True)
+    me_ = chief_of(uid)
     u = STORE.user(user_id)
     if not u:
         raise HTTPException(404, "no such user")
     if user_id == me_["id"] and body.active is False:
         raise HTTPException(400, "cannot deactivate yourself")
+    if user_id in _demo_uids() and (body.new_pin or body.active is False or (body.role and body.role != u["role"])):
+        raise HTTPException(400, "demo account: PIN, role and status are fixed")  # the login screen shows its PIN to everyone
     kw: dict = {}
     if body.active is not None:
         kw["active"] = int(body.active)
@@ -1299,7 +1323,7 @@ def admin_edit_user(user_id: str, body: UserPatch, uid: str | None = Cookie(None
 @app.get("/api/admin/users/{user_id}")
 def admin_user_card(user_id: str, uid: str | None = Cookie(None)) -> dict:
     """Profile card by user ID: style, interests and typical topics, trucks worked on, history."""
-    user_of(uid, manager=True)
+    chief_of(uid)
     u = STORE.user(user_id)
     if not u:
         raise HTTPException(404, "no such user")
@@ -1355,7 +1379,7 @@ def onboarding_done(body: OnboardIn, uid: str | None = Cookie(None)) -> dict:
     st["source"] = "onboarding"
     STORE.upsert_user(u["id"], profile=uprofile.dump(p))
     STORE.audit(user_id=u["id"], role=u["role"], action="onboarding", input=f"{body.formality} {body.detail} {body.experience}", ok=1)
-    return {"user": STORE.user(u["id"]), "style": ustyle.public(p, u)}
+    return {"user": pub(STORE.user(u["id"])), "style": ustyle.public(p, u)}
 
 
 @app.get("/api/my/assignments")
