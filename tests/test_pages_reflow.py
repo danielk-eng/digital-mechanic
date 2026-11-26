@@ -63,3 +63,9 @@ def test_cause_remedy_table_is_rebuilt_row_by_row():
 def test_not_a_table_page():
     from digital_mechanic.ingest.pages import reflow_table
     assert reflow_table(_line(10, [(68, 352, "Обычный"), (360, 400, "текст")]))[0] is None
+
+
+def test_key_facts_take_one_table_row():
+    from digital_mechanic.agent.facts import sentences
+    t = "Причина — Способ устранения\nЗатрудненное перемещение рейки — Осторожно прогреть топливный насос\nЗагрязнение воздушного фильтра — Промыть фильтрующие элементы"
+    assert sentences(t) == t.split("\n")[1:]

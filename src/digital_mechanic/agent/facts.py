@@ -19,7 +19,12 @@ KINDS = [
 LIMIT = {"danger": 1, "tool": 1, "torque": 2, "value": 2}
 
 
+TABLE_HEAD = re.compile(r"^(?:Вероятн\S* |Возможн\S* )?(?:Причин|Неисправн)[^\n]{0,40} — (?:Способ|Метод)", re.M)
+
+
 def sentences(text: str) -> list[str]:
+    if TABLE_HEAD.search(text or ""):  # fault table indexed row by row: each «cause — remedy» row is one statement
+        return [ln.strip() for ln in text.split("\n") if len(ln.strip()) >= 25 and not TABLE_HEAD.match(ln.strip())]
     t = re.sub(r"-\n(?=[а-яё])", "", text)
     t = re.sub(r"\n\s*[-–•]\s+", "\n§", t)  # bullet items are separate statements
     t = re.sub(r"[ \t]*\n[ \t]*", " ", t)
