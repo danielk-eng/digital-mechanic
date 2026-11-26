@@ -402,3 +402,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .qrbox img{background:#fff;border-radius:12px;padding:6px;flex:none}
 .qrbox>div{flex:1;min-width:220px}
 .qrlink{word-break:break-all;color:var(--text-2)}
+/* 26.11 15:30: demo accounts arrive by fetch -> reserve their height (Lighthouse CLS 0.24 on the login screen) */
+.demo-acc:empty{min-height:305px}
+/* manager bar on a phone: title on its own line, actions below (was 46 px horizontal overflow at 390 px, logout off-screen) */
+@media (max-width:560px){
+  .mgr-bar{flex-wrap:wrap;height:auto;min-height:var(--bar);padding:8px 12px;row-gap:6px;gap:8px}
+  .mgr-bar h1{flex:1 1 100%;font-size:1rem}
+  .mgr-bar #whoami{flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+}
