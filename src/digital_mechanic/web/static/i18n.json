@@ -112,7 +112,9 @@
   "insp_saved": "Осмотр сохранён и передан главному",
   "captions": "Крупные субтитры речи",
   "recognizing": "Распознаю",
-  "understood": "Понял как"
+  "understood": "Понял как",
+  "print": "Печать / PDF",
+  "print_note": "Все значения — дословно из руководства; ниже приложены цитируемые страницы. Нет страницы — нет цифры."
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -227,7 +229,9 @@
   "insp_saved": "Koʻrik saqlandi va bosh mexanikka yuborildi",
   "captions": "Katta subtitrlar",
   "recognizing": "Tanimoqda",
-  "understood": "Shunday tushundim"
+  "understood": "Shunday tushundim",
+  "print": "Chop etish / PDF",
+  "print_note": "Barcha qiymatlar qoʻllanmadan soʻzma-soʻz; quyida keltirilgan sahifalar ilova qilingan."
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -342,7 +346,9 @@
   "insp_saved": "Муоина сабт ва ба сармеханик фиристода шуд",
   "captions": "Субтитрҳои калон",
   "recognizing": "Шинохта истодааст",
-  "understood": "Чунин фаҳмидам"
+  "understood": "Чунин фаҳмидам",
+  "print": "Чоп / PDF",
+  "print_note": "Ҳамаи қиматҳо аз дастур айнан гирифта шудаанд; саҳифаҳои иқтибосшуда дар поён замима шудаанд."
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -457,7 +463,9 @@
   "insp_saved": "Тексеру сақталды және бас механикке жіберілді",
   "captions": "Үлкен субтитрлер",
   "recognizing": "Танып жатыр",
-  "understood": "Былай түсіндім"
+  "understood": "Былай түсіндім",
+  "print": "Басып шығару / PDF",
+  "print_note": "Барлық мәндер нұсқаулықтан сөзбе-сөз алынған; төменде дәйексөз беттері қоса берілген."
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -572,7 +580,9 @@
   "insp_saved": "निरीक्षण सहेजा गया और मुख्य मैकेनिक को भेजा गया",
   "captions": "बड़े उपशीर्षक",
   "recognizing": "पहचान रहा है",
-  "understood": "मैंने ऐसे समझा"
+  "understood": "मैंने ऐसे समझा",
+  "print": "प्रिंट / PDF",
+  "print_note": "सभी मान मैनुअल से शब्दशः हैं; उद्धृत पृष्ठ नीचे संलग्न हैं।"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -687,6 +697,8 @@
   "insp_saved": "Đã lưu và gửi thợ trưởng",
   "captions": "Phụ đề lớn",
   "recognizing": "Đang nhận dạng",
-  "understood": "Hiểu là"
+  "understood": "Hiểu là",
+  "print": "In / PDF",
+  "print_note": "Mọi giá trị đều trích nguyên văn từ sổ tay; các trang được trích dẫn đính kèm bên dưới."
  }
 }

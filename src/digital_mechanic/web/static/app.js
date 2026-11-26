@@ -86,7 +86,9 @@ function renderTurn(turn, expanded = false) {
     const und = (turn.understood || []).length ? `<div class="muted understood">🔎 ${t("understood")}: ${turn.understood.map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join(", ")}</div>` : "";
     const d = addMsg("bot", und + factsHtml(turn.facts) + md(turn.text, turn.sources) + sourcesHtml(turn.sources) +
       `<div class="row acts">` + (canExpand ? `<button class="expand">${t("expand")} ▾</button>` : "") +
-      (canAlt ? `<button class="expand alt">🔀 ${t("alternatives")}</button><button class="expand hyp">🧪 ${t("hypothesis")}</button>` : "") + `</div>`);
+      (canAlt ? `<button class="expand alt">🔀 ${t("alternatives")}</button><button class="expand hyp">🧪 ${t("hypothesis")}</button>` : "") +
+      ((turn.sources || []).length ? `<button class="expand prn">🖨 ${t("print")}</button>` : "") + `</div>`);
+    const prn = d.querySelector(".prn"); if (prn) prn.onclick = ev => { ev.stopPropagation(); printTurn(turn); };
     if (canExpand) d.querySelector(".expand").onclick = ev => { ev.stopPropagation(); ev.target.remove(); expandAnswer(turn.text); };
     if (canAlt) {
       d.querySelector(".alt").onclick = ev => { ev.stopPropagation(); ev.target.remove(); eventTurn("alternatives", "", "🔀 " + t("alternatives")); };
@@ -97,6 +99,32 @@ function renderTurn(turn, expanded = false) {
   loadChips();
 }
 let HYP = false;
+// item 19: printable / Save-as-PDF procedure: answer + verbatim key facts + labor norms + the cited manual pages themselves
+async function printTurn(turn) {
+  const w = window.open("", "_blank"); if (!w) return;
+  w.document.write(`<p>${t("thinking")}</p>`);
+  const veh = $("#vehicle") && $("#vehicle").selectedOptions[0] ? $("#vehicle").selectedOptions[0].textContent : "";
+  const labor = (turn.cards || []).flatMap(c => c.labor || []);
+  const lab = labor.length ? `<p>⏱ ${t("labor")}: ` + (labor.some(l => l.norm) ? labor.filter(l => l.norm).map(l => `${esc(l.norm)} (${t("page")} ${l.page})`).join("; ") : t("labor_na")) + `</p>` : "";
+  const seen = new Set(), pages = [];
+  for (const s of (turn.sources || [])) { const k = s.doc_id + "#" + s.page; if (seen.has(k) || pages.length >= 6) continue; seen.add(k);
+    let info = {}; try { info = await api(`/api/page/${encodeURIComponent(s.doc_id)}/${s.page}`); } catch (e) {}
+    pages.push(`<section class="pg"><h3>${esc(s.label || "")} · ${esc(info.full_title || s.document)} — ${t("page")} ${s.page}${s.extra ? " *" : ""}</h3>` +
+      (info.has_image ? `<img src="/page/${encodeURIComponent(s.doc_id)}/${s.page}.png">` : `<pre>${esc((info.text || "").slice(0, 4000))}</pre>`) + `</section>`); }
+  const css = `body{font:13pt/1.45 system-ui,sans-serif;color:#000;margin:1.5cm}h1{font-size:16pt;margin:0}h3{font-size:11pt;margin:.6em 0 .3em}
+    .chip{font-size:.8em;color:#333}.chip:before{content:"["}.chip:after{content:"]"}.facts{border:1px solid #999;padding:.4em .7em;margin:.6em 0}
+    .fact{margin:.2em 0}img{max-width:100%;border:1px solid #ccc}pre{white-space:pre-wrap;font-size:9.5pt;border:1px solid #ccc;padding:.5em}
+    .pg{page-break-before:always}.muted{color:#444;font-size:.9em}@media print{.noprint{display:none}}`;
+  w.document.open();
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${esc(t("app_title"))} — ${esc(veh)}</title><style>${css}</style></head><body>
+    <p class="noprint"><button onclick="print()">🖨 ${t("print")}</button></p>
+    <h1>${esc(t("app_title"))}</h1><p class="muted">${esc(veh)} · ${new Date().toLocaleString()} · ${esc((ME && ME.name) || "")}</p>
+    ${factsHtml(turn.facts)}<div>${md(turn.text, turn.sources)}</div>${lab}
+    <p class="muted">${t("print_note")}</p>${pages.join("")}</body></html>`);
+  w.document.close();
+  const imgs = [...w.document.images]; await Promise.all(imgs.map(i => i.complete ? 1 : new Promise(r => { i.onload = i.onerror = r; })));
+  w.focus(); w.print();
+}
 async function eventTurn(event, text, shown) {
   stopSpeak();
   if (shown) addMsg("user", esc(shown));
