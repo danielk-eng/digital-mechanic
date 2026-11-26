@@ -45,6 +45,7 @@
     </div>
     <div style="margin:.5em 0"><span data-t="font_size">Размер текста</span>: A / A+ / A++ · 🔊</div>
     <div class="muted privacy-note" data-t="privacy_note">🔒</div>
+    <label><input type="checkbox" id="s_cc"> 💬 <span data-t="captions">Субтитры</span></label><br>
     <label><input type="checkbox" id="s_hands"> 🖐 Без рук: после ответа слушать снова</label>
     <div class="row" style="margin-top:.7em"><button id="s_logout" data-t="logout">Выйти</button><button id="s_delete">Удалить мои данные (152-ФЗ)</button><a class="muted" href="/privacy" target="_blank">Политика ПДн</a></div>
   </div>
@@ -56,6 +57,7 @@
   </div>
   <div id="chat"></div>
 </main>
+<div id="caption" class="caption hidden" aria-live="polite"></div>
 <div class="bar"><div class="inner">
   <div class="quick" id="quick"></div>
   <div class="row" style="flex-wrap:nowrap">

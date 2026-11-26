@@ -109,7 +109,9 @@
   "inspection": "Акт осмотра",
   "insp_review": "черновик — проверьте, поправьте и отметьте пункты",
   "insp_confirm": "Подтвердить осмотр",
-  "insp_saved": "Осмотр сохранён и передан главному"
+  "insp_saved": "Осмотр сохранён и передан главному",
+  "captions": "Крупные субтитры речи",
+  "recognizing": "Распознаю"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -221,7 +223,9 @@
   "inspection": "Koʻrik dalolatnomasi",
   "insp_review": "qoralama — tekshiring, tuzating va belgilang",
   "insp_confirm": "Koʻrikni tasdiqlash",
-  "insp_saved": "Koʻrik saqlandi va bosh mexanikka yuborildi"
+  "insp_saved": "Koʻrik saqlandi va bosh mexanikka yuborildi",
+  "captions": "Katta subtitrlar",
+  "recognizing": "Tanimoqda"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -333,7 +337,9 @@
   "inspection": "Санади муоина",
   "insp_review": "лоиҳа — санҷед, ислоҳ кунед ва қайд кунед",
   "insp_confirm": "Тасдиқи муоина",
-  "insp_saved": "Муоина сабт ва ба сармеханик фиристода шуд"
+  "insp_saved": "Муоина сабт ва ба сармеханик фиристода шуд",
+  "captions": "Субтитрҳои калон",
+  "recognizing": "Шинохта истодааст"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -445,7 +451,9 @@
   "inspection": "Тексеру актісі",
   "insp_review": "жоба — тексеріп, түзетіп, белгілеңіз",
   "insp_confirm": "Тексеруді растау",
-  "insp_saved": "Тексеру сақталды және бас механикке жіберілді"
+  "insp_saved": "Тексеру сақталды және бас механикке жіберілді",
+  "captions": "Үлкен субтитрлер",
+  "recognizing": "Танып жатыр"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -557,7 +565,9 @@
   "inspection": "निरीक्षण रिपोर्ट",
   "insp_review": "मसौदा — जाँचें, सुधारें और चिह्नित करें",
   "insp_confirm": "निरीक्षण की पुष्टि करें",
-  "insp_saved": "निरीक्षण सहेजा गया और मुख्य मैकेनिक को भेजा गया"
+  "insp_saved": "निरीक्षण सहेजा गया और मुख्य मैकेनिक को भेजा गया",
+  "captions": "बड़े उपशीर्षक",
+  "recognizing": "पहचान रहा है"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -669,6 +679,8 @@
   "inspection": "Biên bản kiểm tra",
   "insp_review": "bản nháp — kiểm tra, sửa và đánh dấu",
   "insp_confirm": "Xác nhận kiểm tra",
-  "insp_saved": "Đã lưu và gửi thợ trưởng"
+  "insp_saved": "Đã lưu và gửi thợ trưởng",
+  "captions": "Phụ đề lớn",
+  "recognizing": "Đang nhận dạng"
  }
 }

@@ -81,3 +81,6 @@ html[data-fs=xl] .bar label.chip{padding:.4em .5em!important}
 .proven{margin-top:.5em;border-top:1px dashed #445;padding-top:.4em}.proven .fix{margin:.4em 0}
 .arrival{margin:.5em 0;padding:.5em .6em;border-radius:8px;background:rgba(61,139,253,.08);border:1px solid #3d8bfd;font-size:.95em;line-height:1.45}
 .insp{margin:.3em 0}.insp [contenteditable]{border-bottom:1px dashed #667;padding:0 .15em}
+.caption{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(var(--bar-h,150px) + 8px);max-width:min(94vw,900px);z-index:40;
+  background:rgba(0,0,0,.85);color:#fff;font-size:1.6em;line-height:1.3;font-weight:600;padding:.35em .7em;border-radius:10px;text-align:center;pointer-events:none}
+html[data-fs="xl"] .caption{font-size:2em}

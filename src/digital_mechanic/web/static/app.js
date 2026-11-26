@@ -380,10 +380,11 @@ async function startRec() {
     const blob = new Blob(chunks, {type: rec.mimeType || "audio/webm"}); rec = null;
     if (blob.size < 2000) return;
     const fd = new FormData(); fd.append("audio", blob, "voice.webm"); fd.append("lang", ME.lang || "ru");
-    try { const r = await api("/api/stt", {method: "POST", body: fd}); if (r.text) send(r.text); }
+    caption("🎤 " + t("recognizing") + "…");
+    try { const r = await api("/api/stt", {method: "POST", body: fd}); if (r.text) { caption("🎤 " + r.text, 5000); send(r.text); } else caption(""); }
     catch (e) { if (e.status === 503) browserStt(); else addMsg("bot", esc(e.message)); }
   };
-  rec.start(); $("#mic").classList.add("rec"); $("#txt").placeholder = t("listening");
+  rec.start(); $("#mic").classList.add("rec"); $("#txt").placeholder = t("listening"); caption("🎤 " + t("listening"));
   // simple VAD: stop after 1.6 s of silence once speech was heard, max 20 s
   const ctx = new AudioContext(), an = ctx.createAnalyser(); ctx.createMediaStreamSource(stream).connect(an);
   const buf = new Uint8Array(an.fftSize); let heard = false, quiet = 0; const t0 = Date.now();
@@ -397,10 +398,25 @@ function stopRec() { if (rec && rec.state !== "inactive") rec.stop(); }
 function browserStt() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) return alert("Voice input is not available");
-  const r = new SR(); r.lang = SPEECH_LANG[ME.lang] || "ru-RU"; r.interimResults = false;
-  r.onresult = e => send(e.results[0][0].transcript); r.start();
+  const r = new SR(); r.lang = SPEECH_LANG[ME.lang] || "ru-RU"; r.interimResults = true;
+  r.onresult = e => { const res = e.results[e.results.length - 1]; caption("🎤 " + res[0].transcript, res.isFinal ? 5000 : 0); if (res.isFinal) send(res[0].transcript); };
+  caption("🎤 " + t("listening")); r.start();
 }
 $("#mic").onclick = startRec;
+
+// ---------------------------------------------------------------- live captions (item 16)
+const CC = { on: () => localStorage.getItem("cc") !== "0", timer: null };
+function caption(text, ms = 0) {
+  const el = $("#caption"); if (!el) return;
+  if (!text || !CC.on()) { el.classList.add("hidden"); return; }
+  el.textContent = text; el.classList.remove("hidden");
+  clearTimeout(CC.timer); if (ms) CC.timer = setTimeout(() => el.classList.add("hidden"), ms);
+}
+function sentencesOf(p) { return p.match(/[^.!?;:]+[.!?;:]*/g) || [p]; }
+function captionFollow(p, frac) {  // show the sentence at the given fraction of the spoken text
+  const ss = sentencesOf(p); let acc = 0; const pos = frac * p.length;
+  for (const x of ss) { acc += x.length; if (acc >= pos) return caption(x.trim()); }
+}
 
 // ---------------------------------------------------------------- voice out
 function plain(text) { return String(text).replace(/\[[^\]]*\b(S|X)\d+\b[^\]]*\]/g, "").replace(/[*#•]/g, "").replace(/\s+/g, " ").slice(0, 900); }
@@ -412,12 +428,16 @@ async function speak(text) {
   if (ME.lang === "ru" && SERVER_TTS) {  // local Silero on the stand; 404 -> browser speech from now on
     try { const r = await fetch("/api/tts", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: p})});
       if (token !== SPEAK_SEQ) return;  // a newer message or a tap arrived while synthesizing
-      if (r.ok) { const a = new Audio(URL.createObjectURL(await r.blob())); A11Y.audio = a; a.onended = after; a.play(); return; } SERVER_TTS = false; } catch (_) { SERVER_TTS = false; }
+      if (r.ok) { const a = new Audio(URL.createObjectURL(await r.blob())); A11Y.audio = a;
+        a.ontimeupdate = () => { if (a.duration) captionFollow(p, a.currentTime / a.duration); };
+        a.onended = () => { caption(""); after(); }; a.play(); return; } SERVER_TTS = false; } catch (_) { SERVER_TTS = false; }
   }
   if (!window.speechSynthesis) return;
-  const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[ME.lang] || "ru-RU"; u.onend = after; speechSynthesis.speak(u);
+  const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[ME.lang] || "ru-RU";
+  u.onboundary = e => captionFollow(p, (e.charIndex || 0) / p.length); captionFollow(p, 0);
+  u.onend = () => { caption(""); after(); }; speechSynthesis.speak(u);
 }
-function stopSpeak() { SPEAK_SEQ++; A11Y.stop(); }
+function stopSpeak() { SPEAK_SEQ++; A11Y.stop(); caption(""); }
 $("#chat").addEventListener("click", stopSpeak);  // tap on the chat stops reading
 
 // ---------------------------------------------------------------- settings / login
@@ -457,3 +477,7 @@ async function start() {
   try { ME = (await api("/api/me")).user; start(); }
   catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = applyI18n; applyI18n(); $("#login").classList.remove("hidden"); }
 })();
+
+// captions toggle (persisted; on by default)
+(() => { const cb = document.getElementById("s_cc"); if (!cb) return; cb.checked = CC.on();
+  cb.onchange = () => { localStorage.setItem("cc", cb.checked ? "1" : "0"); if (!cb.checked) caption(""); }; })();
