@@ -2,7 +2,7 @@
 // Mechanic app. Vanilla JS, no build step. Sections: core · i18n · audio player · rendering · vehicle · chat · citation viewer · voice mode · sheets · settings · login.
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-let LAST_CHECK = null;  // {vid, sid} of the check diagnosed in this dialog: sent with chat (Vercel instances do not share it)
+let LAST_CHECK = null, LAST_DRAFT = null;  // {vid, sid} of the check diagnosed in this dialog: sent with chat (Vercel instances do not share it)
 let I18N = {}, ME = null, VID = new URLSearchParams(location.search).get("v") || localStorage.getItem("vid") || "", VEH = null, VLIST = [], BUSY = false, LAST_Q = "", HYP = false;
 const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG", be: "be-BY"};
 // Browser TTS: a phone often has no voice for ky/be/tg; read with the closest one that knows the script.
@@ -231,6 +231,7 @@ function spark(trend) {
 const QUALITY = {good: "q_good", medium: "q_medium", bad: "q_bad"};
 const LIGHT_ICON = {go: "circle-check", watch: "circle-check", service: "triangle-alert", stop: "triangle-alert", repeat: "rotate-ccw"};
 function renderCard(c) {
+  if (c.kind === "ticket_draft") LAST_DRAFT = c.token ? {vid: VID, token: c.token} : null; else if (c.kind === "ticket_created") LAST_DRAFT = null;
   if (c.kind === "verdict") {
     const ch = c.check;
     const head = c.status === "anomaly" ? `${ch.anomaly_type} · ${esc(ch.anomaly_title)}` : c.status === "normal" ? t("verdict_normal") : t("verdict_failed");
@@ -260,9 +261,9 @@ function renderCard(c) {
     const d = addMsg("bot", h);
     const row = d.querySelector(".card-actions");
     const ok = document.createElement("button"); ok.className = "btn primary"; ok.textContent = c.requires_inspection ? t("inspection_ok") : t("confirm_send");
-    ok.onclick = () => confirmTicket(c.draft_id, true, row);
+    ok.onclick = () => confirmTicket(c.draft_id, true, row, c.token);
     const no = document.createElement("button"); no.className = "btn ghost"; no.textContent = c.requires_inspection ? t("inspection_no") : t("cancel");
-    no.onclick = () => c.requires_inspection ? confirmTicket(c.draft_id, false, row) : (row.innerHTML = `<span class="muted small">${t("cancelled")}</span>`);
+    no.onclick = () => c.requires_inspection ? confirmTicket(c.draft_id, false, row, c.token) : (row.innerHTML = `<span class="muted small">${t("cancelled")}</span>`);
     row.append(ok, no);
   } else if (c.kind === "ticket_created") {
     addMsg("bot", `<div class="vh"><div class="vi">${icon("circle-check", 22)}</div><div><div class="vt">${t("ticket_created")}: <span class="mono">${esc(c.ticket_id)}</span></div><div class="vs">${esc(c.request.conclusion)}</div></div></div>`, {cls: "verdict go", speak: `${t("ticket_created")} ${c.ticket_id}`});
@@ -290,10 +291,10 @@ async function loadProven(box, code) {
         f.steps.map(st => `<li>${esc(st.text)}${st.page ? ` <button class="cite" data-doc="${esc(st.doc_id)}" data-page="${st.page}" data-q="${esc(st.text)}">${t("page_short")} ${st.page}</button>` : ""}</li>`).join("") + `</ol></div>`).join("") + `</details>`);
   } catch (_) {}
 }
-async function confirmTicket(draftId, ok, row) {
+async function confirmTicket(draftId, ok, row, token) {
   row.innerHTML = `<span class="muted small">${icon("loader-circle", 16, "spin")}</span>`;
   try {
-    const r = await api("/api/ticket/confirm", {json: {vehicle_id: VID, draft_id: draftId, inspection_ok: ok}});
+    const r = await api("/api/ticket/confirm", {json: {vehicle_id: VID, draft_id: draftId, inspection_ok: ok, ...(token ? {token} : {})}});
     row.innerHTML = "";
     if (r.card) renderCard(r.card); else addMsg("bot", md(r.text || r.error || ""), {speak: r.text});
     refreshVehicle();
@@ -518,7 +519,7 @@ async function ask(text, event = null, sources = null) {
     showDraft(draft);
     if (VOICE.on && steps.length) $("#vHint").textContent = steps[steps.length - 1];
   }, 1000);
-  const payload = {vehicle_id: VID || null, text, event, ...(LAST_CHECK && LAST_CHECK.vid === VID ? {session_id: LAST_CHECK.sid} : {}), ...(sources ? {sources: sources.map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))} : {})};
+  const payload = {vehicle_id: VID || null, text, event, ...(LAST_CHECK && LAST_CHECK.vid === VID ? {session_id: LAST_CHECK.sid} : {}), ...(LAST_DRAFT && LAST_DRAFT.vid === VID ? {draft_token: LAST_DRAFT.token} : {}), ...(sources ? {sources: sources.map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))} : {})};
   try {
     let r = null;
     if (streamIt) {
@@ -531,6 +532,7 @@ async function ask(text, event = null, sources = null) {
       } catch (e) { if (!e.stream) throw e; r = null; }  // the stream itself failed (proxy, old server): ask the plain way
     }
     if (!r) r = await api("/api/chat", {json: payload});
+    if (r && r.draft_open === false) LAST_DRAFT = null;
     th.remove(); return renderTurn(r, event === "expand");
   }
   catch (e) { th.remove(); errorMsg(e); return null; }

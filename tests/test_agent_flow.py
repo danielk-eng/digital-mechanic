@@ -397,3 +397,14 @@ def test_citation_extract_drops_absence_claims():
     assert "не упоминаются" not in out and "прокачать систему" in out
     assert d("- прокачать систему\n- код F08 в разделе не упоминается\n- заменить насос") == "- прокачать систему\n- заменить насос"
     assert d("Момент затяжки указан только для стартера.") == "Момент затяжки указан только для стартера."
+
+
+def test_ticket_draft_token_roundtrip_and_tamper():
+    from digital_mechanic.web.app import draft_from_token, draft_token
+    d = {"id": "abc12345", "request": {"vehicle_id": "M333YK47", "session_id": "S-0005"}, "operations": []}
+    tok = draft_token("u1", "M333YK47", d)
+    assert draft_from_token("u1", "M333YK47", tok) == d
+    assert draft_from_token("u2", "M333YK47", tok) is None  # another user
+    assert draft_from_token("u1", "A464EP47", tok) is None  # another vehicle
+    b, sig = tok.rsplit(".", 1)
+    assert draft_from_token("u1", "M333YK47", b[:-2] + "xx." + sig) is None  # edited draft

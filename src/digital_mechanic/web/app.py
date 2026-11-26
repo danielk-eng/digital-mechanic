@@ -103,6 +103,33 @@ def profile_cookie(u: dict) -> str:
     return b + "." + hmac.new(_cookie_key(), b.encode(), hashlib.sha256).hexdigest()[:32]
 
 
+def draft_token(uid: str, vid: str, draft: dict) -> str:
+    """Vercel: the ticket draft lives in one instance's memory, «Подтвердить» may land on another. The card carries the
+    draft HMAC-signed for this user and vehicle; the confirming instance restores it (no client-made drafts: the signature)."""
+    b = base64.urlsafe_b64encode(json.dumps(draft, ensure_ascii=False, separators=(",", ":")).encode()).decode().rstrip("=")
+    return b + "." + hmac.new(_cookie_key(), f"draft:{uid}:{vid}:{b}".encode(), hashlib.sha256).hexdigest()[:40]
+
+
+def draft_from_token(uid: str, vid: str, tok: str | None) -> dict | None:
+    if not tok or "." not in tok:
+        return None
+    b, sig = tok.rsplit(".", 1)
+    if not hmac.compare_digest(sig, hmac.new(_cookie_key(), f"draft:{uid}:{vid}:{b}".encode(), hashlib.sha256).hexdigest()[:40]):
+        return None
+    try:
+        return json.loads(base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)))
+    except Exception:
+        return None
+
+
+def _sign_draft_cards(out: dict, uid: str, c) -> dict:
+    for cd in out.get("cards") or []:
+        if cd.get("kind") == "ticket_draft" and c.draft and cd.get("draft_id") == c.draft.get("id") and c.vehicle:
+            cd["token"] = draft_token(uid, c.vehicle.vehicle_id, c.draft)
+    out["draft_open"] = bool(c.draft)  # the client forgets its signed draft once it is sent or cancelled
+    return out
+
+
 def restore_from_cookie(uid: str | None, up: str | None) -> dict | None:
     if not uid or not up or "." not in up:
         return None
@@ -720,6 +747,7 @@ class ChatIn(BaseModel):
     event: str | None = None
     sources: list[dict] | None = None  # «Подробнее»: the brief answer's sources (labels -> pages), see Agent.rehydrate_frags
     session_id: str | None = None  # the check last diagnosed in this dialog (another instance may not have it), see Agent.restore_check
+    draft_token: str | None = None  # the signed ticket draft shown in this dialog («Подтверждаю заявку» by voice/text on another instance)
 
 
 @app.post("/api/chat")
@@ -732,6 +760,12 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
         raise HTTPException(404, "unknown vehicle")
     if c.vehicle is None and u["role"] not in ("manager", "engineer"):
         raise HTTPException(400, "choose a vehicle")
+    if c.draft is None and body.draft_token and c.vehicle:
+        d = draft_from_token(u["id"], c.vehicle.vehicle_id, body.draft_token)
+        if d:
+            with c.lock:
+                c.draft = d
+                AGENT.restore_check(c, (d.get("request") or {}).get("session_id"))
     # adaptive profile: learn the mechanic's terms, answer in them; novices get short glosses the first few times
     prof = uprofile.load(u)
     if u["role"] == "mechanic":
@@ -755,7 +789,7 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
     # "expand" re-renders the previous answer: do not store it again as a user message
     shown = {"expand": "", "alternatives": "Другие варианты"}.get(body.event or "", None)
     _record(u, c, "chat" if not body.event else body.event, body.text if shown is None else shown, turn, t0)
-    return {**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000)}
+    return _sign_draft_cards({**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000)}, u["id"], c)
 
 
 @app.post("/api/chat/stream")
@@ -1018,6 +1052,7 @@ class ConfirmIn(BaseModel):
     vehicle_id: str
     draft_id: str | None = None
     inspection_ok: bool = True
+    token: str | None = None  # the signed draft from the card (see draft_token)
 
 
 @app.post("/api/ticket/confirm")
@@ -1025,6 +1060,12 @@ def confirm(body: ConfirmIn, uid: str | None = Cookie(None)) -> dict:
     u = user_of(uid)
     t0 = time.time()
     c = AGENT.conv(u["id"], body.vehicle_id)
+    if c.draft is None or (body.draft_id and c.draft.get("id") != body.draft_id):
+        d = draft_from_token(u["id"], body.vehicle_id, body.token)
+        if d and (not body.draft_id or d.get("id") == body.draft_id):
+            with c.lock:
+                c.draft = d
+                AGENT.restore_check(c, (d.get("request") or {}).get("session_id"))
     try:
         r = AGENT.confirm(c, body.draft_id, body.inspection_ok)
     except ServiceError as e:
