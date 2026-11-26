@@ -32,6 +32,9 @@ from .prompts import DETAIL, EXPAND_PROMPT, EXPERIENCE, MANAGER_SYSTEM, MECHANIC
 URG_RU = {"high": "высокий", "medium": "средний", "low": "низкий"}
 
 
+# requests that are actions (ticket, repair, diagnosis, history) — no manual prefetch before the LLM call
+PREFETCH_SKIP = re.compile(r"заявк|дефектовк|начать ремонт|начни ремонт|ремонт по шагам|истори|результат|получи\w* диагноз|главн\w* механик|"
+                           r"сколько машин|подтвержда|отмен|^\s*(да|нет|ок|спасибо)[\s.!]*$", re.I)
 CONFIRM_RE = re.compile(r"^\s*(да[,.!\s]*)?(подтвержда\w*|отправля\w*|отправь\w*|tasdiqla\w*|тасдиқ\w*|растаймын|xác nhận|पुष्टि)", re.I)
 CANCEL_RE = re.compile(r"^\s*(отмен\w*|не надо|не отправля\w*|отбой|bekor|бекор|болдырма\w*|hủy|रद्द)", re.I)
 NEXT_RE = re.compile(r"^\s*(готово|сделал\w*|сделано|дальше|следующ\w*|далее|tayyor|keyingi\w*|тайёр|дайын|келесі|xong|tiếp|हो गया|अगला)[\s.!]*$", re.I)
@@ -349,9 +352,12 @@ class Agent:
         c.frags[label] = f
         return label
 
-    def tool_search_manual(self, c: Conv, query: str, k: int = 4) -> dict:
+    def tool_search_manual(self, c: Conv, query: str, k: int = 5) -> dict:
+        from ..retrieval.expand import expand, make_boost
+
         query = self.normalizer.normalize(query)[0]
-        hits = self.index.search(c.vehicle.engine_model, query, k=k)
+        queries, symptom = expand(query)
+        hits = self.index.search_multi(c.vehicle.engine_model, queries, k=k, boost=make_boost(queries) if symptom else None)
         out = []
         for h in hits:
             p = h.page
@@ -599,6 +605,19 @@ class Agent:
             masked = (masked + "\n" if masked else "") + f"[Фото от механика, описание: {image_note}]"
         if not self.llm.available:
             return self._fallback(c, masked, turn)
+        if c.vehicle and not event and raw and not image_note and not PREFETCH_SKIP.search(raw):
+            # Retrieval before the first LLM call: the model usually answers in ONE round instead of
+            # "decide to search" + "answer" (≈ half the latency). It may still search again if fragments do not fit.
+            q = self.normalizer.normalize(pii.mask(raw) if self.pii_masking else raw)[0]
+            r = self.tool_search_manual(c, q, k=5)
+            self.progress.setdefault(c.cid, []).append(PROGRESS["search_manual"] + f": {q[:80]}")
+            turn.tools.append({"tool": "search_manual", "args": {"query": q}, "ok": True, "auto": True,
+                               "hits": [f"{f['label']}:{f['document']} стр.{f['pdf_page']}" for f in r["fragments"]]})
+            if r["fragments"]:
+                masked += ("\n\nФРАГМЕНТЫ РУКОВОДСТВА ЭТОГО ДВИГАТЕЛЯ ПО ВОПРОСУ (уже найдены — отвечай по ним с метками; "
+                           "новый search_manual — только если ответа в них нет; если вопрос не о двигателе или данных нет — так и скажи):\n\n" +
+                           "\n\n".join(f"[{f['label']}] {f['document']}, стр. PDF {f['pdf_page']}" + (f" — {f['section']}" if f.get("section") else "") +
+                                        f"\n{f['text'][:1300]}" for f in r["fragments"][:6]))
 
         messages = [{"role": "system", "content": self._system(c, user, manager)}]
         for m in self.store.messages(c.cid, 12):

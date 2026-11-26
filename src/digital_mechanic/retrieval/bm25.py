@@ -26,15 +26,24 @@ from .filter import for_engine
 _WORD = re.compile(r"[0-9]+(?:[.,][0-9]+)?|[a-zа-яё]+", re.I)
 STOP = set(
     "и в во не на с со по к у о об от до за из для при как что это или а но же бы ли то так его ее её их он она они "
-    "ряд какой какая какие каков какого мне нужно можно ли ли есть быть если чем где когда".split()
+    "ряд какой какая какие каков какого мне нужно можно ли ли есть быть если чем где когда "
+    "почему зачем отчего что делать сделать сегодня подскажи скажи пожалуйста".split()
 )
+
+# Verb / adjective forms whose Snowball stem differs from the noun used in the manuals ("стучит" -> "стук").
+STEM_ALIAS = {
+    "стуч": "стук", "стучат": "стук", "постукиван": "стук", "шумн": "шум", "вибрир": "вибрац", "перегрева": "перегр",
+    "перегрет": "перегр", "дымлен": "дым", "дымн": "дым", "пуска": "пуск", "запуска": "запуск", "гуд": "гул",
+    "подтека": "подтекан", "теч": "течь", "троен": "тро", "свистя": "свист",
+}
 
 
 @lru_cache(maxsize=200_000)
 def stem(w: str) -> str:
     w = w.lower().replace("ё", "е")
     if _STEM and not w[0].isdigit():
-        return _STEM.stemWord(w)
+        st = _STEM.stemWord(w)
+        return STEM_ALIAS.get(st, st)
     return w
 
 
@@ -106,6 +115,23 @@ class ManualIndex:
     def search(self, engine_type: str, query: str, k: int = 6) -> list[Hit]:
         idx = self._engine_index(engine_type)
         return [Hit(idx.pages[i], s) for i, s in idx.search(query, k)]
+
+    def search_multi(self, engine_type: str, queries: list[str], k: int = 6, boost=None, depth: int = 30) -> list[Hit]:
+        """Reciprocal rank fusion of several reformulations (original + symptom expansion + fault-table query).
+
+        `boost(page) -> float` multiplies the fused score (e.g. fault tables for symptom questions)."""
+        idx = self._engine_index(engine_type)
+        fused: dict[int, float] = {}
+        best: dict[int, float] = {}
+        for qi, q in enumerate(q for q in queries if q and q.strip()):
+            w = (1.0, 0.9, 0.5)[min(qi, 2)]
+            for rank, (i, s) in enumerate(idx.search(q, depth)):
+                fused[i] = fused.get(i, 0.0) + w / (60 + rank)
+                best[i] = max(best.get(i, 0.0), s)
+        if boost:
+            fused = {i: v * boost(idx.pages[i]) for i, v in fused.items()}
+        order = sorted(fused, key=lambda i: -fused[i])[:k]
+        return [Hit(idx.pages[i], best[i]) for i in order]
 
     def get_page(self, doc_id: str, page: int, engine_type: str | None = None) -> ManualPage | None:
         p = self._pages_by_key.get((doc_id, page))
