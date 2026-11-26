@@ -116,7 +116,7 @@ def timeline(vehicle, sessions: list, store, demo: dict[str, list[dict]], today:
     return {"vehicle_id": vid, "engine_model": vehicle.engine_model, "entries": list(reversed(entries)), "trend": trend, "media": media,
             "recurring": recurring, "last_check": last,
             "days_since_last_check": (today - date.fromisoformat(last)).days if last else None,
-            "mileage_note": "пробег — демо (в заглушках его нет)"}
+            "mileage_note": "пробег — демо-данные"}
 
 
 MEDIA_RU = {"photo": "фото", "video": "видео", "sound": "запись звука"}
