@@ -79,6 +79,7 @@ class Conv:
     frags: dict[str, dict] = field(default_factory=dict)
     n_s: int = 0
     n_x: int = 0
+    preface: str = ""
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -484,6 +485,9 @@ class Agent:
     def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None) -> Turn:
         with c.lock:
             turn = self._handle(c, user, text, image_note, event)
+            if c.preface:  # deterministic part (e.g. triage order by the TZ urgency rules), not subject to LLM grounding
+                turn.text = c.preface + ("\n\n" + turn.text if turn.text else "")
+                c.preface = ""
             if turn.text and turn.sources and not turn.text.startswith("LLM временно недоступна"):
                 from .facts import key_facts
 
@@ -504,6 +508,17 @@ class Agent:
             code = m.group(1).upper()
             title = self.fleet.fault_types.get(code)
             raw = masked = f"Код неисправности {code}" + (f" «{title}»" if title else "") + ": что это значит для этого двигателя и что проверить по руководству?"
+        if event == "triage" and c.vehicle:
+            order = self.triage(c.vehicle.vehicle_id)
+            if len(order) < 2:
+                turn.text = "Сейчас у машины одно отклонение — порядок не нужен, работаем по нему."
+                return turn
+            c.preface = "**Порядок работ по приоритету** (правила срочности ТЗ):\n" + "\n".join(
+                f"{i}. {o['code']} {o['title']} — {o['urgency']}: {'; '.join(o['why'][:2])}" for i, o in enumerate(order, 1))
+            raw = masked = ("Несколько отклонений по этой машине, порядок уже определён: " + ", ".join(f"{o['code']} {o['title']}" for o in order) +
+                            ". Для каждого в этом порядке: до 3 вероятных причин и первая проверка по руководству этого двигателя, с метками. "
+                            "Норматив времени на работу — только если он есть во фрагменте, иначе напиши «время в книге не указано». Порядок не меняй.")
+            event = None
         if event in ("alternatives", "hypothesis") and c.vehicle:
             raw = masked = (ALT_PROMPT if event == "alternatives" else HYPOTHESIS_PROMPT.format(h=masked[:300]))
             event = None
@@ -687,6 +702,20 @@ class Agent:
             answer += "\n\n⚠️ Часть цифр не подтверждена руководством и убрана — уточните по странице."
             turn.tools.append({"tool": "number_guard", "removed": bad})
         return answer
+
+    def triage(self, vehicle_id: str, last_n: int = 6) -> list[dict]:
+        """Item 13: distinct anomalies in the recent checks, ordered by the TZ urgency rules, then by score."""
+        rank = {"high": 0, "medium": 1, "low": 2}
+        latest: dict[str, CheckResult] = {}
+        for ch in sorted(self.fleet.sessions(vehicle_id), key=lambda x: x.checked_at or "")[-last_n:]:
+            if getattr(ch.status, "value", ch.status) == "anomaly" and ch.anomaly_type:
+                latest[ch.anomaly_type] = ch
+        out = []
+        for code, ch in latest.items():
+            u, why = policy.urgency(ch)
+            out.append({"code": code, "title": ch.anomaly_title or self.fleet.fault_types.get(code, ""), "urgency": u.value, "why": why,
+                        "score": ch.anomaly_score, "session_id": ch.session_id})
+        return sorted(out, key=lambda o: (rank.get(o["urgency"], 3), -(o["score"] or 0)))
 
     def summary(self, c: Conv, user: dict) -> dict:
         from .handoff import summarize

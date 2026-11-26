@@ -156,7 +156,11 @@ def build(index, vehicle, check, history: list, repair: dict | None, draft: dict
             if p and len(chips) < 4:
                 chips.append(Chip(text, "symptom", p.doc_id, p.page))
         chips.append(Chip(CODE_CHIP, "code"))
-    # 3) history: repeated fault or growing score
+    # 3) several different deviations in recent checks -> triage
+    codes = {h.anomaly_type for h in history[-6:] if getattr(h.status, "value", h.status) == "anomaly" and h.anomaly_type}
+    if len(codes) >= 2:
+        chips.append(Chip(f"Что чинить сначала? ({len(codes)} отклонения)", "triage"))
+    # history: repeated fault or growing score
     prev = [h for h in history if getattr(h.status, "value", h.status) == "anomaly" and (not check or h.session_id != check.session_id)]
     if check and status == "anomaly" and any(h.anomaly_type == check.anomaly_type for h in prev):
         chips.append(Chip("Этот дефект уже был — что делали в прошлый раз?", "history"))

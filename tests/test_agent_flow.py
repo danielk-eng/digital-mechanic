@@ -209,3 +209,12 @@ def test_summary_handoff_and_ticket_package(make_agent):
     assert h["vehicle_id"] == "M333YK47" and h["payload"]["dialog"]
     a.store.delete_user_data("u1")
     assert not a.store.handoffs()
+
+
+def test_triage_orders_by_urgency(make_agent):
+    a = make_agent([msg("F03: проверить термостат [S1]. Время в книге не указано.")])
+    order = a.triage("B332BP98")
+    assert [o["code"] for o in order][:1] == ["F03"] and len(order) == 2  # overheating before the belt drive
+    c = a.conv("u1", "B332BP98")
+    t = a.handle(c, {"lang": "ru"}, "", event="triage")
+    assert t.text.startswith("**Порядок работ по приоритету**") and "Порядок не меняй" in str(a.llm.calls[-1]["messages"])
