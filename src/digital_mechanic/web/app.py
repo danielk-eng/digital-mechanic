@@ -101,6 +101,13 @@ def login(body: LoginIn, response: Response) -> dict:
     return {"user": u}
 
 
+@app.get("/api/session")
+def session(uid: str | None = Cookie(None)) -> dict:
+    """Boot check without a 401 in the browser console: {"user": null} when not logged in."""
+    u = STORE.user(uid) if uid else None
+    return {"user": u, "langs": {k: v["name"] for k, v in LANGS.items()}}
+
+
 @app.get("/api/me")
 def me(uid: str | None = Cookie(None)) -> dict:
     return {"user": user_of(uid), "langs": {k: v["name"] for k, v in LANGS.items()}}

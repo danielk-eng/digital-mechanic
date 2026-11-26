@@ -708,6 +708,6 @@ async function start() {
 (async () => {
   hydrateIcons();
   I18N = await (await fetch("/static/i18n.json")).json();
-  try { ME = (await api("/api/me")).user; if (ME.role === "manager" && !location.search.includes("mechanic")) { /* chief can use the mechanic view too */ } start(); }
+  try { ME = (await api("/api/session")).user; if (!ME) throw new Error("login"); start(); }
   catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = applyI18n; applyI18n(); $("#login").classList.remove("hidden"); }
 })();

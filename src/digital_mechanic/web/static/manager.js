@@ -164,8 +164,8 @@ document.addEventListener("click", e => {
 (async () => {
   document.querySelectorAll("[data-icon]").forEach(el => el.innerHTML = icon(el.dataset.icon));
   I18N = await (await fetch("/static/i18n.json")).json();
-  ME = (await api("/api/me")).user;
-  if (ME.role !== "manager") { location.href = "/"; return; }
+  ME = (await api("/api/session")).user;
+  if (!ME || ME.role !== "manager") { location.href = "/"; return; }
   $$("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
   themeIcon();
   await loadFleet(); renderFleet();
