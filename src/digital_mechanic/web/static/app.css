@@ -78,3 +78,4 @@ html[data-fs=xl] .bar label.chip{padding:.4em .5em!important}
 .facts .fact.danger{color:#ffb4b4}
 .acts{gap:.4em;margin-top:.3em;flex-wrap:wrap}
 .thumb{height:72px;border-radius:6px;margin:.2em}.att{padding:.3em 0}tr.det td{background:rgba(255,255,255,.03)}
+.proven{margin-top:.5em;border-top:1px dashed #445;padding-top:.4em}.proven .fix{margin:.4em 0}

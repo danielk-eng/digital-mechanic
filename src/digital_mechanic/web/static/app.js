@@ -122,6 +122,18 @@ function spark(trend) {
     xy.map((p, i) => `<circle cx="${p[0]}" cy="${p[1] ?? H - 8}" r="4" fill="${col(trend[i].status)}"><title>${trend[i].session_id} ${trend[i].status} ${trend[i].anomaly_score ?? "—"}</title></circle>`).join("") + "</svg>";
 }
 
+async function loadProven(box, code) {  // item 6: proven fixes for this engine + fault code in this fleet
+  try {
+    const r = await api(`/api/proven?vehicle_id=${encodeURIComponent(VID)}&code=${encodeURIComponent(code)}`);
+    if (!r.fixes.length) return;
+    const ver = f => f.verified === true ? `✅ ${t("fix_verified")}` : f.verified === false ? `⚠️ ${t("fix_not_verified")}` : "";
+    box.insertAdjacentHTML("beforeend", `<details class="proven"><summary>🛠 ${t("proven_fixes")} (${r.engine}, ${esc(code)}): ${r.fixes.length}</summary>` +
+      r.fixes.map(f => `<div class="fix"><b>${esc(f.vehicle_id)}</b> · ${esc(f.date || "")} · ${esc(f.ticket_id || "")} ${ver(f)}${f.source === "demo" ? ` <span class="muted">(${t("demo_hist")})</span>` : ""}<ol>` +
+        f.steps.map(st => `<li>${esc(st.text)}${st.page ? ` <span class="chip" data-doc="${esc(st.doc_id)}" data-page="${st.page}" data-q="${esc(st.text)}">${t("page")} ${st.page}</span>` : ""}</li>`).join("") + `</ol>` +
+        (f.parts && f.parts.length ? `<div class="muted">${t("parts")}: ${f.parts.map(esc).join(", ")}</div>` : "") + `</div>`).join("") + `</details>`);
+  } catch (_) {}
+}
+
 function renderCard(c) {
   if (c.kind === "verdict") {
     const ch = c.check, st = {normal: t("status_normal"), anomaly: t("status_anomaly"), check_failed: t("status_failed")}[c.status];
@@ -135,7 +147,8 @@ function renderCard(c) {
     if (c.doubt && c.doubt.length) h += `<div style="margin-top:.5em;color:var(--warn)">⚠️ ${t("doubt")}: ${c.doubt.map(esc).join("; ")}</div>`;
     if (c.urgency_basis) h += `<details style="margin-top:.4em"><summary class="muted">Приоритет ${esc(c.urgency)} — почему</summary><div class="muted">${c.urgency_basis.map(esc).join("<br>")}</div></details>`;
     if (c.trend) h += `<div style="margin-top:.5em" class="muted">${t("history")}:</div>${spark(c.trend)}`;
-    addMsg("bot", h, `card verdict ${c.light}`);
+    const vd = addMsg("bot", h, `card verdict ${c.light}`);
+    if (c.status === "anomaly" && ch.anomaly_type) loadProven(vd.querySelector(".b"), ch.anomaly_type);
   } else if (c.kind === "ticket_draft") {
     const r = c.request;
     let h = `<b>📝 ${t("create_ticket")}</b> — <span class="badge b-${r.urgency === "high" ? "quarantine" : r.urgency === "medium" ? "attention" : "ready"}">${r.urgency}</span>`;

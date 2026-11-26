@@ -88,7 +88,12 @@
   "summary": "Резюме для смены",
   "handoff": "Передать главному",
   "handoff_note": "Что передать главному? (необязательно)",
-  "handoff_done": "Передано главному механику"
+  "handoff_done": "Передано главному механику",
+  "proven_fixes": "Проверенные решения в парке",
+  "fix_verified": "повторная проверка — норма",
+  "fix_not_verified": "после ремонта дефект повторился",
+  "demo_hist": "демо-история",
+  "parts": "Запчасти"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -179,7 +184,12 @@
   "summary": "Smena uchun xulosa",
   "handoff": "Bosh mexanikka topshirish",
   "handoff_note": "Bosh mexanikka nima deyish kerak? (ixtiyoriy)",
-  "handoff_done": "Bosh mexanikka topshirildi"
+  "handoff_done": "Bosh mexanikka topshirildi",
+  "proven_fixes": "Parkda sinalgan yechimlar",
+  "fix_verified": "qayta tekshiruv — meʼyor",
+  "fix_not_verified": "taʼmirdan keyin nuqson takrorlandi",
+  "demo_hist": "demo-tarix",
+  "parts": "Ehtiyot qismlar"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -270,7 +280,12 @@
   "summary": "Хулоса барои баст",
   "handoff": "Ба сармеханик супоридан",
   "handoff_note": "Ба сармеханик чӣ гӯем? (ихтиёрӣ)",
-  "handoff_done": "Ба сармеханик супорида шуд"
+  "handoff_done": "Ба сармеханик супорида шуд",
+  "proven_fixes": "Ҳалли санҷидашуда дар парк",
+  "fix_verified": "санҷиши такрорӣ — меъёр",
+  "fix_not_verified": "пас аз таъмир нуқсон такрор шуд",
+  "demo_hist": "таърихи намоишӣ",
+  "parts": "Қисмҳои эҳтиётӣ"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -361,7 +376,12 @@
   "summary": "Ауысымға қорытынды",
   "handoff": "Бас механикке беру",
   "handoff_note": "Бас механикке не айту керек? (міндетті емес)",
-  "handoff_done": "Бас механикке берілді"
+  "handoff_done": "Бас механикке берілді",
+  "proven_fixes": "Парктегі тексерілген шешімдер",
+  "fix_verified": "қайта тексеру — қалыпты",
+  "fix_not_verified": "жөндеуден кейін ақау қайталанды",
+  "demo_hist": "демо-тарих",
+  "parts": "Қосалқы бөлшектер"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -452,7 +472,12 @@
   "summary": "शिफ्ट के लिए सारांश",
   "handoff": "मुख्य मैकेनिक को सौंपें",
   "handoff_note": "मुख्य मैकेनिक को क्या बताना है? (वैकल्पिक)",
-  "handoff_done": "मुख्य मैकेनिक को सौंप दिया गया"
+  "handoff_done": "मुख्य मैकेनिक को सौंप दिया गया",
+  "proven_fixes": "बेड़े में आज़माए गए समाधान",
+  "fix_verified": "दोबारा जाँच — सामान्य",
+  "fix_not_verified": "मरम्मत के बाद दोष दोहराया",
+  "demo_hist": "डेमो इतिहास",
+  "parts": "पुर्ज़े"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -543,6 +568,11 @@
   "summary": "Tóm tắt cho ca sau",
   "handoff": "Chuyển cho thợ trưởng",
   "handoff_note": "Ghi chú cho thợ trưởng (không bắt buộc)",
-  "handoff_done": "Đã chuyển cho thợ trưởng"
+  "handoff_done": "Đã chuyển cho thợ trưởng",
+  "proven_fixes": "Giải pháp đã kiểm chứng trong đội xe",
+  "fix_verified": "kiểm tra lại — bình thường",
+  "fix_not_verified": "lỗi lặp lại sau sửa chữa",
+  "demo_hist": "lịch sử demo",
+  "parts": "Phụ tùng"
  }
 }

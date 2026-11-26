@@ -48,3 +48,13 @@ def test_real_ticket_and_session_answer_in_timeline(make_agent):
     a.store.add_message(c.cid, "u1", "M333YK47", "assistant", turn.text, {"sources": turn.sources})
     e = next(x for x in a.timeline("M333YK47")["entries"] if x["session_id"] == "S-0005")
     assert e["mechanic"] == "П***р С." and "0,25" in e["answer"] and e["sources"]
+
+
+def test_proven_fixes_same_engine_and_code(make_agent):
+    from digital_mechanic.history import load_demo
+    from digital_mechanic.proven import proven_fixes
+    a = make_agent([])
+    a.demo = load_demo("data/demo_history.json")
+    fixes = proven_fixes(a, "E549YT198", "F02")
+    assert fixes and all(a.fleet.get(f["vehicle_id"]).engine_model == "ЯМЗ-236М2" for f in fixes)
+    assert any(f["verified"] is True for f in fixes)

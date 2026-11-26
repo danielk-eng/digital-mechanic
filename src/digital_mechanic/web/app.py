@@ -230,6 +230,21 @@ def handoff(body: VehIn, uid: str | None = Cookie(None)) -> dict:
     return r
 
 
+@app.get("/api/proven")
+def proven(vehicle_id: str, code: str | None = None, uid: str | None = Cookie(None)) -> dict:
+    """Item 6: proven fixes for this engine + fault code from this fleet's tickets/repairs."""
+    user_of(uid)
+    if vehicle_id not in AGENT.fleet.ids():
+        raise HTTPException(404)
+    from ..proven import proven_fixes
+
+    if not code:
+        c = AGENT.conv(user_of(uid)["id"], vehicle_id)
+        code = c.check.anomaly_type if c.check else None
+    v = AGENT.fleet.get(vehicle_id)
+    return {"engine": v.engine_model, "code": code, "fixes": proven_fixes(AGENT, vehicle_id, code)}
+
+
 @app.get("/api/tickets")
 def tickets_list(uid: str | None = Cookie(None)) -> dict:
     user_of(uid, manager=True)
