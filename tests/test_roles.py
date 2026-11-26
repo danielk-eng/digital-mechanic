@@ -113,3 +113,19 @@ def test_persona_styles_differ_and_memory_callback(app_mod):
     assert memory.hint(m.STORE, m.DEMO, stud, "M333YK47", question="Как проверить форсунку?")[0]  # same system: injectors
     assert memory.hint(m.STORE, m.DEMO, stud, "M333YK47", question="Какие зазоры клапанов?")[0] == ""  # other system: not now
     assert memory.hint(m.STORE, m.DEMO, m.STORE.user("demo-chief"), "M333YK47")[0] == ""
+
+
+def test_demo_accounts_are_fixed_and_pin_hash_stays_on_the_server(app_mod):
+    """Demo PINs are printed on the login screen: no one may reset them, change the role or deactivate the account."""
+    chief = login(app_mod, "chief", "1001")
+    me = chief.get("/api/session").json()["user"]
+    assert me["chief"] is True and "pin_hash" not in me
+    for patch in ({"new_pin": True}, {"active": False}, {"role": "engineer"}):
+        assert chief.post("/api/admin/users/demo-ivanov", json=patch).status_code == 400, patch
+        assert chief.post("/api/admin/users/demo-chief", json=patch).status_code == 400, patch
+    assert login(app_mod, "veteran", "3001").get("/api/me").status_code == 200  # published PIN still works
+    new = chief.post("/api/admin/users", json={"name": "Петров", "role": "mechanic"}).json()
+    c = TestClient(app_mod.app)
+    r = c.post("/api/login/demo", json={"account": new["login"], "pin": new["pin"], "consent": True}).json()
+    assert "pin_hash" not in r["user"] and r["user"]["chief"] is False
+    assert c.get("/api/admin/users").status_code == 403

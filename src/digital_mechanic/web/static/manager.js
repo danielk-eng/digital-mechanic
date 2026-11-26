@@ -266,9 +266,11 @@ async function userCard(id) {
     `<div class="section-label">${t("history")}</div>` + (c.history.length ? `<ul class="small">${c.history.map(h => `<li><b class="mono">${esc(h.vehicle_id)}</b> ${esc(h.date || "")} ${esc(h.ticket_id || "")}: ${esc((h.done || (h.repair_steps || []).join("; ")).slice(0, 160))}</li>`).join("")}</ul>` : `<p class="muted small">${t("none")}</p>`) +
     (c.assigned.length ? `<div class="section-label">${t("assigned_to_him")}</div><ul class="small">${c.assigned.map(a => `<li class="mono">${esc(a.ticket_id)} ${esc(a.vehicle_id)} (${esc(a.status)})</li>`).join("")}</ul>` : "") +
     (c.recent_questions.length ? `<div class="section-label">${t("recent_questions")}</div><ul class="small">${c.recent_questions.map(q => `<li>${esc(q.text)} <span class="sub mono">${esc(q.vehicle_id || "")}</span></li>`).join("")}</ul>` : "") +
+    (id.startsWith("demo-") ? `<p class="sub">${t("demo_fixed")}</p>` :  // demo PINs are printed on the login screen: fixed
     `<div class="card-actions" style="justify-content:flex-start"><button class="btn ghost sm" id="uc_pin">${t("new_pin")}</button>` +
-    `<button class="btn ${u.active ? "danger" : "primary"} sm" id="uc_act">${u.active ? t("deactivate") : t("activate")}</button></div><div id="uc_out"></div>`;
+    `<button class="btn ${u.active ? "danger" : "primary"} sm" id="uc_act">${u.active ? t("deactivate") : t("activate")}</button></div>`) + `<div id="uc_out"></div>`;
   const body = $("#layer .vbd"); if (body) body.innerHTML = b;
+  if (!$("#uc_pin")) return;
   $("#uc_pin").onclick = async () => { const x = await api(`/api/admin/users/${encodeURIComponent(id)}`, {json: {new_pin: true}}); $("#uc_out").innerHTML = `<p>${t("pin")}: <b class="mono">${esc(x.pin)}</b> <span class="small muted">${t("pin_once")}</span></p>`; };
   $("#uc_act").onclick = async () => { await api(`/api/admin/users/${encodeURIComponent(id)}`, {json: {active: !u.active}}); loadUsers(); userCard(id); };
 }
@@ -289,6 +291,7 @@ document.addEventListener("click", e => {
   if (!ME || ME.role !== "manager") { location.href = ME && ME.role === "engineer" ? "/engineer" : "/"; return; }
   $$("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
   $("#whoami").textContent = `${ME.name}, ${t("role_chief")}`;
+  if (!ME.chief) { const ub = $('#tabs button[data-tab="users"]'); if (ub) ub.remove(); }  // staff: only the chief signed in by code + PIN
   if (new URLSearchParams(location.search).get("tab")) tab(new URLSearchParams(location.search).get("tab"));
   themeIcon();
   await loadFleet(); renderFleet();

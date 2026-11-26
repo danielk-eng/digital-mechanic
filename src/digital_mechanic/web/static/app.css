@@ -367,6 +367,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .demo-acc .acc .pin{font-family:var(--mono,monospace);color:var(--text-2)}
 .demo-acc .acc.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 .pin-row{display:grid;grid-template-columns:2fr 1fr;gap:8px}
+.mcp-form{display:grid;grid-template-columns:1fr 1fr;gap:8px;align-items:end}.mcp-form>div:nth-child(2),.mcp-form>.btn{grid-column:1/-1}
+.mcp-form .input{min-width:0;width:100%}
+@media (min-width:720px){.mcp-form{grid-template-columns:1fr 2fr 1fr 1fr auto}.mcp-form>div:nth-child(2),.mcp-form>.btn{grid-column:auto}}
 .or{text-align:center;margin:8px 0}
 .ob-q{margin:16px 0 8px}
 .ob-opts{display:grid;gap:8px;margin-bottom:16px}

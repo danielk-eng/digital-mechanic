@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import gzip
 import html
+from collections import Counter
 import json
 import re
 import shutil
@@ -143,8 +144,8 @@ def reflow_side_captions(page_xml: str) -> str | None:
 # and its remedy end up apart. We rebuild the table row by row: «cause — remedy», hyphenation joined inside cells.
 TABLE_LEFT_RE = re.compile(r"^(Вероятн\w+ |Возможн\w+ )?(Причин|Неисправност)\w*", re.I)
 TABLE_RIGHT_RE = re.compile(r"(Способ|Метод)\w* устранения", re.I)
-ROW_START_RE = re.compile(r"^([А-ЯЁA-Z]|\d+(\.\d+)+\.?\s|\d+\.\s|[а-я]\)\s)")  # new cause: capital, «5.22 », «3. », «а) »
-MAX_CELL = 450
+ROW_START_RE = re.compile(r"^([А-ЯЁA-Z]|\d+(\.\s?\d+)+\.?\s|\d+\.\s|[а-я]\)(\s|$)|[-–—]\s|\*)")  # new cause: capital, «5.22 », «3. », «а) », «- », footnote «*»
+MAX_CELL = 700
 
 
 def _words(page_xml: str) -> list[list[tuple]]:
@@ -182,22 +183,25 @@ def _join_cell(lines: list[str]) -> str:
 
 
 def _gutter(lines: list[list[tuple]], lo: float, hi: float) -> float | None:
-    """x between lo and hi crossed by the fewest words (ties: the middle of the widest free gap)."""
+    """x between lo and hi crossed by the fewest words: the middle of the widest such run (a short word near
+    the header gap, «давления в», must not pull the gutter into the left column)."""
     if hi - lo < 4:
         return None
-    best = None
+    runs: list[list[float]] = []  # [count, start, end]
     x = lo
     while x <= hi:
         n = sum(1 for ws in lines for w in ws if w[0] < x < w[2])
-        if best is None or n < best[0]:
-            best = (n, x, x)
-        elif n == best[0] and abs(x - best[2] - 1) < 1.01:
-            best = (n, best[1], x)
+        if runs and runs[-1][0] == n and abs(x - runs[-1][2] - 1) < 1.01:
+            runs[-1][2] = x
+        else:
+            runs.append([n, x, x])
         x += 1
-    if best is None:
+    if not runs:
         return None
+    m = min(r[0] for r in runs)
+    best = max((r for r in runs if r[0] == m), key=lambda r: r[2] - r[1])
     total = sum(len(ws) for ws in lines) or 1
-    return (best[1] + best[2]) / 2 if best[0] <= 0.05 * total else None
+    return (best[1] + best[2]) / 2 if m <= 0.05 * total else None
 
 
 def _split(ws: list[tuple], g: float) -> tuple[list[tuple], list[tuple], bool]:
@@ -217,7 +221,7 @@ def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str |
     lines = _words(page_xml)
     if not lines:
         return None, None
-    head_i, g = None, None
+    head_i, g, hx0 = None, None, None
     for i, ws in enumerate(lines):
         t = _join_words(ws)
         if len(t) > 90:
@@ -231,8 +235,10 @@ def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str |
         if len(segs) == 2 and TABLE_LEFT_RE.match(_join_words(segs[0])) and TABLE_RIGHT_RE.search(_join_words(segs[1])):
             body = lines[i + 1:]
             g = _gutter(body, segs[0][-1][2], segs[1][0][0])
+            if g is None:  # the table ends mid-page and full-width text follows: the gutter of its first rows
+                g = _gutter(body[:12], segs[0][-1][2], segs[1][0][0])
             if g is not None:
-                head_i = i
+                head_i, hx0 = i, segs[0][0][0]
                 break
     if head_i is None:
         if prev_gutter is None:
@@ -251,6 +257,7 @@ def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str |
     rows: list[list[list[str]]] = []
 
     long_cells = []
+    sub_of: dict[int, list] = {}  # dash sub-item row -> the row whose remedy runs beside it
 
     def flush() -> None:
         for lc, rc in rows:
@@ -259,7 +266,68 @@ def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str |
             out.append(f"{L} — {R}" if L and R else (L or R))
         rows.clear()
 
-    for ws in lines[head_i + 1:]:
+    # three columns «Неисправность и ее признаки | Вероятная причина | Способ устранения»: the symptom column
+    # left of the cause column becomes a line of its own before its causes
+    g1, body = None, lines[head_i + 1:]
+    if hx0 is not None:
+        xmin = min(ws[0][0] for ws in body) if body else hx0
+        near = [w for ws in lines[max(0, head_i - 2):head_i + 3] for w in ws]
+        if hx0 - xmin > 60 and any(w[4].startswith("Неисправност") and w[2] < hx0 for w in near):
+            top = [ws for ws in body[:12] if not any(w[0] < g - 1 < g + 1 < w[2] for w in ws)]  # rows, not prose
+            c = _gutter(top, xmin + 20, hx0 - 1)
+            if c is not None and sum(1 for ws in top if any(w[2] < c for w in ws) and any(c < w[0] and w[2] < g for w in ws)) >= 3:
+                g1 = c
+    syms: list[list[str]] = []
+    sym_pos, hdr_joined = -1, False
+    tail: list[str] = []
+    def full_width(ws: list[tuple]) -> bool:
+        return len(_join_words(ws)) > 50 and any(w[0] < g - 1 < g + 1 < w[2] for w in ws)
+
+    rx_count = Counter(round(r[0][0]) for r in (([w for w in ws if w[0] >= g]) for ws in body) if r)
+    rx = rx_count.most_common(1)[0][0] if rx_count else None
+
+    def table_goes_on(k: int) -> bool:
+        """A later line is a table row: it starts at a column start of the rows above, has a word exactly at the
+        remedy column and none across the gutter (justified prose after the table does not line up so)."""
+        at_rx = [ws for ws in body if any(abs(w[0] - rx) < 1.5 for w in ws)] if rx is not None else []
+        starts = [x for x, _ in Counter(round(ws[0][0]) for ws in at_rx).most_common(2)]
+        return rx is not None and any(any(abs(ws[0][0] - x) < 1.5 for x in starts) and any(abs(w[0] - rx) < 1.5 for w in ws)
+                                      and not any(w[0] < g - 1 < g + 1 < w[2] for w in ws) for ws in body[k + 1:])
+
+    for k, ws in enumerate(body):
+        if tail:
+            tail.append(_join_words(ws))
+            continue
+        if full_width(ws) and k + 1 < len(body) and len(_join_words(body[k + 1])) > 40 and not table_goes_on(k):  # a paragraph
+            flush()
+            tail.append(_join_words(ws))  # a full-width paragraph: the table is over, the rest is plain text
+            continue
+        if g1 is not None:
+            sym = [w for w in ws if w[2] < g1 + 1]
+            if sym:
+                st = _join_words(sym)
+                numbered = bool(re.match(r"^\d+\s+\S", st))
+                if not syms and not numbered and not hdr_joined and head_i >= 1 and all(w[2] < g1 + 1 for w in lines[head_i - 1]):
+                    # «Неисправность и ее | признаки» around the header line: one header «… признаки — причина — способ»
+                    out[head_i - 1] = _join_cell([out[head_i - 1], st]) + " — " + out[head_i]
+                    del out[head_i]
+                    hdr_joined = True
+                    ws = [w for w in ws if w[2] >= g1 + 1]
+                    if not ws:
+                        continue
+                    sym = []
+            if sym:
+                if numbered or not syms:
+                    flush()
+                    syms.append([st])
+                    sym_pos = len(out)
+                    out.append("")  # the symptom line goes here, filled as its cell grows
+                else:
+                    syms[-1].append(st)
+                out[sym_pos] = _join_cell(syms[-1])
+                ws = [w for w in ws if w[2] >= g1 + 1]
+                if not ws:
+                    continue
         left, right, phrase = _split(ws, g)
         if phrase or not (left or right):
             flush()
@@ -269,14 +337,33 @@ def reflow_table(page_xml: str, prev_gutter: float | None = None) -> tuple[str |
         cur = rows[-1] if rows else None
         prev_l = (cur[0][-1] if cur and cur[0] else "")
         new = bool(ROW_START_RE.match(L)) and not prev_l.endswith("-")
+        owner = next((r for r in reversed(rows) if r[1]), None)
+        last_r = owner[1][-1] if owner else ""
+        if L[:1] == "*" and k + 1 < len(body) and any(w[0] < g - 1 < g + 1 < w[2] for w in body[k + 1]):
+            flush()
+            out.append(_join_words(ws))  # a footnote running across both columns under the table
+            continue
+        if new and owner is not None and L[:1] in "-–—*" and R:
+            steps = re.findall(r"(?:^|[.;] )(\d+) [А-ЯЁ]", " ".join(owner[1]))
+            m = re.match(r"(\d+) [А-ЯЁ]", R)
+            if R[:1].islower() or (m and steps and int(m.group(1)) == int(steps[-1]) + 1):
+                # a dash sub-item (or a footnote) beside the running remedy of the item above: the item is its
+                # own line, the remedy words stay with the remedy they continue
+                owner[1].append(R)
+                rows.append([[L], []])
+                sub_of[id(rows[-1])] = owner
+                continue
+        if new and R and L[:1] not in "-–—*" and R[:1].islower() and last_r.endswith(","):
+            new = False  # «ЭБУ из-за …» beside «…из разъема ЭБУ, | заменить жгут»: one row going on
         if cur is None or new:
             rows.append([[L] if L else [], [R] if R else []])
         else:
             if L:
                 cur[0].append(L)
             if R:
-                cur[1].append(R)
+                (sub_of[id(cur)] if id(cur) in sub_of else cur)[1].append(R)
     flush()
+    out.extend(tail)
     if long_cells:  # rows ran together (three-column table, list items): keep pdftotext's text
         return None, g
     return "\n".join(x for x in out if x.strip()), g
