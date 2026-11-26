@@ -158,6 +158,25 @@ def test_expand_is_prefetched_after_brief_answer(make_agent):
     assert a._prefetch_take(c, "совсем другой ответ про форсунки [S1]", ["S1"]) is None
 
 
+def test_expand_on_another_instance_rehydrates_sources(make_agent):
+    """Vercel: the expand request may hit a fresh instance with an empty conversation -> pages re-read from the index."""
+    a = make_agent([
+        msg(None, [tool_call("search_manual", {"query": "момент затяжки болтов крышек коренных подшипников"}, 1)]),
+        msg("421-461 Н·м [S1]."),
+    ])
+    c = a.conv("u1", "M333YK47")
+    a.diagnose(c, "S-0005")
+    short = a.handle(c, {"lang": "ru"}, "Момент затяжки коренных?")
+    src = [{"label": s["label"], "doc_id": s["doc_id"], "page": s["page"]} for s in short.sources]
+    b = make_agent([msg("Подробно: момент 421-461 Н·м [S1]. Выдумка 777 Н·м [S1]."), msg("Подробно: момент 421-461 Н·м [S1].")])
+    c2 = b.conv("u1", "M333YK47")
+    assert not c2.frags
+    long = b.handle(c2, {"lang": "ru"}, short.text, event="expand", sources=src + [{"label": "S9", "doc_id": "nope", "page": 1}, {"label": "evil"}])
+    assert "Нечего развернуть" not in long.text and "421" in long.text and "777" not in long.text
+    assert long.sources and long.sources[0]["page"] == short.sources[0]["page"] and set(c2.frags) == {"S1"}
+    assert c2.frags["S1"]["text"] == c.frags["S1"]["text"]  # text from our index, not from the client
+
+
 def test_expand_without_citations(make_agent):
     a = make_agent([])
     c = a.conv("u1", "M333YK47")

@@ -353,6 +353,34 @@ class Agent:
                      "факты, цифры и метки источников не меняются):" + personal)
         return base
 
+    def rehydrate_frags(self, c: Conv, sources: list[dict]) -> None:
+        """Serverless (Vercel): «Подробнее» may land on another instance that never saw this conversation. The client
+        sends back the answer's sources (label, doc_id, page); the page text is re-read from OUR index (never from the
+        client), so the expand uses the same pages and labels as the brief answer."""
+        for s in sources[:12]:
+            try:
+                label, doc_id, page = str(s.get("label") or ""), str(s.get("doc_id") or ""), int(s.get("page") or 0)
+            except (TypeError, ValueError, AttributeError):
+                continue
+            m = re.fullmatch(r"([SX])(\d{1,3})", label)
+            if not m or not doc_id or not page:
+                continue
+            old = c.frags.get(label)
+            if old and old.get("doc_id") == doc_id and old.get("page") == page:
+                continue
+            if m.group(1) == "S":
+                p = self.index.get_page(doc_id, page)
+                if p is None:
+                    continue
+                c.frags[label] = dict(doc_id=p.doc_id, document=p.document, page=p.page, text=p.text, extra=False)
+                c.n_s = max(c.n_s, int(m.group(2)))
+            else:
+                p = self.extra.get_page(doc_id, page) if self.extra else None
+                if p is None:
+                    continue
+                c.frags[label] = dict(doc_id=p.doc_id, document=p.document, page=p.page, text=p.text, extra=True, image=p.image)
+                c.n_x = max(c.n_x, int(m.group(2)))
+
     def _expand(self, c: Conv, user: dict, answer: str, turn: "Turn") -> "Turn":
         """Re-render an existing grounded answer in detail: same fragments, same labels, same verification."""
         labels = [l for l in cited_labels(answer) if l in c.frags]
@@ -620,9 +648,12 @@ class Agent:
         return {"counts": {**counts, "in_repair": len(open_rep), "tickets": len(tickets), "total": len(rows)}, "ops": ops, "vehicles": rows}
 
     # ------------------------------------------------------------------ chat turn
-    def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None) -> Turn:
+    def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None,
+               sources: list[dict] | None = None) -> Turn:
         with c.lock:
             c.lang = answer_lang(user)  # translated manual index (if imported) is searched in this language too
+            if event == "expand" and sources:
+                self.rehydrate_frags(c, sources)
             turn = self._handle(c, user, text, image_note, event)
             if c.preface:  # deterministic part (e.g. triage order by the TZ urgency rules), not subject to LLM grounding
                 turn.text = c.preface + ("\n\n" + turn.text if turn.text else "")

@@ -203,7 +203,7 @@ function renderTurn(turn, expanded = false) {
     const uu = (turn.understood || []).filter(([a, b]) => !(b.length <= a.length && pre(a.toLowerCase(), b.toLowerCase()) >= 3));
     const und = uu.length ? `<div class="understood">${t("understood")}: ${uu.map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join(", ")}</div>` : "";
     const actions = [];
-    if (hasSrc && !expanded && (ME.detail || "brief") === "brief") actions.push({label: t("expand"), onclick: (ev, b) => { b.remove(); eventTurn("expand", turn.text, null, true); }});
+    if (hasSrc && !expanded && (ME.detail || "brief") === "brief") actions.push({label: t("expand"), onclick: (ev, b) => { b.remove(); eventTurn("expand", turn.text, null, true, turn.sources); }});
     if (hasSrc && VID) actions.push({icon: "ellipsis", aria: t("more_actions"), onclick: () => turnMenu(turn)});
     const d = addMsg("bot", und + factsHtml(turn.facts) + md(turn.text, turn.sources) + answerActionsHtml(turn.actions), {speak: turn.text, actions});
     bindAnswerActions(d, turn.actions);
@@ -475,7 +475,7 @@ async function diagnose() {
   } catch (e) { errorMsg(e); }
   finally { BUSY = false; const b = $("#btnDiag"); if (b) b.disabled = false; }
 }
-async function ask(text, event = null) {
+async function ask(text, event = null, sources = null) {
   if (BUSY) return null; BUSY = true;
   const th = skeleton(), t0 = Date.now();
   const tick = setInterval(async () => {
@@ -491,14 +491,14 @@ async function ask(text, event = null) {
     }
     if (VOICE.on && steps.length) $("#vHint").textContent = steps[steps.length - 1];
   }, 1000);
-  try { const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event}}); th.remove(); return renderTurn(r, event === "expand"); }
+  try { const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event, ...(sources ? {sources: sources.map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))} : {})}}); th.remove(); return renderTurn(r, event === "expand"); }
   catch (e) { th.remove(); errorMsg(e); return null; }
   finally { clearInterval(tick); BUSY = false; }
 }
-async function eventTurn(event, text, shown, expanded = false) {
+async function eventTurn(event, text, shown, expanded = false, sources = null) {
   Player.stop();
   if (shown) addMsg("user", esc(shown));
-  return ask(text, event);
+  return ask(text, event, sources);
 }
 async function send(text) {
   Player.stop();
