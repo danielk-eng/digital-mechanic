@@ -70,7 +70,7 @@ class TextGZip:
 
     async def __call__(self, scope, receive, send):
         p = scope.get("path", "") if scope["type"] == "http" else ""
-        if scope["type"] != "http" or p.endswith(self.SKIP) or p.startswith(("/api/tts", "/api/stt", "/api/photo", "/api/media", "/page/", "/manuals/")):
+        if scope["type"] != "http" or p.endswith(self.SKIP) or p.startswith(("/api/chat/stream", "/api/tts", "/api/stt", "/api/photo", "/api/media", "/page/", "/manuals/")):
             return await self.app(scope, receive, send)
         return await self.gz(scope, receive, send)
 
@@ -350,7 +350,9 @@ def session(uid: str | None = Cookie(None)) -> dict:
     """Boot check without a 401 in the browser console: {"user": null} when not logged in."""
     u = STORE.user(uid) if uid else None
     # server_tts: false -> the browser speaks itself (no POST /api/tts that can only answer 404)
-    return {"user": pub(u), "langs": {k: v["name"] for k, v in LANGS.items()}, "server_tts": bool(S.speech_url or S.silero_enabled)}
+    # server_stt: false -> the browser recognises speech itself (Web Speech API) instead of POST /api/stt that can only answer 503
+    return {"user": pub(u), "langs": {k: v["name"] for k, v in LANGS.items()}, "server_tts": bool(S.speech_url or S.silero_enabled),
+            "server_stt": voice.stt_configured(S)}
 
 
 @app.get("/api/me")
@@ -753,6 +755,48 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
     shown = {"expand": "", "alternatives": "Другие варианты"}.get(body.event or "", None)
     _record(u, c, "chat" if not body.event else body.event, body.text if shown is None else shown, turn, t0)
     return {**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000)}
+
+
+@app.post("/api/chat/stream")
+def chat_stream(body: ChatIn, uid: str | None = Cookie(None)):
+    """Same as /api/chat, streamed as NDJSON: {"step"} / {"draft"} lines while the model writes, then {"turn"} (or
+    {"error", "status"}). On Vercel the /api/progress poll lands on other instances and sees nothing; this stream
+    carries the live lines of the SAME instance (used by «Подробнее», 8–17 s there)."""
+    from fastapi.responses import StreamingResponse
+
+    u = user_of(uid)  # 401 before the stream starts
+    cid = f"{u['id']}:{body.vehicle_id or '-'}"
+    res: dict = {}
+
+    def run() -> None:
+        try:
+            res["turn"] = chat(body, uid)
+        except HTTPException as e:
+            res["error"], res["status"] = str(e.detail)[:300], e.status_code
+        except Exception as e:  # noqa: BLE001 - reported to the client, which falls back to /api/chat
+            res["error"], res["status"] = type(e).__name__, 500
+
+    th = threading.Thread(target=run, daemon=True, name=f"chat-stream-{cid}")
+    th.start()
+
+    def gen():
+        last_step, last_draft = None, None
+        yield json.dumps({"step": PROGRESS_START}, ensure_ascii=False) + "\n"
+        while th.is_alive():
+            th.join(0.3)
+            steps, draft = AGENT.progress.get(cid) or [], AGENT.drafts.get(cid, "")
+            if steps and steps[-1] != last_step:
+                last_step = steps[-1]
+                yield json.dumps({"step": last_step}, ensure_ascii=False) + "\n"
+            if draft and draft != last_draft:
+                last_draft = draft
+                yield json.dumps({"draft": draft}, ensure_ascii=False) + "\n"
+        yield json.dumps({"turn": res["turn"]} if "turn" in res else {"error": res.get("error", "error"), "status": res.get("status", 500)}, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"})
+
+
+PROGRESS_START = "📖 Перечитываю страницы руководства"
 
 
 def _evolve_style(uid: str, recent: list[str]) -> None:

@@ -85,6 +85,7 @@ def test_session_endpoint_no_401():
     r = TestClient(app).get("/api/session")
     assert r.status_code == 200 and r.json()["user"] is None
     assert r.json()["server_tts"] in (True, False)  # the browser skips POST /api/tts when false (was a 404 in the console)
+    assert r.json()["server_stt"] in (True, False)  # false -> the browser recognises speech (Web Speech API), no 503 from /api/stt
 
 
 def test_vehicle_title_not_overwritten_by_i18n():
@@ -150,3 +151,18 @@ def test_country_consent_and_privacy_page(client):
     assert "91/2025/QH15" in client.get("/privacy?country=VN").text and "152-ФЗ" in client.get("/privacy?country=RU").text
     assert client.post("/api/me", json={"country": "IN"}).json()["user"]["country"] == "IN"
     assert privacy_laws.country("xx") == "RU" and not privacy_laws.requires_localization("TJ")
+
+
+def test_chat_stream_ndjson(client):
+    """«Подробнее» on Vercel: /api/chat/stream gives step lines then the same turn as /api/chat; 401 before the stream."""
+    import json as _j
+    from fastapi.testclient import TestClient
+    import digital_mechanic.web.app as m
+    assert TestClient(m.app).post("/api/chat/stream", json={"text": "x"}).status_code == 401
+    client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True, "lang": "ru"})
+    r = client.post("/api/chat/stream", json={"vehicle_id": "M333YK47", "text": "что значит F08?"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/x-ndjson")
+    lines = [_j.loads(x) for x in r.text.splitlines() if x.strip()]
+    assert lines[0].get("step") and "turn" in lines[-1] and lines[-1]["turn"].get("text")
+    bad = client.post("/api/chat/stream", json={"vehicle_id": "NOPE000", "text": "x"})
+    assert _j.loads(bad.text.splitlines()[-1]) == {"error": "unknown vehicle", "status": 404}

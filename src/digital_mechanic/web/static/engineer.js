@@ -91,16 +91,35 @@ let EVOICE = false, EREC = null;
 async function micToggle() {
   const b = $("#emic");
   if (EREC) { EREC.stop(); return; }
+  if (!(await WebSTT.serverOk())) return micBrowser(b);  // no server STT (Vercel): the browser recognises speech
   let stream; try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); } catch (_) { alert("Нет доступа к микрофону"); return; }
   const chunks = [], rec = new MediaRecorder(stream); EREC = rec; EVOICE = true; b.classList.add("on");
   rec.ondataavailable = e => e.data.size && chunks.push(e.data);
   rec.onstop = async () => {
     stream.getTracks().forEach(x => x.stop()); EREC = null; b.classList.remove("on");
     const fd = new FormData(); fd.append("audio", new Blob(chunks, {type: rec.mimeType || "audio/webm"}), "q.webm"); fd.append("lang", (ME && ME.lang) || "ru");
-    try { const r = await api("/api/stt", {method: "POST", body: fd}); if (r.text) ask(r.text); } catch (e) { alert(e.message); }
+    try { const r = await api("/api/stt", {method: "POST", body: fd}); if (r.text) ask(r.text); }
+    catch (e) {
+      if (!WebSTT.serverFailed(e)) return alert(e.message);
+      WebSTT.server = false;  // 503: switch to the browser for this page and listen again right away
+      if (!WebSTT.available()) return alert(WebSTT.message(null, null));
+      micBrowser(b, true);
+    }
   };
   rec.start();
   setTimeout(() => { if (EREC === rec) rec.stop(); }, window.__micMs || 6000);
+}
+// Web Speech API path: tap = listen one phrase; tap again = finish now
+let MBROWSER = false;
+function micBrowser(b, retry = false) {
+  if (MBROWSER) { WebSTT.stop(); return; }
+  if (!WebSTT.available()) { alert(WebSTT.message(null, null)); return; }
+  MBROWSER = true; EVOICE = true; b.classList.add("on");
+  if (retry) b.title = "Сервер распознавания недоступен — слушаю через браузер. Повторите, пожалуйста";
+  WebSTT.listen(SPEECH_LANG_OF((ME && ME.lang) || "ru"), {maxMs: 15000})
+    .then(text => { if (text) ask(text); })
+    .catch(e => alert(WebSTT.message(e, null)))
+    .finally(() => { MBROWSER = false; b.classList.remove("on"); });
 }
 async function ask(textIn) {
   const txt = (typeof textIn === "string" ? textIn : $("#etxt").value).trim(); if (!txt) return; $("#etxt").value = "";

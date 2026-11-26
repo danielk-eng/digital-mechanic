@@ -279,16 +279,35 @@ let MVOICE = false, MREC = null;
 async function micToggle() {
   const b = $("#mmic");
   if (MREC) { MREC.stop(); return; }
+  if (!(await WebSTT.serverOk())) return micBrowser(b);  // no server STT (Vercel): the browser recognises speech
   let stream; try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); } catch (_) { alert(t("mic_denied")); return; }
   const chunks = [], rec = new MediaRecorder(stream); MREC = rec; MVOICE = true; b.classList.add("on");
   rec.ondataavailable = e => e.data.size && chunks.push(e.data);
   rec.onstop = async () => {
     stream.getTracks().forEach(x => x.stop()); MREC = null; b.classList.remove("on");
     const fd = new FormData(); fd.append("audio", new Blob(chunks, {type: rec.mimeType || "audio/webm"}), "q.webm"); fd.append("lang", (ME && ME.lang) || "ru");
-    try { const r = await api("/api/stt", {method: "POST", body: fd}); if (r.text) ask(r.text); } catch (e) { alert(e.message); }
+    try { const r = await api("/api/stt", {method: "POST", body: fd}); if (r.text) ask(r.text); }
+    catch (e) {
+      if (!WebSTT.serverFailed(e)) return alert(e.message);
+      WebSTT.server = false;  // 503: switch to the browser for this page and listen again right away
+      if (!WebSTT.available()) return alert(WebSTT.message(null, t));
+      micBrowser(b, true);
+    }
   };
   rec.start();
   setTimeout(() => { if (MREC === rec) rec.stop(); }, window.__micMs || 6000);  // short commands; tap again to stop earlier
+}
+// Web Speech API path: tap = listen one phrase; tap again = finish now
+let MBROWSER = false;
+function micBrowser(b, retry = false) {
+  if (MBROWSER) { WebSTT.stop(); return; }
+  if (!WebSTT.available()) { alert(WebSTT.message(null, t)); return; }
+  MBROWSER = true; MVOICE = true; b.classList.add("on");
+  if (retry) b.title = t("v_browser_stt");
+  WebSTT.listen(SPEECH_LANG_OF((ME && ME.lang) || "ru"), {maxMs: 15000})
+    .then(text => { if (text) ask(text); })
+    .catch(e => alert(WebSTT.message(e, t)))
+    .finally(() => { MBROWSER = false; b.classList.remove("on"); });
 }
 
 // ---------------------------------------------------------------- employees (only the chief: server-side RBAC)

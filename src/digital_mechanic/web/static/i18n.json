@@ -348,7 +348,11 @@
   "f_reset": "Сбросить",
   "f_nothing": "Ничего не найдено — измените фильтры",
   "ask_any_ph": "Задайте вопрос",
-  "email_qr": "Почта (для QR-входа)"
+  "email_qr": "Почта (для QR-входа)",
+  "v_browser_stt": "Сервер распознавания недоступен — слушаю через браузер. Повторите, пожалуйста",
+  "v_no_stt": "Голосовой ввод недоступен: сервер распознавания отключён, а этот браузер не умеет распознавать речь. Напишите вопрос текстом или откройте в Chrome, Edge или Safari",
+  "v_lang_unsupported": "Браузер не распознаёт речь на этом языке. Напишите вопрос текстом",
+  "v_stt_network": "Распознавание речи в браузере не отвечает (нет сети). Напишите вопрос текстом"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -699,7 +703,11 @@
   "f_reset": "Tozalash",
   "f_nothing": "Hech narsa topilmadi — filtrlarni o'zgartiring",
   "ask_any_ph": "Savol bering",
-  "email_qr": "Elektron pochta (QR orqali kirish uchun)"
+  "email_qr": "Elektron pochta (QR orqali kirish uchun)",
+  "v_browser_stt": "Nutqni aniqlash serveri ishlamayapti — brauzer orqali tinglayapman. Iltimos, qaytaring",
+  "v_no_stt": "Ovozli kiritish mavjud emas: server oʻchirilgan, bu brauzer esa nutqni aniqlay olmaydi. Savolni matn bilan yozing yoki Chrome, Edge yoki Safari’da oching",
+  "v_lang_unsupported": "Brauzer bu tildagi nutqni aniqlay olmaydi. Savolni matn bilan yozing",
+  "v_stt_network": "Brauzerda nutqni aniqlash javob bermayapti (tarmoq yoʻq). Savolni matn bilan yozing"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -1050,7 +1058,11 @@
   "f_reset": "Тоза кардан",
   "f_nothing": "Чизе ёфт нашуд — филтрҳоро иваз кунед",
   "ask_any_ph": "Савол диҳед",
-  "email_qr": "Почта (барои воридшавӣ бо QR)"
+  "email_qr": "Почта (барои воридшавӣ бо QR)",
+  "v_browser_stt": "Сервери шинохти нутқ дастрас нест — тавассути браузер гӯш мекунам. Лутфан такрор кунед",
+  "v_no_stt": "Вуруди овозӣ дастрас нест: сервер хомӯш аст ва ин браузер нутқро намешиносад. Саволро матнӣ нависед ё дар Chrome, Edge ё Safari кушоед",
+  "v_lang_unsupported": "Браузер нутқро бо ин забон намешиносад. Саволро матнӣ нависед",
+  "v_stt_network": "Шинохти нутқ дар браузер ҷавоб намедиҳад (шабака нест). Саволро матнӣ нависед"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -1401,7 +1413,11 @@
   "f_reset": "Тазалау",
   "f_nothing": "Ештеңе табылмады — сүзгілерді өзгертіңіз",
   "ask_any_ph": "Сұрақ қойыңыз",
-  "email_qr": "Пошта (QR арқылы кіру үшін)"
+  "email_qr": "Пошта (QR арқылы кіру үшін)",
+  "v_browser_stt": "Сөйлеуді тану сервері қолжетімсіз — браузер арқылы тыңдаймын. Қайталаңызшы",
+  "v_no_stt": "Дауыспен енгізу қолжетімсіз: сервер өшірулі, ал бұл браузер сөйлеуді тани алмайды. Сұрақты мәтінмен жазыңыз немесе Chrome, Edge не Safari-де ашыңыз",
+  "v_lang_unsupported": "Браузер бұл тілдегі сөйлеуді танымайды. Сұрақты мәтінмен жазыңыз",
+  "v_stt_network": "Браузердегі сөйлеуді тану жауап бермейді (желі жоқ). Сұрақты мәтінмен жазыңыз"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -1752,7 +1768,11 @@
   "f_reset": "रीसेट",
   "f_nothing": "कुछ नहीं मिला — फ़िल्टर बदलें",
   "ask_any_ph": "प्रश्न पूछें",
-  "email_qr": "ईमेल (QR लॉगिन के लिए)"
+  "email_qr": "ईमेल (QR लॉगिन के लिए)",
+  "v_browser_stt": "वाक् पहचान सर्वर उपलब्ध नहीं है — ब्राउज़र से सुन रहा हूँ। कृपया दोहराएँ",
+  "v_no_stt": "आवाज़ इनपुट उपलब्ध नहीं: सर्वर बंद है और यह ब्राउज़र वाक् पहचान नहीं कर सकता। सवाल लिखकर भेजें या Chrome, Edge या Safari में खोलें",
+  "v_lang_unsupported": "ब्राउज़र इस भाषा में वाक् पहचान नहीं करता। सवाल लिखकर भेजें",
+  "v_stt_network": "ब्राउज़र की वाक् पहचान जवाब नहीं दे रही (नेटवर्क नहीं)। सवाल लिखकर भेजें"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -2103,7 +2123,11 @@
   "f_reset": "Đặt lại",
   "f_nothing": "Không tìm thấy — hãy đổi bộ lọc",
   "ask_any_ph": "Đặt câu hỏi",
-  "email_qr": "Email (để đăng nhập bằng QR)"
+  "email_qr": "Email (để đăng nhập bằng QR)",
+  "v_browser_stt": "Máy chủ nhận dạng giọng nói không khả dụng — đang nghe qua trình duyệt. Vui lòng nói lại",
+  "v_no_stt": "Không nhập được bằng giọng nói: máy chủ đã tắt và trình duyệt này không nhận dạng được giọng nói. Hãy gõ câu hỏi hoặc mở bằng Chrome, Edge hoặc Safari",
+  "v_lang_unsupported": "Trình duyệt không nhận dạng được giọng nói bằng ngôn ngữ này. Hãy gõ câu hỏi",
+  "v_stt_network": "Nhận dạng giọng nói của trình duyệt không phản hồi (không có mạng). Hãy gõ câu hỏi"
  },
  "bn": {
   "app_title": "ডিজিটাল মেকানিক",
@@ -2454,7 +2478,11 @@
   "f_reset": "রিসেট",
   "f_nothing": "কিছু পাওয়া যায়নি — ফিল্টার বদলান",
   "ask_any_ph": "প্রশ্ন করুন",
-  "email_qr": "ইমেইল (QR লগইনের জন্য)"
+  "email_qr": "ইমেইল (QR লগইনের জন্য)",
+  "v_browser_stt": "কণ্ঠস্বর শনাক্তকরণ সার্ভার উপলব্ধ নেই — ব্রাউজারের মাধ্যমে শুনছি। অনুগ্রহ করে আবার বলুন",
+  "v_no_stt": "ভয়েস ইনপুট উপলব্ধ নেই: সার্ভার বন্ধ এবং এই ব্রাউজার কণ্ঠস্বর চিনতে পারে না। প্রশ্নটি লিখে পাঠান বা Chrome, Edge অথবা Safari-তে খুলুন",
+  "v_lang_unsupported": "ব্রাউজার এই ভাষায় কণ্ঠস্বর চিনতে পারে না। প্রশ্নটি লিখে পাঠান",
+  "v_stt_network": "ব্রাউজারের কণ্ঠস্বর শনাক্তকরণ সাড়া দিচ্ছে না (নেটওয়ার্ক নেই)। প্রশ্নটি লিখে পাঠান"
  },
  "ky": {
   "app_title": "Санарип механик",
@@ -2805,7 +2833,11 @@
   "f_reset": "Тазалоо",
   "f_nothing": "Эч нерсе табылган жок — чыпкаларды өзгөртүңүз",
   "ask_any_ph": "Суроо бериңиз",
-  "email_qr": "Почта (QR аркылуу кирүү үчүн)"
+  "email_qr": "Почта (QR аркылуу кирүү үчүн)",
+  "v_browser_stt": "Кепти таануу сервери жеткиликсиз — браузер аркылуу угуп жатам. Кайталап коюңузчу",
+  "v_no_stt": "Үн менен киргизүү жеткиликсиз: сервер өчүк, бул браузер кепти тааный албайт. Суроону текст менен жазыңыз же Chrome, Edge же Safari'де ачыңыз",
+  "v_lang_unsupported": "Браузер бул тилдеги кепти тааныбайт. Суроону текст менен жазыңыз",
+  "v_stt_network": "Браузердеги кепти таануу жооп бербей жатат (тармак жок). Суроону текст менен жазыңыз"
  },
  "be": {
   "app_title": "Лічбавы механік",
@@ -3156,6 +3188,10 @@
   "f_reset": "Скінуць",
   "f_nothing": "Нічога не знойдзена — змяніце фільтры",
   "ask_any_ph": "Задайце пытанне",
-  "email_qr": "Пошта (для ўваходу па QR)"
+  "email_qr": "Пошта (для ўваходу па QR)",
+  "v_browser_stt": "Сервер распазнавання недаступны — слухаю праз браўзер. Паўтарыце, калі ласка",
+  "v_no_stt": "Галасавы ўвод недаступны: сервер адключаны, а гэты браўзер не ўмее распазнаваць мову. Напішыце пытанне тэкстам або адкрыйце ў Chrome, Edge ці Safari",
+  "v_lang_unsupported": "Браўзер не распазнае мову на гэтай мове. Напішыце пытанне тэкстам",
+  "v_stt_network": "Распазнаванне мовы ў браўзеры не адказвае (няма сеткі). Напішыце пытанне тэкстам"
  }
 }

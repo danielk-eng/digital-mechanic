@@ -94,7 +94,7 @@ const Player = {
     speechSynthesis.speak(u);
   },
 };
-let SERVER_TTS = true;
+let SERVER_TTS = true, SERVER_STT = true;
 function plain(text) { return String(text || "").replace(/\[[^\]]*\b(S|X)\d+\b[^\]]*\]/g, "").replace(/<[^>]+>/g, " ").replace(/[*#•_]/g, "").replace(/\s+/g, " ").replace(/ ([.,;:!?)])/g, "$1").trim().slice(0, 1200); }
 function caption(text, ms = 0) {
   const el = $("#caption"); if (!el) return;
@@ -475,23 +475,62 @@ async function diagnose() {
   } catch (e) { errorMsg(e); }
   finally { BUSY = false; const b = $("#btnDiag"); if (b) b.disabled = false; }
 }
+// «Подробнее» streams (NDJSON from /api/chat/stream): on Vercel the /api/progress poll hits other instances and sees nothing,
+// the stream carries the steps and live lines of the instance that writes the answer. Any stream problem -> plain /api/chat.
+const EXPAND_STAGES = [[0, "📖 Перечитываю страницы руководства"], [3, "🧩 Собираю шаги и нормы с тех же страниц"], [7, "✍️ Пишу подробный ответ"], [14, "🔢 Сверяю цифры с руководством"]];
+async function chatStream(payload, onLine) {
+  const r = await fetch("/api/chat/stream", {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+  if (!r.ok || !r.body) { const e = new Error("stream " + r.status); e.status = r.status; e.stream = true; throw e; }
+  const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "", fin = null;
+  for (;;) {
+    const {value, done} = await rd.read(); if (done) break;
+    buf += dec.decode(value, {stream: true}); let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue;
+      let m; try { m = JSON.parse(line); } catch (_) { continue; }
+      if (m.turn) fin = m.turn; else if (m.error) { const e = new Error(m.error); e.status = m.status; throw e; } else onLine(m);
+    }
+  }
+  if (!fin) { const e = new Error("stream ended"); e.stream = true; throw e; }
+  return fin;
+}
 async function ask(text, event = null, sources = null) {
   if (BUSY) return null; BUSY = true;
-  const th = skeleton(), t0 = Date.now();
+  const streamIt = event === "expand" && window.ReadableStream && window.TextDecoder;
+  const th = skeleton(streamIt ? trStep(EXPAND_STAGES[0][1]) : ""), t0 = Date.now();
+  let live = false;  // the stream delivered steps/lines: no /api/progress poll
+  const showDraft = draft => {
+    if (!draft || draft === th.dataset.draft || !th.isConnected) return;  // live lines already checked against the manual (numbers), replaced by the final answer
+    th.dataset.draft = draft; th.classList.add("has-draft");
+    let box = th.querySelector(".draft"); if (!box) { box = document.createElement("div"); box.className = "draft"; th.querySelector(".progress").after(box); }
+    box.innerHTML = md(draft, []);
+  };
   const tick = setInterval(async () => {
     const sec = Math.round((Date.now() - t0) / 1000);
     let steps = [], draft = "";
-    try { const p = await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`); steps = p.steps || []; draft = p.draft || ""; } catch (_) {}
+    if (!live) { try { const p = await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`); steps = p.steps || []; draft = p.draft || ""; } catch (_) {} }
     if (!th.isConnected) return;
-    const el = th.querySelector(".ptext"); if (el) { if (steps.length) el.dataset.step = trStep(steps[steps.length - 1]); el.textContent = `${draft ? t("writing") : (el.dataset.step || t("thinking"))} · ${sec} ${t("sec")}`; }
-    if (draft && draft !== th.dataset.draft) {  // live lines already checked against the manual (numbers), replaced by the final answer
-      th.dataset.draft = draft; th.classList.add("has-draft");
-      let box = th.querySelector(".draft"); if (!box) { box = document.createElement("div"); box.className = "draft"; th.querySelector(".progress").after(box); }
-      box.innerHTML = md(draft, []);
-    }
+    const el = th.querySelector(".ptext");
+    if (el && streamIt && !steps.length && !th.dataset.sstep) { const st = EXPAND_STAGES.filter(x => sec >= x[0]).pop(); el.dataset.step = trStep(st[1]); }  // stage text when nothing arrives
+    if (el) { if (steps.length) el.dataset.step = trStep(steps[steps.length - 1]); el.textContent = `${th.dataset.draft ? t("writing") : (el.dataset.step || t("thinking"))} · ${sec} ${t("sec")}`; }
+    showDraft(draft);
     if (VOICE.on && steps.length) $("#vHint").textContent = steps[steps.length - 1];
   }, 1000);
-  try { const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event, ...(sources ? {sources: sources.map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))} : {})}}); th.remove(); return renderTurn(r, event === "expand"); }
+  const payload = {vehicle_id: VID || null, text, event, ...(sources ? {sources: sources.map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))} : {})};
+  try {
+    let r = null;
+    if (streamIt) {
+      try {
+        r = await chatStream(payload, m => {
+          live = true; const el = th.querySelector(".ptext");
+          if (m.step && el && m.step !== EXPAND_STAGES[0][1]) { th.dataset.sstep = 1; el.dataset.step = trStep(m.step); }
+          if (m.draft) showDraft(m.draft);
+        });
+      } catch (e) { if (!e.stream) throw e; r = null; }  // the stream itself failed (proxy, old server): ask the plain way
+    }
+    if (!r) r = await api("/api/chat", {json: payload});
+    th.remove(); return renderTurn(r, event === "expand");
+  }
   catch (e) { th.remove(); errorMsg(e); return null; }
   finally { clearInterval(tick); BUSY = false; }
 }
@@ -808,7 +847,7 @@ async function printTurn(turn) {
 }
 
 // ---------------------------------------------------------------- voice dialog mode: listen → VAD → STT → answer → speak → listen again; barge-in stops speech
-const VOICE = {on: false, state: "idle", stream: null, ctx: null, an: null, rec: null, chunks: [], raf: 0, heard: false, quietMs: 0, speechMs: 0, t0: 0, last: 0, floor: 4};
+const VOICE = {on: false, browser: false, srSeq: 0, state: "idle", stream: null, ctx: null, an: null, rec: null, chunks: [], raf: 0, heard: false, quietMs: 0, speechMs: 0, t0: 0, last: 0, floor: 4};
 const V_ICON = {listening: "mic", transcribing: "loader-circle", thinking: "loader-circle", speaking: "square", idle: "mic"};
 function vSet(state, hint = "") {
   VOICE.state = state;
@@ -821,6 +860,8 @@ async function voiceOpen() {
   if (!VID) return toast(t("choose_vehicle"));
   Player.stop();
   $("#voice").classList.remove("hidden"); $("#vSaid").textContent = ""; $("#vReply").textContent = ""; VOICE.on = true;
+  VOICE.browser = !SERVER_STT;
+  if (VOICE.browser && !WebSTT.available()) { vSet("idle", WebSTT.message(null, t)); return; }
   try {
     VOICE.stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}});
   } catch (e) { vSet("idle", t("v_no_mic")); return; }
@@ -828,6 +869,17 @@ async function voiceOpen() {
   VOICE.an = VOICE.ctx.createAnalyser(); VOICE.an.fftSize = 1024;
   VOICE.ctx.createMediaStreamSource(VOICE.stream).connect(VOICE.an);
   meter(); vListen();
+}
+// no server STT (Vercel: 503) -> the browser recognises the phrase (Web Speech API, language of the UI)
+function vListenBrowser(hint = "") {
+  if (!VOICE.on) return;
+  Player.stop(); VOICE.speechMs = 0;
+  if (!WebSTT.available()) return vSet("idle", WebSTT.message(null, t));
+  const my = ++VOICE.srSeq;
+  vSet("listening", hint);
+  WebSTT.listen(SPEECH_LANG[(ME && ME.lang) || "ru"] || "ru-RU", {onInterim: s => { if (my === VOICE.srSeq && s) $("#vSaid").textContent = s; }})
+    .then(text => { if (my !== VOICE.srSeq || !VOICE.on) return; if (!text) return vSet("idle", t("v_tap_to_talk")); vHeard(text); })
+    .catch(e => { if (my === VOICE.srSeq && VOICE.on) vSet("idle", WebSTT.message(e, t)); });
 }
 function rms() { const buf = new Uint8Array(VOICE.an.fftSize); VOICE.an.getByteTimeDomainData(buf); let s = 0; for (const v of buf) s += (v - 128) ** 2; return Math.sqrt(s / buf.length); }
 // VAD = level above an ADAPTIVE noise floor AND most energy in the voice band (300–3400 Hz).
@@ -852,7 +904,7 @@ function meter() {
   if (!VOICE.on) return;
   const now = performance.now(), dt = VOICE.last ? now - VOICE.last : 16; VOICE.last = now;
   const r = rms(); $("#vOrb").style.setProperty("--lvl", Math.min(1, r / 30).toFixed(2));
-  if (VOICE.state === "listening") {
+  if (VOICE.state === "listening" && !VOICE.browser) {  // browser recognition has its own end-of-phrase detection
     if (isSpeech(r)) { VOICE.speechMs += dt; if (VOICE.speechMs > 150) VOICE.heard = true; VOICE.quietMs = 0; } else if (VOICE.heard) VOICE.quietMs += dt;
     const long = now - VOICE.t0;
     if ((VOICE.heard && VOICE.quietMs > 1300) || long > 30000) vStopRec();
@@ -864,6 +916,7 @@ function meter() {
 }
 function vListen() {
   if (!VOICE.on || !VOICE.stream) return;
+  if (VOICE.browser) return vListenBrowser();
   Player.stop();
   VOICE.chunks = []; VOICE.heard = false; VOICE.quietMs = 0; VOICE.speechMs = 0; VOICE.t0 = performance.now();
   VOICE.rec = new MediaRecorder(VOICE.stream);
@@ -880,9 +933,19 @@ async function vOnRecorded() {
   const fd = new FormData(); fd.append("audio", blob, "voice.webm"); fd.append("lang", ME.lang || "ru");
   let text = "";
   try { text = ((await api("/api/stt", {method: "POST", body: fd})).text || "").trim(); }
-  catch (e) { if (!VOICE.on) return; vSet("idle", friendlyError(e)); return; }
+  catch (e) {
+    if (!VOICE.on) return;
+    if (WebSTT.serverFailed(e)) {  // 503 «STT unavailable» or no network to the server: switch to the browser for the rest of the session
+      SERVER_STT = false; VOICE.browser = true;
+      return WebSTT.available() ? vListenBrowser(t("v_browser_stt")) : vSet("idle", WebSTT.message(null, t));
+    }
+    vSet("idle", friendlyError(e)); return;
+  }
   if (!VOICE.on) return;
   if (!text) { vSet("listening", t("v_didnt_hear")); return vListen(); }
+  vHeard(text);
+}
+async function vHeard(text) {
   $("#vSaid").textContent = text; $("#vReply").textContent = "";
   vSet("thinking");
   const turn = await send(text);
@@ -895,14 +958,14 @@ async function vOnRecorded() {
   Player.play(reply, null, {onend: () => { if (VOICE.on && VOICE.state === "speaking") vListen(); }});
 }
 function voiceClose() {
-  VOICE.on = false; cancelAnimationFrame(VOICE.raf); stopRecorder(); Player.stop();
+  VOICE.on = false; VOICE.srSeq++; WebSTT.abort(); cancelAnimationFrame(VOICE.raf); stopRecorder(); Player.stop();
   try { VOICE.stream && VOICE.stream.getTracks().forEach(tr => tr.stop()); } catch (_) {}
   try { VOICE.ctx && VOICE.ctx.close(); } catch (_) {}
   VOICE.stream = VOICE.ctx = VOICE.an = null; VOICE.last = 0;
   $("#voice").classList.add("hidden");
 }
 function orbTap() {
-  if (VOICE.state === "listening") vStopRec();
+  if (VOICE.state === "listening") VOICE.browser ? WebSTT.stop() : vStopRec();
   else if (VOICE.state === "speaking") { Player.stop(); vListen(); }
   else if (VOICE.state === "idle") vListen();
 }
@@ -1061,6 +1124,6 @@ async function start() {
 (async () => {
   hydrateIcons();
   I18N = await (await fetch("/static/i18n.json")).json();
-  try { const ss = await api("/api/session"); SERVER_TTS = ss.server_tts !== false; ME = ss.user; if (!ME) throw new Error("login"); start(); }
+  try { const ss = await api("/api/session"); SERVER_TTS = ss.server_tts !== false; SERVER_STT = WebSTT.server = ss.server_stt !== false; ME = ss.user; if (!ME) throw new Error("login"); start(); }
   catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = () => { COUNTRIES = null; $("#l_country").innerHTML = ""; applyI18n(); }; $("#l_country").onchange = loginCountry; applyI18n(); demoAccounts(); $("#login").classList.remove("hidden"); }
 })();

@@ -77,3 +77,33 @@ def test_localization_country_forces_local_first_stt(monkeypatch):
     cf = Settings(stt_order="cloud-first", deepgram_api_key="k", speech_url="http://x")
     for c, engine in (("UZ", "whisper-local"), ("KZ", "whisper-local"), ("RU", "whisper-local"), ("IN", "deepgram"), ("VN", "deepgram")):
         assert voice.transcribe(b"x", "audio/webm", "uz" if c != "IN" else "hi", cf, local_first=privacy_laws.requires_localization(c))[1] == engine, c
+
+
+def test_stt_configured_flag(monkeypatch):
+    """Vercel: no speech service, no cloud key, no faster-whisper -> server_stt false, the browser recognises speech."""
+    import importlib.util
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None)
+    assert voice.stt_configured(Settings(speech_url="", deepgram_api_key="", cloudru_api_key="")) is False
+    assert voice.stt_configured(Settings(speech_url="", deepgram_api_key="k", cloudru_api_key="")) is True
+    assert voice.stt_configured(Settings(speech_url="http://speech:8000", deepgram_api_key="", cloudru_api_key="")) is True
+
+
+def test_browser_stt_fallback_wired():
+    """503 from /api/stt -> Web Speech API on all three pages; clear message when the browser has none; 9 languages."""
+    import json
+    from pathlib import Path
+    st = Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static"
+    for page in ("index.html", "engineer.html", "manager.html"):
+        h = (st / page).read_text(encoding="utf-8")
+        assert h.index("/static/webstt.js") < h.index("/static/" + {"index.html": "app.js"}.get(page, page.replace(".html", ".js")))
+    w = (st / "webstt.js").read_text(encoding="utf-8")
+    assert "webkitSpeechRecognition" in w and "e.status === 503" in w
+    app = (st / "app.js").read_text(encoding="utf-8")
+    assert "WebSTT.serverFailed(e)" in app and "vListenBrowser(t(\"v_browser_stt\"))" in app and "ss.server_stt" in app
+    for js in ("engineer.js", "manager.js"):
+        s = (st / js).read_text(encoding="utf-8")
+        assert "WebSTT.serverFailed(e)" in s and "micBrowser(b, true)" in s
+    i18n = json.loads((st / "i18n.json").read_text(encoding="utf-8"))
+    for lang, d in i18n.items():
+        for k in ("v_browser_stt", "v_no_stt", "v_lang_unsupported", "v_stt_network"):
+            assert d.get(k), (lang, k)

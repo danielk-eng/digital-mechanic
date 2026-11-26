@@ -174,6 +174,14 @@ def speech_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
     return postprocess(r.json()["text"].strip(), lang)
 
 
+def stt_configured(s: Settings) -> bool:
+    """Any server STT engine at all (speech service, cloud key or in-process faster-whisper); false on the Vercel stand."""
+    if s.speech_url or s.deepgram_api_key or (s.cloudru_api_key and s.cloudru_stt):
+        return True
+    import importlib.util
+    return importlib.util.find_spec("faster_whisper") is not None
+
+
 def transcribe(audio: bytes, mime: str, lang: str, s: Settings, local_first: bool = False, country: str | None = None) -> tuple[str, str]:
     """Return (text, engine): [Cloud.ru for RU-region users] -> local whisper service -> Deepgram -> in-process whisper.
     Cloud.ru goes first for `cloudru_countries` unless the law of the person's country wants the data in that country
