@@ -24,8 +24,18 @@ SYMPTOMS: list[tuple[str, str]] = [
     (r"расход масл|ест масл|жр[её]т масл|масложор|угар", "повышенный расход масла на угар"),
     (r"теч|подтек|потек|сопл|капает", "подтекание течь негерметичность уплотнений"),
     (r"глохн|глохнет|останавлива", "двигатель внезапно останавливается неустойчивая работа на холостом ходу"),
-    (r"заряд|генератор|аккумулятор", "генератор не заряжает аккумуляторная батарея"),
+    (r"не заряж|нет заряд|заряд\w* нет|сел\w* аккумулятор|аккумулятор\w* сад|генератор\w* не ", "генератор не заряжает аккумуляторная батарея"),
 ]
+
+# maintenance / procedure questions ("как проверить натяжение ремня генератора") are not symptoms: they need the
+# adjustment section, not the fault tables. trigger -> manual section vocabulary
+MAINT: list[tuple[str, str]] = [
+    (r"натяж\w*.{0,30}ремн|ремн\w*.{0,30}натяж|прогиб\w* ремн", "регулировка натяжения ремней прогиб ремня усилие"),
+    (r"зазор\w* клапан|клапан\w*.{0,20}зазор", "регулировка тепловых зазоров клапанов щуп коромысло"),
+    (r"момент\w* затяж|затяжк\w*", "момент затяжки болтов гаек последовательность затяжки"),
+    (r"угол опереж|опережени\w* впрыск", "установка угла опережения впрыскивания топлива"),
+]
+MAINT_RX = re.compile(r"(?i)как (?:проверить|отрегулировать|регулировать|выставить|снять|установить|заменить|натянуть)|регулировк|натяжени|момент затяжк|зазор")
 
 FAULT_RX = re.compile(r"(?i)способ\w* устранения|метод\w* устранения|причин\w* неисправност|внешнее проявление|неисправности и методы")
 WHY_RX = re.compile(r"(?i)почему|причин|что делать|в ч[её]м дело|из-за чего|отчего|что провер|неисправ")
@@ -34,7 +44,10 @@ WHY_RX = re.compile(r"(?i)почему|причин|что делать|в ч[е
 def expand(question: str) -> tuple[list[str], bool]:
     """Return ([queries], is_symptom). The first query is always the question itself."""
     low = (question or "").lower()
+    maint = [t for rx, t in MAINT if re.search(rx, low)]
     terms = [t for rx, t in SYMPTOMS if re.search(rf"(?<![а-яё])(?:{rx})", low)]
+    if maint and MAINT_RX.search(low) and not WHY_RX.search(low.replace("что проверить", "")):
+        return [question] + maint, False  # procedure question: its section, no fault-table boost
     symptom = bool(terms) or bool(WHY_RX.search(low))
     queries = [question]
     if terms:
