@@ -41,6 +41,8 @@ function arrivalCard(tl, tr) {
   if ((tl.recurring || []).length) lines.push(`🔁 ${tr("recurring")}: ` + tl.recurring.map(r => `<b>${esc_(r.anomaly_type)}</b> ${esc_(r.component || "")} ×${r.count}`).join("; "));
   const open = es.find(x => x.ticket && !["closed", "returned"].includes(x.ticket.status));
   if (open) lines.push(`📝 ${tr("open_ticket")}: <b>${esc_(open.ticket.ticket_id)}</b> (${esc_(open.ticket.status)})`);
+  const ret = es.find(x => x.ticket && x.ticket.status === "returned");
+  if (ret) lines.push(`↩️ ${tr("ticket_returned")}: <b>${esc_(ret.ticket.ticket_id)}</b>${ret.ticket.review_comment ? " — " + esc_(ret.ticket.review_comment) : ""}`);
   const rep = es.find(x => x.repair && x.repair.status === "open");
   if (rep) lines.push(`🛠 ${tr("repair_in_progress")}: ${rep.repair.done}/${rep.repair.total}`);
   const last = es.find(x => x.repair && x.repair.status === "done");

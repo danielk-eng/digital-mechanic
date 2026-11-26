@@ -78,7 +78,10 @@ def timeline(vehicle, sessions: list, store, demo: dict[str, list[dict]], today:
         if tk:
             payload = tk.get("payload") or {}
             payload = json.loads(payload) if isinstance(payload, str) else payload
-            e["ticket"] = {"ticket_id": tk["ticket_id"], "status": tk.get("status") or "created", "urgency": tk.get("urgency")}
+            rev = tk.get("review")
+            rev = json.loads(rev) if isinstance(rev, str) else rev
+            e["ticket"] = {"ticket_id": tk["ticket_id"], "status": tk.get("status") or "created", "urgency": tk.get("urgency"),
+                           "review_comment": (rev or {}).get("comment") or None}
             e["parts"] = payload.get("spare_parts", [])
         rp = next((r for r in repairs if r["session_id"] == s.session_id), None)
         if rp:

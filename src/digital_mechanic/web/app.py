@@ -257,6 +257,25 @@ def tickets_list(uid: str | None = Cookie(None)) -> dict:
     return {"tickets": out}
 
 
+class ReviewIn(BaseModel):
+    decision: str
+    comment: str = ""
+
+
+@app.post("/api/ticket/{ticket_id}/review")
+def review_ticket(ticket_id: str, body: ReviewIn, uid: str | None = Cookie(None)) -> dict:
+    """Item 12: the chief mechanic approves the ticket or returns it to the mechanic with a comment."""
+    u = user_of(uid, manager=True)
+    if body.decision not in ("approved", "returned"):
+        raise HTTPException(400, "decision")
+    if not STORE.one("SELECT id FROM tickets WHERE ticket_id=?", (ticket_id,)):
+        raise HTTPException(404)
+    rev = {"decision": body.decision, "comment": pii.mask(body.comment)[:500], "by": mask_name(u.get("name") or ""), "at": time.time()}
+    STORE.set_ticket_review(ticket_id, rev, body.decision)
+    STORE.audit(user_id=u["id"], role=u["role"], action="ticket_review", input=f"{ticket_id} {body.decision}", output=rev["comment"], ok=1)
+    return {"ok": True, "review": rev}
+
+
 @app.get("/api/handoffs")
 def handoffs(status: str | None = None, uid: str | None = Cookie(None)) -> dict:
     user_of(uid, manager=True)

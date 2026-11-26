@@ -80,8 +80,18 @@ async function loadTickets() {
   bindReview();
 }
 const TSTATUS = {created: "создана", approved: "утверждена", returned: "возвращена"};
-function reviewHtml(x) { return ""; }
-function bindReview() {}
+function reviewHtml(x) {
+  const rv = x.review ? `<span class="muted">${x.review.decision === "approved" ? "✅ утверждена" : "↩️ возвращена"} ${esc(x.review.by || "")}${x.review.comment ? ": " + esc(x.review.comment) : ""}</span>` : "";
+  return rv + (x.status === "created" || x.status === "returned" ? `<button class="go" data-rv="${esc(x.ticket_id)}" data-d="approved">✅ Утвердить</button><button data-rv="${esc(x.ticket_id)}" data-d="returned">↩️ Вернуть с комментарием</button>` : "");
+}
+function bindReview() {
+  document.querySelectorAll("#tab-tickets button[data-rv]").forEach(b => b.onclick = async ev => {
+    ev.stopPropagation();
+    const comment = b.dataset.d === "returned" ? prompt("Что исправить механику?") : "";
+    if (comment === null) return;
+    await api(`/api/ticket/${encodeURIComponent(b.dataset.rv)}/review`, {json: {decision: b.dataset.d, comment}}); loadTickets(); loadFleetTiles && loadFleetTiles();
+  });
+}
 async function loadHandoffs() {
   const r = await api("/api/handoffs");
   const st = {open: "🟠 новая", taken: "🔵 в работе у главного", closed: "✅ закрыта"};

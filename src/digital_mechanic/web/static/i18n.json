@@ -101,7 +101,8 @@
   "open_ticket": "Открытая заявка",
   "repair_in_progress": "Ремонт идёт, шагов",
   "last_fix": "Последний ремонт",
-  "recheck": "повторная проверка"
+  "recheck": "повторная проверка",
+  "ticket_returned": "Заявку вернул главный"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -205,7 +206,8 @@
   "open_ticket": "Ochiq ariza",
   "repair_in_progress": "Taʼmir davom etmoqda, qadamlar",
   "last_fix": "Oxirgi taʼmir",
-  "recheck": "qayta tekshiruv"
+  "recheck": "qayta tekshiruv",
+  "ticket_returned": "Arizani bosh mexanik qaytardi"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -309,7 +311,8 @@
   "open_ticket": "Дархости кушода",
   "repair_in_progress": "Таъмир идома дорад, қадамҳо",
   "last_fix": "Таъмири охирин",
-  "recheck": "санҷиши такрорӣ"
+  "recheck": "санҷиши такрорӣ",
+  "ticket_returned": "Дархостро сармеханик баргардонд"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -413,7 +416,8 @@
   "open_ticket": "Ашық өтінім",
   "repair_in_progress": "Жөндеу жүріп жатыр, қадамдар",
   "last_fix": "Соңғы жөндеу",
-  "recheck": "қайта тексеру"
+  "recheck": "қайта тексеру",
+  "ticket_returned": "Өтінімді бас механик қайтарды"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -517,7 +521,8 @@
   "open_ticket": "खुला अनुरोध",
   "repair_in_progress": "मरम्मत जारी, चरण",
   "last_fix": "अंतिम मरम्मत",
-  "recheck": "दोबारा जाँच"
+  "recheck": "दोबारा जाँच",
+  "ticket_returned": "मुख्य मैकेनिक ने अनुरोध लौटाया"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -621,6 +626,7 @@
   "open_ticket": "Phiếu đang mở",
   "repair_in_progress": "Đang sửa, bước",
   "last_fix": "Lần sửa gần nhất",
-  "recheck": "kiểm tra lại"
+  "recheck": "kiểm tra lại",
+  "ticket_returned": "Thợ trưởng trả lại phiếu"
  }
 }
