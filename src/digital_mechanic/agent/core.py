@@ -403,7 +403,10 @@ class Agent:
         if not self.extra or make not in self.extra.makes():
             return {"fragments": [], "note": f"дополнительных руководств для марки {c.vehicle.make} нет"}
         out = []
-        for p, _ in self.extra.search(make, query, k=3):
+        model = (c.vehicle.model or "").lower()
+        own = lambda p: bool(model) and any(model == m.lower() or model.startswith(m.lower() + "-") for m in p.models)  # noqa: E731
+        hits = sorted(self.extra.search(make, query, k=8), key=lambda h: -h[1] * (1.6 if own(h[0]) else 1.0))[:3]  # this model's manual first
+        for p, _ in hits:
             lab = self._add_frag(c, "X", doc_id=p.doc_id, document=p.document, page=p.page, text=p.text, extra=True, image=p.image)
             out.append({"label": lab, "document": p.document + " [доп. источник, не база Заказчика]", "pdf_page": p.page, "text": snippet(p.text, query, 1500)})
         return {"fragments": out, "caveat": "Дополнительный источник по автомобилю, модели могут отличаться; нормативы двигателя брать только из S#."}
