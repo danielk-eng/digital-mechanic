@@ -864,6 +864,7 @@ function settingsSheet() {
     sh.querySelector("#s_delete").onclick = async () => { if (confirm(t("delete_confirm"))) { await api("/api/me", {method: "DELETE"}); location.reload(); } };
   });
 }
+const ABBR = new Set(["гбц", "цпг", "кшм", "грм", "тнвд"]);
 // What the assistant learned about the user (agent/profile.py): visible, editable, deletable.
 async function drawProfile(sh, prof) {
   const box = sh.querySelector("#s_prof"); if (!box) return;
@@ -872,7 +873,7 @@ async function drawProfile(sh, prof) {
   box.innerHTML = `<p>${t("role")}: <b>${esc(ME.role === "manager" ? t("role_manager") : t("role_mechanic"))}</b>. ${t("prof_messages")}: ${prof.messages}.` +
     (lvl ? ` ${t("prof_inferred")}: <b>${esc(short(lvl))}</b>.` : "") + (prof.prefers_detail ? ` ${t("prof_prefers_detail")}` : "") + `</p>` +
     `<p style="margin-top:8px">${t("prof_terms")}:</p><div class="terms">` +
-    (prof.terms.length ? prof.terms.map(k => `<button class="term" data-k="${esc(k)}" aria-label="${esc(t("remove"))} ${esc(k)}">${esc(k)} ${icon("x", 14)}</button>`).join("") : `<span>${t("prof_no_terms")}</span>`) + `</div>` +
+    (prof.terms.length ? prof.terms.map(k => `<button class="term" data-k="${esc(k)}" aria-label="${esc(t("remove"))} ${esc(k)}">${esc(ABBR.has(k) ? k.toUpperCase() : k)} ${icon("x", 14)}</button>`).join("") : `<span>${t("prof_no_terms")}</span>`) + `</div>` +
     `<button class="btn ghost sm" id="s_preset" style="margin-top:12px">${icon("rotate-ccw", 16)}<span>${t("prof_reset")}</span></button>`;
   box.querySelectorAll(".term").forEach(b => b.onclick = async () => drawProfile(sh, (await api("/api/me/profile", {json: {remove_term: b.dataset.k}})).profile));
   box.querySelector("#s_preset").onclick = async () => drawProfile(sh, (await api("/api/me/profile", {json: {reset: true}})).profile);
