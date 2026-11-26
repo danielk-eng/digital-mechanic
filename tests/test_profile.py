@@ -42,3 +42,7 @@ def test_profile_api_edit_and_delete(tmp_path):
     assert c.post("/api/me/profile", json={"reset": True}).json()["profile"]["terms"] == []
     c.delete("/api/me")
     assert web.STORE.user("u-prof") is None  # deleted with the user's data
+
+
+def test_expert_does_not_get_own_abbreviations_explained():
+    assert P.terms_in("гбц") and P.terms_in("ТНВД") and not P.terms_in("дымит")

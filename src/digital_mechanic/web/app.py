@@ -504,6 +504,8 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
     level = u.get("experience") or "experienced"
     turn = AGENT.handle(c, {**u, "_vocab_hint": uprofile.prompt_hint(prof, level)}, body.text[:4000], event=body.event)
     turn.text, glossed = uprofile.gloss(turn.text, prof, level)
+    if level != "novice":  # an experienced mechanic does not need "ГБЦ -> головка блока цилиндров" explained back to him
+        turn.understood = [p for p in (turn.understood or []) if not uprofile.terms_in(p[0])]
     if u["role"] == "mechanic":
         STORE.upsert_user(u["id"], profile=uprofile.dump(prof))
     # "expand" re-renders the previous answer: do not store it again as a user message
