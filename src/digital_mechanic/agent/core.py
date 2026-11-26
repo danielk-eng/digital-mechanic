@@ -94,6 +94,12 @@ class Turn:
         return {"text": self.text, "cards": self.cards, "sources": self.sources, "tools": self.tools}
 
 
+def _same(a: str, b: str) -> bool:
+    import difflib
+
+    return difflib.SequenceMatcher(None, a[:1500], b[:1500]).ratio() > 0.9
+
+
 class Agent:
     def __init__(self, fleet: Fleet, ml: MlClient, toir: ToirClient, index: ManualIndex, extra: ExtraIndex | None,
                  llm: Llm, store: Store, engine_docs: dict, max_rounds: int = 5, pii_masking: bool = True):
@@ -395,7 +401,11 @@ class Agent:
         for m in self.store.messages(c.cid, 12):
             if m["role"] in ("user", "assistant") and m["content"]:
                 messages.append({"role": m["role"], "content": m["content"][:2500]})
-        messages.append({"role": "user", "content": masked})
+        if len(messages) > 1 and not event:
+            # without this marker non-thinking models sometimes re-answer the previous question
+            messages.append({"role": "user", "content": "Новый вопрос механика — ответь именно на него (прошлые ответы не повторяй):\n" + masked})
+        else:
+            messages.append({"role": "user", "content": masked})
         tools = TOOLS_MANAGER if manager else TOOLS_MECHANIC
         if not manager and not (self.extra and (c.vehicle.make or "").upper() in self.extra.makes()):
             tools = [t for t in tools if t["function"]["name"] != "search_extra_docs"]
@@ -407,6 +417,14 @@ class Agent:
                 calls = getattr(msg, "tool_calls", None) or []
                 if not calls:
                     answer = (msg.content or "").strip()
+                    prev = [m["content"] for m in messages[1:-1] if m["role"] == "assistant" and m.get("content")]
+                    if answer and prev and _same(answer, prev[-1]) and rnd < self.max_rounds:
+                        # non-thinking models sometimes replay the previous reply in long chats
+                        messages.append({"role": "assistant", "content": answer})
+                        messages.append({"role": "user", "content": "Это ответ на прошлый вопрос. Ответь на последний вопрос механика: " + (masked or "")[:500]})
+                        turn.tools.append({"tool": "repeat_guard"})
+                        answer = ""
+                        continue
                     break
                 messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
                     {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in calls]})
@@ -492,6 +510,10 @@ class Agent:
             allowed |= {t["ticket_id"].split("-")[-1].lstrip("0")}
         if c.draft:
             allowed |= {str(len(c.draft["operations"])), str(len(c.draft["spare_parts"]))}
+        from .grounding import numbers as _nums
+        for m in messages:  # numbers the mechanic typed himself may be echoed back
+            if m.get("role") == "user" and isinstance(m.get("content"), str) and not m["content"].startswith("Проверка:"):
+                allowed |= _nums(m["content"])
         bad = unverified_numbers(answer, evidence, allowed)
         if bad and self.llm.available:
             messages.append({"role": "assistant", "content": answer})

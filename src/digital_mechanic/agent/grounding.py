@@ -41,6 +41,8 @@ def unverified_numbers(answer: str, evidence: list[str], allowed: set[str] | Non
     clean = re.sub(r"\[[^\]]{0,80}\b(?:S|X)\d+\b[^\]]{0,80}\]", " ", answer)
     clean = re.sub(r"(?i)(стр\.?|page|pdf|bet|саҳ\.?|tr\.|पृ\.)\s*\d+", " ", clean)  # page refs are checked separately
     clean = re.sub(r"\b[FfSs]-?\d{2,4}\b|TKT-\d+", " ", clean)  # fault codes, session / ticket ids
+    # engine / vehicle model designations: ЯМЗ-236М2, ЗМЗ-40904.10, КамАЗ-4350, 238М2
+    clean = re.sub(r"[А-ЯЁA-Z][А-ЯЁа-яёA-Za-z]{1,6}-\d[\w.]*|\b\d{3,5}[А-ЯЁA-Z]\d?\b", " ", clean)
     have: set[str] = set(allowed or set())
     for e in evidence:
         have |= numbers(e)

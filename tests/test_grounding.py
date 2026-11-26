@@ -22,3 +22,15 @@ def test_cited_labels_loose():
 def test_pii_mask():
     t = pii.mask("Иванов И.И., тел. +7 912 345-67-89, mail a.b@c.ru, паспорт 4510 123456")
     assert "912" not in t and "@" not in t and "123456" not in t and "Иванов" not in t
+
+
+def test_model_designations_are_not_norms():
+    assert unverified_numbers("В базе только ЯМЗ-236М2/238М2 и ЗМЗ-40904.10", []) == []
+    assert unverified_numbers("Момент 480 Н·м для ЯМЗ-536", []) == ["480"]
+
+
+def test_repeat_detector():
+    from digital_mechanic.agent.core import _same
+    a = "**Не менее 100 кПа** на холостом ходу [S1]. После длительной эксплуатации 50 кПа [S1]."
+    assert _same(a, a + " ")
+    assert not _same(a, "Данных для ЗМЗ-409 нет: это другой двигатель.")
