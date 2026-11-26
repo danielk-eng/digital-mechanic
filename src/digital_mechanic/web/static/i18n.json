@@ -77,7 +77,8 @@
   "full_section": "Полный текст раздела",
   "page_image": "Изображение страницы",
   "pages": "Страницы",
-  "extra_src": "Дополнительный источник (не база Заказчика)"
+  "extra_src": "Дополнительный источник (не база Заказчика)",
+  "privacy_note": "🔒 Данные сессии хранятся на сервере заказчика; в языковую модель уходит только замаскированный текст запроса."
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -157,7 +158,8 @@
   "full_section": "Boʻlimning toʻliq matni",
   "page_image": "Sahifa rasmi",
   "pages": "Sahifalar",
-  "extra_src": "Qoʻshimcha manba (Buyurtmachi bazasi emas)"
+  "extra_src": "Qoʻshimcha manba (Buyurtmachi bazasi emas)",
+  "privacy_note": "🔒 Sessiya maʼlumotlari buyurtmachi serverida saqlanadi; til modeliga faqat niqoblangan soʻrov matni yuboriladi."
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -237,7 +239,8 @@
   "full_section": "Матни пурраи бахш",
   "page_image": "Тасвири саҳифа",
   "pages": "Саҳифаҳо",
-  "extra_src": "Манбаи иловагӣ (на пойгоҳи Фармоишгар)"
+  "extra_src": "Манбаи иловагӣ (на пойгоҳи Фармоишгар)",
+  "privacy_note": "🔒 Маълумоти сессия дар сервери фармоишгар нигоҳ дошта мешавад; ба модели забонӣ танҳо матни ниқобпӯшидаи дархост меравад."
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -317,7 +320,8 @@
   "full_section": "Бөлімнің толық мәтіні",
   "page_image": "Бет суреті",
   "pages": "Беттер",
-  "extra_src": "Қосымша дереккөз (Тапсырыс беруші базасы емес)"
+  "extra_src": "Қосымша дереккөз (Тапсырыс беруші базасы емес)",
+  "privacy_note": "🔒 Сессия деректері тапсырыс берушінің серверінде сақталады; тілдік модельге тек бүркемеленген сұрау мәтіні жіберіледі."
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -397,7 +401,8 @@
   "full_section": "अनुभाग का पूरा पाठ",
   "page_image": "पृष्ठ की छवि",
   "pages": "पृष्ठ",
-  "extra_src": "अतिरिक्त स्रोत (ग्राहक का आधार नहीं)"
+  "extra_src": "अतिरिक्त स्रोत (ग्राहक का आधार नहीं)",
+  "privacy_note": "🔒 सत्र का डेटा ग्राहक के सर्वर पर रहता है; भाषा मॉडल को केवल छिपाया गया (मास्क) अनुरोध पाठ भेजा जाता है।"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -477,6 +482,7 @@
   "full_section": "Toàn văn mục",
   "page_image": "Ảnh trang",
   "pages": "Trang",
-  "extra_src": "Nguồn bổ sung (không thuộc cơ sở của Khách hàng)"
+  "extra_src": "Nguồn bổ sung (không thuộc cơ sở của Khách hàng)",
+  "privacy_note": "🔒 Dữ liệu phiên được lưu trên máy chủ của khách hàng; mô hình ngôn ngữ chỉ nhận văn bản yêu cầu đã được che thông tin cá nhân."
  }
 }

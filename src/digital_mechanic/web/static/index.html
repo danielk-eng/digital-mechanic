@@ -19,6 +19,7 @@
     <label><input type="radio" name="exp" value="expert"> <span data-t="exp_pro">Эксперт</span></label>
   </div>
   <label style="margin-top:.8em"><input id="l_consent" type="checkbox"> <span data-t="consent">Согласие 152-ФЗ</span> — <a href="/privacy" target="_blank" style="color:var(--accent)">?</a></label>
+  <div class="muted privacy-note" data-t="privacy_note">🔒 Данные сессии хранятся на сервере заказчика; в языковую модель уходит только замаскированный текст запроса.</div>
   <button class="primary" id="l_go" style="width:100%;margin-top:1em" data-t="enter">Войти</button>
 </section>
 
@@ -43,6 +44,7 @@
       <label><input type="radio" name="s_detail" value="detailed"> <span data-t="detail_detailed">Подробно</span></label>
     </div>
     <div style="margin:.5em 0"><span data-t="font_size">Размер текста</span>: A / A+ / A++ · 🔊</div>
+    <div class="muted privacy-note" data-t="privacy_note">🔒</div>
     <label><input type="checkbox" id="s_hands"> 🖐 Без рук: после ответа слушать снова</label>
     <div class="row" style="margin-top:.7em"><button id="s_logout" data-t="logout">Выйти</button><button id="s_delete">Удалить мои данные (152-ФЗ)</button><a class="muted" href="/privacy" target="_blank">Политика ПДн</a></div>
   </div>
