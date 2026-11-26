@@ -111,3 +111,14 @@ def test_progress_has_live_draft(client):
     client.post("/api/login", json={"name": "T", "role": "mechanic", "lang": "ru", "consent": True})
     r = client.get("/api/progress?vehicle_id=M333YK47")
     assert r.status_code == 200 and "draft" in r.json() and "steps" in r.json()
+
+
+def test_pwa_manifest_icons_exist():
+    import json
+    from pathlib import Path
+    st = Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static"
+    m = json.loads((st / "manifest.json").read_text(encoding="utf-8"))
+    assert {i["purpose"] for i in m["icons"] if i.get("purpose")} >= {"any", "maskable"}
+    for i in m["icons"]:
+        assert (st / i["src"].split("/static/")[1]).exists()
+    assert "apple-touch-icon" in (st / "index.html").read_text(encoding="utf-8")
