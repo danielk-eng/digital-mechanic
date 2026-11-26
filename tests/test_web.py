@@ -98,3 +98,16 @@ def test_manual_pdf_served_inline():
     from digital_mechanic.web import app as web
     src = inspect.getsource(web.manual_pdf)
     assert 'content_disposition_type="inline"' in src
+
+
+def test_text_gzip_but_not_pdf(client):
+    r = client.get("/static/app.js", headers={"Accept-Encoding": "gzip"})
+    assert r.status_code == 200 and r.headers.get("content-encoding") == "gzip"
+    from digital_mechanic.web.app import TextGZip
+    assert ".pdf" in TextGZip.SKIP
+
+
+def test_progress_has_live_draft(client):
+    client.post("/api/login", json={"name": "T", "role": "mechanic", "lang": "ru", "consent": True})
+    r = client.get("/api/progress?vehicle_id=M333YK47")
+    assert r.status_code == 200 and "draft" in r.json() and "steps" in r.json()

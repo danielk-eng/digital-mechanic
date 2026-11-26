@@ -45,7 +45,7 @@ class TextGZip:
 
     async def __call__(self, scope, receive, send):
         p = scope.get("path", "") if scope["type"] == "http" else ""
-        if scope["type"] != "http" or p.endswith(self.SKIP) or p.startswith(("/api/tts", "/api/page", "/api/pdf", "/api/doc", "/api/upload", "/api/stt")):
+        if scope["type"] != "http" or p.endswith(self.SKIP) or p.startswith(("/api/tts", "/api/stt", "/api/photo", "/page/", "/manuals/")):
             return await self.app(scope, receive, send)
         return await self.gz(scope, receive, send)
 

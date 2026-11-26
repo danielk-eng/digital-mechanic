@@ -753,6 +753,7 @@ $("#send").onclick = () => send();
 $("#txt").addEventListener("input", autosize);
 $("#txt").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
 $("#photo").onchange = onPhoto;
+document.querySelectorAll("label[role=button]").forEach(l => l.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); l.querySelector("input")?.click(); } }));
 $("#mic").onclick = voiceOpen;
 $("#vClose").onclick = voiceClose; $("#vExit").onclick = voiceClose; $("#vOrb").onclick = orbTap;
 window.addEventListener("resize", layout);
