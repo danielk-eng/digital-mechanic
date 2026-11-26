@@ -49,8 +49,9 @@ function md(text, sources) {
   h = h.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
   h = h.replace(/^#{1,4}\s*(.+)$/gm, "<b>$1</b>");
   h = h.replace(/^\s*[-•*]\s+/gm, "• ");
-  h = h.replace(/\[([^\]]{1,80})\]/g, (m, grp) => { const labs = grp.match(/\b(?:S|X)\d+\b/g); if (!labs) return m;
-    return labs.map(l => src[l] ? `<span class="chip ${src[l].extra ? "x" : ""}" data-doc="${src[l].doc_id}" data-page="${src[l].page}">${esc(src[l].document.slice(0, 24))}, ${t("page")} ${src[l].page}</span>` : "").join(""); });
+  h = h.replace(/\[([^\]]{1,80})\]/g, (m, grp, off, whole) => { const labs = grp.match(/\b(?:S|X)\d+\b/g); if (!labs) return m;
+    const ctx = whole.slice(Math.max(0, off - 240), off).replace(/<[^>]+>/g, "").split(/\n|[.!?]\s|•/).filter(x => x.trim().length > 6).pop() || "";
+    return labs.map(l => src[l] ? `<span class="chip ${src[l].extra ? "x" : ""}" data-doc="${src[l].doc_id}" data-page="${src[l].page}" data-q="${ctx.trim().slice(0, 200)}">${esc(src[l].document.slice(0, 24))}, ${t("page")} ${src[l].page}</span>` : "").join(""); });
   return h.replace(/\n/g, "<br>");
 }
 
@@ -159,20 +160,38 @@ async function repairAction(a) {
 }
 
 // ---------------------------------------------------------------- page viewer
+let LAST_Q = "";
+function hl(txt, q) {  // highlight the cited words in the section text
+  const words = [...new Set((q || "").toLowerCase().match(/[\p{L}\d]{5,}/gu) || [])].slice(0, 12);
+  if (!words.length) return txt;
+  const re = new RegExp(`(${words.map(w => w.slice(0, Math.max(5, w.length - 2)).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})[\\p{L}]*`, "giu");
+  return txt.replace(re, m => `<mark>${m}</mark>`);
+}
 document.addEventListener("click", async e => {
   const ch = e.target.closest(".chip[data-doc]");
   if (!ch) return;
-  const doc = ch.dataset.doc, page = ch.dataset.page, q = ch.dataset.q || "";
+  const doc = ch.dataset.doc, page = +ch.dataset.page, q = ch.dataset.q || "";
   $("#modal").classList.remove("hidden"); $("#mBody").innerHTML = "…";
   try {
-    const p = await api(`/api/page/${encodeURIComponent(doc)}/${page}`);
-    $("#mTitle").textContent = `${p.full_title} — ${t("page")} ${p.page}`;
-    $("#mPdf").href = p.extra ? "#" : `/manuals/${encodeURIComponent(doc)}.pdf#page=${page}`;
-    $("#mPdf").classList.toggle("hidden", !!p.extra);
-    let txt = esc(p.text);
-    if (q.length > 8) { const qq = esc(q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"); try { txt = txt.replace(new RegExp(qq, "i"), m => `<mark>${m}</mark>`); } catch (_) {} }
-    $("#mBody").innerHTML = (p.extra ? `<div class="muted">* Дополнительный источник (не база Заказчика)</div>` : "") +
-      (p.has_image ? `<img loading="lazy" src="/page/${encodeURIComponent(doc)}/${page}.png" alt="page">` : "") + `<pre>${txt}</pre>`;
+    const s = await api(`/api/section/${encodeURIComponent(doc)}/${page}?q=${encodeURIComponent(q || LAST_Q)}`);
+    $("#mTitle").textContent = `${s.full_title}`;
+    $("#mPdf").href = s.pdf ? `/manuals/${encodeURIComponent(doc)}.pdf#page=${page}` : "#";
+    $("#mPdf").classList.toggle("hidden", !s.pdf);
+    const link = n => s.pdf ? `<a class="chip" target="_blank" href="/manuals/${encodeURIComponent(doc)}.pdf#page=${n}">${t("page")} ${n}</a>`
+      : `<span class="chip pg" data-img="${n}">${t("page")} ${n}</span>`;
+    const pages = s.pages.map(p => p.page);
+    $("#mBody").innerHTML = (s.extra ? `<div class="muted">* ${t("extra_src")}</div>` : "") +
+      `<div class="extract" id="mExtract"><span class="muted">⏳ ${t("extract")}…</span></div>` +
+      `<div class="sechead"><b>${esc(s.label || t("page") + " " + page)}</b><div class="muted">${t("pages")}: ${pages.map(link).join(" ")}</div></div>` +
+      `<details class="sec"><summary>${t("full_section")} (${t("page")} ${esc(s.span)})</summary>` +
+      s.pages.map(p => `<div class="muted">— ${t("page")} ${p.page} —</div><pre>${hl(esc(p.text), q)}</pre>`).join("") + `</details>` +
+      (s.has_image ? `<details class="sec" id="mImgBox"><summary>${t("page_image")} ${page}</summary><img id="mImg" loading="lazy" src="/page/${encodeURIComponent(doc)}/${page}.png" alt="page"></details>` : "");
+    $("#mBody").querySelectorAll(".chip.pg").forEach(c => c.onclick = ev => { ev.stopPropagation(); const n = c.dataset.img;
+      if ($("#mImg")) { $("#mImg").src = `/page/${encodeURIComponent(doc)}/${n}.png`; $("#mImgBox").open = true; $("#mImgBox summary").textContent = `${t("page_image")} ${n}`; } });
+    api("/api/extract", {json: {doc_id: doc, page, q, question: LAST_Q}}).then(x => {
+      const box = $("#mExtract"); if (!box) return;
+      box.innerHTML = x.ok ? `<b>${t("extract")}:</b> ${md(x.text)}` : `<span class="muted">${t("extract_na")}</span>`;
+    }).catch(() => { const box = $("#mExtract"); if (box) box.innerHTML = `<span class="muted">${t("extract_na")}</span>`; });
   } catch (err) { $("#mBody").textContent = err.message; }
 });
 $("#mClose").onclick = () => $("#modal").classList.add("hidden");
@@ -247,6 +266,7 @@ async function ask(text, event = null) {
 function send(text) {
   stopSpeak();
   text = (text ?? $("#txt").value).trim();
+  if (text) LAST_Q = text;
   if (!text) return;
   if (!VID) return alert(t("choose_vehicle"));
   $("#txt").value = "";

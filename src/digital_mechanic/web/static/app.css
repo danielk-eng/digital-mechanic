@@ -66,3 +66,8 @@ tr.click{cursor:pointer}tr.click:hover{background:#1c262e}
 html[data-fs=l] .bar .mic,html[data-fs=xl] .bar .mic{width:2.6em;height:2.6em;min-width:2.6em;padding:0;font-size:1em}
 html[data-fs=xl] .bar textarea{min-width:40%}html[data-fs=xl] .bar button:not(.mic){padding:.5em .6em}
 html[data-fs=xl] .bar label.chip{padding:.4em .5em!important}
+.modal .extract{background:#eef6ff;border-left:4px solid #2b6cb0;padding:.6em .8em;margin:.4em 0 .6em;border-radius:6px}
+.modal .sechead{margin:.4em 0}
+.modal details.sec{margin:.5em 0;border:1px solid #ddd;border-radius:6px;padding:.3em .6em}
+.modal details.sec summary{cursor:pointer;font-weight:600}
+.modal mark{background:#ffe58a}

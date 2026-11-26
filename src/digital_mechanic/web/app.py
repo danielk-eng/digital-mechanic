@@ -393,6 +393,33 @@ def page_json(doc_id: str, page: int, uid: str | None = Cookie(None)) -> dict:
             "has_image": bool((not extra and (Path(S.manuals_dir) / meta.get("filename", "_")).exists() and shutil.which("pdftoppm")) or (extra and p.image))}
 
 
+@app.get("/api/section/{doc_id}/{page}")
+def section_json(doc_id: str, page: int, q: str = "", uid: str | None = Cookie(None)) -> dict:
+    """Full text of the section/procedure containing the cited line, with its page span."""
+    user_of(uid)
+    p, extra = _page(doc_id, page)
+    sec = AGENT.sections.find(doc_id, page, q)
+    meta = AGENT.docs.get(doc_id, {})
+    pdf = not extra and (Path(S.manuals_dir) / meta.get("filename", "_")).exists()
+    imgs = bool((pdf and shutil.which("pdftoppm")) or (extra and p.image and (Path(S.extra_images_dir) / p.image).exists()))
+    return {"document": p.document, "full_title": meta.get("full_title", p.document), "extra": extra, "pdf": pdf, "has_image": imgs,
+            **(sec.as_dict() if sec else {"pages": [{"page": page, "text": p.text}], "start_page": page, "end_page": page, "span": str(page), "title": "", "label": ""})}
+
+
+class ExtractIn(BaseModel):
+    doc_id: str
+    page: int
+    q: str = ""
+    question: str = ""
+
+
+@app.post("/api/extract")
+def extract(body: ExtractIn, uid: str | None = Cookie(None)) -> dict:
+    u = user_of(uid)
+    _page(body.doc_id, body.page)
+    return AGENT.section_extract(body.doc_id, body.page, body.q, pii.mask(body.question)[:300], LANGS[lang_or_default(u.get("lang"))]["llm"])
+
+
 @app.get("/page/{doc_id}/{page}.png")
 def page_png(doc_id: str, page: int, uid: str | None = Cookie(None)):
     user_of(uid)

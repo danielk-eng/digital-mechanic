@@ -109,6 +109,44 @@ class Agent:
         self.convs: dict[str, Conv] = {}
         self.progress: dict[str, list[str]] = {}
         self._lock = threading.Lock()
+        self._sections = None
+        self._extracts: dict[tuple, dict] = {}
+
+    @property
+    def sections(self):
+        if self._sections is None:
+            from ..retrieval.sections import SectionIndex
+
+            self._sections = SectionIndex(list(self.index.pages) + list(self.extra.pages if self.extra else []))
+        return self._sections
+
+    def section_extract(self, doc_id: str, page: int, hint: str, question: str = "", lang: str = "русском") -> dict:
+        """Short LLM-written extract of the section that contains the cited line; numbers not present in the
+        section text are dropped (no page = no number). Cached per (doc, page, hint, question)."""
+        key = (doc_id, page, hint[:200], question[:200], lang)
+        if key in self._extracts:
+            return self._extracts[key]
+        sec = self.sections.find(doc_id, page, hint)
+        if not sec:
+            return {"text": "", "ok": False}
+        body = sec.text[:9000]
+        try:
+            msg, _ = self.llm.chat("section_extract", [
+                {"role": "system", "content": "Ты помогаешь механику. Перескажи раздел руководства коротко (2–4 предложения или 3–5 пунктов) "
+                 f"на {lang} языке, только по тексту раздела, ничего не добавляя. Если задан вопрос — выжимка отвечает на него. "
+                 "Числа, моменты, зазоры, давления переписывай ТОЛЬКО если они есть в тексте, без изменений. Без вступлений."},
+                {"role": "user", "content": f"Вопрос механика: {question or '-'}\nЦитата: {hint[:300]}\nРаздел «{sec.label}» (стр. {sec.span}):\n{body}"}],
+                max_tokens=500)
+            text = (msg.content or "").strip()
+        except Exception as e:  # LLM down -> UI still shows the full section
+            return {"text": "", "ok": False, "error": type(e).__name__}
+        bad = unverified_numbers(text, [body], allowed=set(), free_max=5) if text else []
+        if bad:  # drop sentences carrying numbers not found in the section
+            parts = re.split(r"(?<=[.!?])\s+|\n", text)
+            text = " ".join(x for x in parts if not any(b in x or b.replace(".", ",") in x for b in bad)).strip()
+        out = {"text": text, "ok": bool(text), "dropped_numbers": bad}
+        self._extracts[key] = out
+        return out
 
     # ------------------------------------------------------------------ state
     def conv(self, uid: str, vehicle_id: str | None) -> Conv:
@@ -294,7 +332,19 @@ class Agent:
         for h in hits:
             p = h.page
             lab = self._add_frag(c, "S", doc_id=p.doc_id, document=p.document, page=p.page, text=p.text, extra=False)
-            out.append({"label": lab, "document": p.document, "pdf_page": p.page, "text": snippet(p.text, query, 1500)})
+            sec = self.sections.find(p.doc_id, p.page, query)
+            f = {"label": lab, "document": p.document, "pdf_page": p.page, "text": snippet(p.text, query, 1500)}
+            if sec and sec.title:
+                f["section"], f["section_pages"] = sec.label[:120], sec.span
+            out.append(f)
+            # the procedure continues on the next page: give it as its own citable fragment
+            nxt = next((x for x in (sec.pages if sec else []) if x["page"] == p.page + 1), None)
+            if nxt and len(out) < k + 2:
+                np_ = self.index.get_page(p.doc_id, p.page + 1)
+                if np_ and not any(o["pdf_page"] == np_.page and o["document"] == np_.document for o in out):
+                    lab2 = self._add_frag(c, "S", doc_id=np_.doc_id, document=np_.document, page=np_.page, text=np_.text, extra=False)
+                    out.append({"label": lab2, "document": np_.document, "pdf_page": np_.page, "text": snippet(nxt["text"], query, 900),
+                                "section": f.get("section", ""), "note": "продолжение того же раздела"})
         return {"engine": c.vehicle.engine_model, "fragments": out} if out else {"engine": c.vehicle.engine_model, "fragments": [], "note": "ничего не найдено"}
 
     def tool_search_extra(self, c: Conv, query: str) -> dict:
