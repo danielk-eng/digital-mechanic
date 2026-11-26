@@ -1,7 +1,7 @@
 [project]
 name = "digital-mechanic"
 version = "0.0.0"
-description = "Pre-sprint contract skeleton for IIKuznitsa Digital Mechanic. Not the contest product."
+description = "Digital Mechanic: AI agent for ICE diagnostics (IIkuznitsa 2026, NeuroDVS)"
 requires-python = ">=3.10"
 readme = "README.md"
 

@@ -15,3 +15,11 @@ def test_diagnose_contract(official_apps):
     ml, _ = official_apps
     c = adapters.check_from_official(ml.post("/diagnose", json={"vehicle_id": "M333YK47", "session_id": "S-0005"}).json())
     assert c.status.value == "anomaly" and c.anomaly_type == "F08"
+
+
+def test_embedded_mocks_bootstrap(tmp_path, monkeypatch):
+    from digital_mechanic.bootstrap import _embedded_mocks
+    from digital_mechanic.config import Settings
+    ml, toir = _embedded_mocks(Settings(embed_mocks=True))
+    assert ml.health() and toir.health()
+    assert ml.diagnose("M333YK47", "S-0005").status == "anomaly"

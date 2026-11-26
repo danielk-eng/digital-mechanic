@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     ml_service_url: str = Field("http://127.0.0.1:8001", validation_alias=AliasChoices("ML_SERVICE_URL", "MOCK_ML_URL"))
     toir_service_url: str = Field("http://127.0.0.1:8002", validation_alias=AliasChoices("TOIR_SERVICE_URL", "MOCK_TOIR_URL"))
     http_timeout_s: float = 20.0
+    # Serverless backup (Vercel): run the official ML/TOiR mocks in-process instead of separate services
+    embed_mocks: bool = False
+    mocks_dir: str = "vendor/neurodvs_mock"
 
     # Data
     vehicles_path: str = "data/official/vehicles.json"

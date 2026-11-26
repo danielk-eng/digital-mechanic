@@ -1,0 +1,11 @@
+.venv
+.git
+var
+runs
+tests
+docs
+data/manuals
+data/extra/images
+**/__pycache__
+.env
+pyproject.toml

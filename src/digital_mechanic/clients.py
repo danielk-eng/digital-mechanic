@@ -46,12 +46,13 @@ class Fleet:
 
 
 class MlClient:
-    def __init__(self, base_url: str, timeout: float = 20.0):
-        self.base, self.timeout = base_url.rstrip("/"), timeout
+    def __init__(self, base_url: str, timeout: float = 20.0, http=None):
+        # http: anything with httpx-like .get/.post (e.g. an in-process TestClient for embedded mocks)
+        self.base, self.timeout, self.http = base_url.rstrip("/"), timeout, http or httpx
 
     def diagnose(self, vehicle_id: str, session_id: str) -> CheckResult:
         try:
-            r = httpx.post(f"{self.base}/diagnose", json={"vehicle_id": vehicle_id, "session_id": session_id}, timeout=self.timeout)
+            r = self.http.post(f"{self.base}/diagnose", json={"vehicle_id": vehicle_id, "session_id": session_id}, timeout=self.timeout)
         except httpx.HTTPError as e:
             raise ServiceError("ml", None, type(e).__name__) from None
         if r.status_code != 200:
@@ -60,18 +61,19 @@ class MlClient:
 
     def health(self) -> bool:
         try:
-            return httpx.get(f"{self.base}/health", timeout=3).status_code == 200
+            return self.http.get(f"{self.base}/health", timeout=3).status_code == 200
         except httpx.HTTPError:
             return False
 
 
 class ToirClient:
-    def __init__(self, base_url: str, timeout: float = 20.0):
-        self.base, self.timeout = base_url.rstrip("/"), timeout
+    def __init__(self, base_url: str, timeout: float = 20.0, http=None):
+        # http: anything with httpx-like .get/.post (e.g. an in-process TestClient for embedded mocks)
+        self.base, self.timeout, self.http = base_url.rstrip("/"), timeout, http or httpx
 
     def create_ticket(self, t: TicketRequest) -> TicketAck:
         try:
-            r = httpx.post(f"{self.base}/tickets", json=adapters.ticket_to_official(t), timeout=self.timeout)
+            r = self.http.post(f"{self.base}/tickets", json=adapters.ticket_to_official(t), timeout=self.timeout)
         except httpx.HTTPError as e:
             raise ServiceError("toir", None, type(e).__name__) from None
         if r.status_code != 201:
@@ -81,6 +83,6 @@ class ToirClient:
 
     def health(self) -> bool:
         try:
-            return httpx.get(f"{self.base}/health", timeout=3).status_code == 200
+            return self.http.get(f"{self.base}/health", timeout=3).status_code == 200
         except httpx.HTTPError:
             return False
