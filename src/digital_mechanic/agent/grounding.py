@@ -58,11 +58,12 @@ class Extraction:
 EXTRACT_SYSTEM = """Ты помощник механика. Работаешь ТОЛЬКО с переданными фрагментами руководства по двигателю.
 Правила: ничего не выдумывай; каждое действие и каждая запчасть должны подтверждаться ДОСЛОВНОЙ цитатой (12-200 символов подряд, как в тексте фрагмента) и меткой фрагмента S#.
 Не используй знания вне фрагментов. Артикулов не придумывай: если артикула нет в тексте, пиши название как в тексте.
-coverage: "specific" — во фрагментах есть процедура именно для найденной неисправности; "general" — частной нет, но есть общая процедура осмотра/проверки узла; "none" — нет опоры.
+У каждой работы укажи scope: "specific" — действие из процедуры именно для найденной неисправности (описана по названию/признакам); "general" — действие из ОБЩЕЙ процедуры осмотра/проверки/дефектовки узла или агрегата, когда частной процедуры для этой неисправности нет. Работы из процедур других неисправностей (другой узел, другой симптом) не включай вообще. Работа — это практическое действие механика, а не пояснение.
+Если частной процедуры нет, а общая есть — включай только общие (scope=general). Запчасти включай только если они названы в тексте для этой же процедуры.
 Ответ строго JSON:
-{"coverage":"specific|general|none","risk":"1-2 фразы о последствиях, только из фрагментов, иначе пусто",
+{"risk":"1-2 фразы о последствиях, только из фрагментов, иначе пусто",
  "risk_source":{"source":"S#","quote":"..."},
- "works":[{"title":"краткое действие","source":"S#","quote":"дословно"}],
+ "works":[{"title":"краткое действие","scope":"specific|general","source":"S#","quote":"дословно"}],
  "parts":[{"title":"запчасть","source":"S#","quote":"дословно"}]}"""
 
 
@@ -102,8 +103,22 @@ def verify_extraction(raw: dict, frags: list[Fragment]) -> Extraction:
     f = by.get(str(rs.get("source")))
     if raw.get("risk") and f and quote_in_page(str(rs.get("quote", "")), f.page.text):
         ex.risk = str(raw["risk"]).strip()
-    cov = raw.get("coverage")
-    ex.coverage = cov if cov in ("specific", "general") and ex.works else "none"
+    # coverage is derived in code from verified items, not trusted from the model
+    scopes = {str(w.get("scope")) for w in (raw.get("works") or []) if any(x.title == w.get("title") for x in ex.works)}
+    if "specific" in scopes:
+        keep = "specific"
+    elif "general" in scopes:
+        keep = "general"
+    else:
+        keep = None
+    if keep is None:
+        ex.works, ex.parts, ex.coverage = [], [], "none"
+        return ex
+    ok_titles = {w["title"] for w in raw["works"] if w.get("scope") == keep}
+    ex.works = [w for w in ex.works if w.title in ok_titles]
+    pages = {(w.source.document, w.source.page) for w in ex.works}
+    ex.parts = [p for p in ex.parts if p.source and (p.source.document, p.source.page) in pages]
+    ex.coverage = keep
     return ex
 
 
@@ -120,7 +135,10 @@ def extract_fallback(fault_title: str, frags: list[Fragment]) -> Extraction:
         if "работы" not in text.lower():
             continue
         section = None
-        title_hit = key and key[:12] in norm(text)
+        from ..retrieval.bm25 import tokens
+
+        tt, pt = set(tokens(fault_title)), set(tokens(text))
+        title_hit = bool(tt) and len(tt & pt) / len(tt) >= 0.6
         lines, cur = text.splitlines(), None
         items: dict[str, list[str]] = {"works": [], "parts": []}
         for ln in lines:
