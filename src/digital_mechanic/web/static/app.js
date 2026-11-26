@@ -79,12 +79,26 @@ function renderTurn(turn, expanded = false) {
   (turn.cards || []).forEach(renderCard);
   if (turn.text) {
     const canExpand = !expanded && (turn.sources || []).length && (ME.detail || "brief") === "brief";
+    const canAlt = VID && (turn.sources || []).length;
     const d = addMsg("bot", factsHtml(turn.facts) + md(turn.text, turn.sources) + sourcesHtml(turn.sources) +
-      (canExpand ? `<button class="expand">${t("expand")} ▾</button>` : ""));
+      `<div class="row acts">` + (canExpand ? `<button class="expand">${t("expand")} ▾</button>` : "") +
+      (canAlt ? `<button class="expand alt">🔀 ${t("alternatives")}</button><button class="expand hyp">🧪 ${t("hypothesis")}</button>` : "") + `</div>`);
     if (canExpand) d.querySelector(".expand").onclick = ev => { ev.stopPropagation(); ev.target.remove(); expandAnswer(turn.text); };
+    if (canAlt) {
+      d.querySelector(".alt").onclick = ev => { ev.stopPropagation(); ev.target.remove(); eventTurn("alternatives", "", "🔀 " + t("alternatives")); };
+      d.querySelector(".hyp").onclick = ev => { ev.stopPropagation(); HYP = true; $("#txt").placeholder = t("hypothesis_ph"); $("#txt").focus(); };
+    }
     speak(turn.text);
   }
   loadChips();
+}
+let HYP = false;
+async function eventTurn(event, text, shown) {
+  stopSpeak();
+  if (shown) addMsg("user", esc(shown));
+  const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
+  try { const r = await api("/api/chat", {json: {vehicle_id: VID || null, text, event}}); th.remove(); renderTurn(r); }
+  catch (e) { th.innerHTML = `<div class="b" style="color:var(--stop)">${esc(e.message)}</div>`; }
 }
 async function expandAnswer(text) {
   stopSpeak();
@@ -274,6 +288,7 @@ function send(text) {
   stopSpeak();
   text = (text ?? $("#txt").value).trim();
   if (text) LAST_Q = text;
+  if (HYP && text) { HYP = false; $("#txt").value = ""; $("#txt").placeholder = t("ask_placeholder"); return eventTurn("hypothesis", text, "🧪 " + text); }
   if (!text) return;
   if (!VID) return alert(t("choose_vehicle"));
   $("#txt").value = "";

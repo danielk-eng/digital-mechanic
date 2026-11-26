@@ -174,3 +174,12 @@ def test_grounding_filter_drops_topics_missing_in_manual(index):
     from digital_mechanic.agent.suggest import grounded_page
     assert grounded_page(index, "ЯМЗ-236М2", "угол опережения впрыскивания топлива установка")
     assert grounded_page(index, "ЯМЗ-236М2", "свечи зажигания зазор между электродами") is None  # diesel: no spark plugs
+
+
+def test_alternatives_and_hypothesis_events(make_agent):
+    a = make_agent([msg("Других причин в руководстве нет."), msg("В руководстве этого нет.")])
+    c = a.conv("u1", "M333YK47")
+    a.handle(c, {"lang": "ru"}, "", event="alternatives")
+    assert "Другие варианты" in str(a.llm.calls[-1]["messages"])
+    a.handle(c, {"lang": "ru"}, "прокладка ГБЦ", event="hypothesis")
+    assert "Проверь гипотезу механика: «прокладка ГБЦ»" in str(a.llm.calls[-1]["messages"])

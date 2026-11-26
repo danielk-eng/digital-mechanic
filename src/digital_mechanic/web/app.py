@@ -243,7 +243,8 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
         raise HTTPException(400, "choose a vehicle")
     turn = AGENT.handle(c, u, body.text[:4000], event=body.event)
     # "expand" re-renders the previous answer: do not store it again as a user message
-    _record(u, c, "chat" if not body.event else body.event, "" if body.event == "expand" else body.text, turn, t0)
+    shown = {"expand": "", "alternatives": "🔀 Другие варианты"}.get(body.event or "", None)
+    _record(u, c, "chat" if not body.event else body.event, body.text if shown is None else shown, turn, t0)
     return {**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000)}
 
 

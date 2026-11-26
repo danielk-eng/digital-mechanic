@@ -81,7 +81,10 @@
   "privacy_note": "🔒 Данные сессии хранятся на сервере заказчика; в языковую модель уходит только замаскированный текст запроса.",
   "scope_only": "Ищу только в руководствах двигателя",
   "books": "книг(и)",
-  "key_facts": "Важно из руководства"
+  "key_facts": "Важно из руководства",
+  "alternatives": "Другие варианты",
+  "hypothesis": "Проверить гипотезу",
+  "hypothesis_ph": "Ваша гипотеза: например «прокладка ГБЦ»"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -165,7 +168,10 @@
   "privacy_note": "🔒 Sessiya maʼlumotlari buyurtmachi serverida saqlanadi; til modeliga faqat niqoblangan soʻrov matni yuboriladi.",
   "scope_only": "Faqat ushbu dvigatel qoʻllanmalarida qidiraman",
   "books": "ta kitob",
-  "key_facts": "Qoʻllanmadan muhim"
+  "key_facts": "Qoʻllanmadan muhim",
+  "alternatives": "Boshqa variantlar",
+  "hypothesis": "Gipotezani tekshirish",
+  "hypothesis_ph": "Gipotezangiz: masalan «blok kallagi qistirmasi»"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -249,7 +255,10 @@
   "privacy_note": "🔒 Маълумоти сессия дар сервери фармоишгар нигоҳ дошта мешавад; ба модели забонӣ танҳо матни ниқобпӯшидаи дархост меравад.",
   "scope_only": "Танҳо дар дастурҳои ҳамин муҳаррик ҷустуҷӯ мекунам",
   "books": "китоб",
-  "key_facts": "Муҳим аз дастур"
+  "key_facts": "Муҳим аз дастур",
+  "alternatives": "Вариантҳои дигар",
+  "hypothesis": "Санҷиши фарзия",
+  "hypothesis_ph": "Фарзияи шумо: масалан «прокладкаи сари блок»"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -333,7 +342,10 @@
   "privacy_note": "🔒 Сессия деректері тапсырыс берушінің серверінде сақталады; тілдік модельге тек бүркемеленген сұрау мәтіні жіберіледі.",
   "scope_only": "Тек осы қозғалтқыштың нұсқаулықтарынан іздеймін",
   "books": "кітап",
-  "key_facts": "Нұсқаулықтан маңызды"
+  "key_facts": "Нұсқаулықтан маңызды",
+  "alternatives": "Басқа нұсқалар",
+  "hypothesis": "Болжамды тексеру",
+  "hypothesis_ph": "Болжамыңыз: мысалы «блок қақпағының төсемі»"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -417,7 +429,10 @@
   "privacy_note": "🔒 सत्र का डेटा ग्राहक के सर्वर पर रहता है; भाषा मॉडल को केवल छिपाया गया (मास्क) अनुरोध पाठ भेजा जाता है।",
   "scope_only": "केवल इसी इंजन की पुस्तिकाओं में खोज",
   "books": "पुस्तकें",
-  "key_facts": "पुस्तिका से महत्वपूर्ण"
+  "key_facts": "पुस्तिका से महत्वपूर्ण",
+  "alternatives": "अन्य विकल्प",
+  "hypothesis": "अनुमान जाँचें",
+  "hypothesis_ph": "आपका अनुमान: जैसे «हेड गैस्केट»"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -501,6 +516,9 @@
   "privacy_note": "🔒 Dữ liệu phiên được lưu trên máy chủ của khách hàng; mô hình ngôn ngữ chỉ nhận văn bản yêu cầu đã được che thông tin cá nhân.",
   "scope_only": "Chỉ tìm trong sổ tay của động cơ",
   "books": "cuốn",
-  "key_facts": "Quan trọng từ sổ tay"
+  "key_facts": "Quan trọng từ sổ tay",
+  "alternatives": "Phương án khác",
+  "hypothesis": "Kiểm tra giả thuyết",
+  "hypothesis_ph": "Giả thuyết của bạn: ví dụ «gioăng nắp máy»"
  }
 }

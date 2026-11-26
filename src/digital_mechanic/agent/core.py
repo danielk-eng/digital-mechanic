@@ -96,6 +96,13 @@ class Turn:
         return {"text": self.text, "cards": self.cards, "sources": self.sources, "tools": self.tools, "facts": self.facts}
 
 
+ALT_PROMPT = ("Другие варианты: предложи до 3 других возможных причин, которые мы ещё НЕ обсуждали, и как проверить каждую — "
+              "только по руководству этого двигателя (поищи в разделе неисправностей и методов их устранения), с метками источников. "
+              "Если других причин в руководстве нет — так и скажи.")
+HYPOTHESIS_PROMPT = ("Проверь гипотезу механика: «{h}». Найди в руководстве этого двигателя, что её подтверждает или опровергает и как её проверить "
+                     "(шаги, нормативы — с метками). Если в руководстве этого нет — честно скажи.")
+
+
 def _same(a: str, b: str) -> bool:
     import difflib
 
@@ -492,6 +499,9 @@ class Agent:
         masked = pii.mask(raw) if self.pii_masking else raw
         if event == "expand":
             return self._expand(c, user, raw, turn)
+        if event in ("alternatives", "hypothesis") and c.vehicle:
+            raw = masked = (ALT_PROMPT if event == "alternatives" else HYPOTHESIS_PROMPT.format(h=masked[:300]))
+            event = None
         # deterministic fast paths (voice-friendly, no LLM)
         if c.vehicle and not event:
             if c.draft and CONFIRM_RE.match(raw):
