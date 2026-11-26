@@ -1,75 +1,94 @@
-"""One record per PDF page, 1-based page numbers, engine-bound document id."""
+"""One record per PDF page, 1-based PDF page numbers, engine-bound document id.
+
+Text is extracted once (pdftotext if installed, else pypdf) and cached in a gzip JSONL
+index committed to the repo, so the running app does not need the PDFs to answer.
+"""
 
 from __future__ import annotations
 
+import gzip
 import json
+import shutil
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import yaml
-from pypdf import PdfReader
+
+MIN_TEXT_CHARS = 40  # below this a page is treated as an image page
 
 
 @dataclass(frozen=True)
 class ManualPage:
-    document: str  # official title, goes into ticket references
+    document: str  # official designation from TZ section 3 -> ticket references[].manual
     doc_id: str
     engine_types: tuple[str, ...]
     page: int  # PDF page number, starts at 1
     text: str
-    needs_ocr: bool
-    path: Path
+    needs_ocr: bool = False
+    filename: str = ""
+    kind: str = ""
 
     @property
     def key(self) -> str:
         return f"{self.doc_id}#{self.page}"
 
 
-MIN_TEXT_CHARS = 40  # below this a page is treated as an image page
-
-
 def load_engine_docs(path: str | Path) -> dict:
     return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
 
 
-def _ocr_page(pdf_path: Path, page: int) -> str:  # pragma: no cover - optional
-    try:
-        import subprocess, tempfile
-
-        with tempfile.TemporaryDirectory() as d:
-            subprocess.run(["pdftoppm", "-r", "200", "-f", str(page), "-l", str(page), "-png", str(pdf_path), f"{d}/p"], check=True)
-            img = next(Path(d).glob("p*.png"))
-            out = subprocess.run(["tesseract", str(img), "-", "-l", "rus+eng"], capture_output=True, text=True, check=True)
-            return out.stdout
-    except Exception:
-        return ""
+def _extract_pdftotext(pdf: Path) -> list[str]:
+    out = subprocess.run(["pdftotext", "-enc", "UTF-8", str(pdf), "-"], capture_output=True, check=True).stdout.decode("utf-8", "replace")
+    pages = out.split("\f")
+    if pages and not pages[-1].strip():
+        pages = pages[:-1]
+    return pages
 
 
-def ingest_manuals(manuals_dir: str | Path, engine_docs_path: str | Path, cache_dir: str | Path | None = None, ocr: bool = False) -> list[ManualPage]:
-    """Extract every page of every configured manual (text layer, optional OCR)."""
+def _extract_pypdf(pdf: Path) -> list[str]:
+    from pypdf import PdfReader
+
+    return [(p.extract_text() or "") for p in PdfReader(str(pdf)).pages]
+
+
+def extract_pdf(pdf: Path) -> list[str]:
+    if shutil.which("pdftotext"):
+        return _extract_pdftotext(pdf)
+    return _extract_pypdf(pdf)
+
+
+def build_index(manuals_dir: str | Path, engine_docs_path: str | Path, out_path: str | Path) -> int:
     cfg = load_engine_docs(engine_docs_path)
-    pages: list[ManualPage] = []
-    for doc_id, meta in cfg["documents"].items():
-        pdf = Path(manuals_dir) / meta["filename"]
-        if not pdf.exists():
-            continue
-        cache = None
-        if cache_dir:
-            Path(cache_dir).mkdir(parents=True, exist_ok=True)
-            cache = Path(cache_dir) / f"{doc_id}.{pdf.stat().st_size}.{int(pdf.stat().st_mtime)}.json"
-            if cache.exists():
-                for r in json.loads(cache.read_text(encoding="utf-8")):
-                    pages.append(ManualPage(**{**r, "engine_types": tuple(r["engine_types"]), "path": pdf}))
+    n = 0
+    with gzip.open(out_path, "wt", encoding="utf-8") as f:
+        for doc_id, meta in cfg["documents"].items():
+            pdf = Path(manuals_dir) / meta["filename"]
+            for i, text in enumerate(extract_pdf(pdf), start=1):
+                text = text.strip()
+                rec = ManualPage(meta["title"], doc_id, tuple(meta["engines"]), i, text, len(text) < MIN_TEXT_CHARS, meta["filename"], meta.get("kind", ""))
+                f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
+                n += 1
+    return n
+
+
+def load_pages(index_path: str | Path, engine_docs_path: str | Path, manuals_dir: str | Path | None = None) -> list[ManualPage]:
+    """Load the page index; rebuild it from PDFs if missing and the PDFs are present."""
+    p = Path(index_path)
+    if not p.exists():
+        if manuals_dir is None:
+            raise FileNotFoundError(index_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        build_index(manuals_dir, engine_docs_path, p)
+    cfg = load_engine_docs(engine_docs_path)["documents"]
+    pages = []
+    with gzip.open(p, "rt", encoding="utf-8") as f:
+        for line in f:
+            r = json.loads(line)
+            meta = cfg.get(r["doc_id"])
+            if not meta:
                 continue
-        reader = PdfReader(str(pdf))
-        doc_pages = []
-        for i, pg in enumerate(reader.pages, start=1):
-            text = (pg.extract_text() or "").strip()
-            needs_ocr = len(text) < MIN_TEXT_CHARS
-            if needs_ocr and ocr:
-                text = _ocr_page(pdf, i) or text
-            doc_pages.append(ManualPage(meta["title"], doc_id, tuple(meta["engines"]), i, text, needs_ocr, pdf))
-        pages.extend(doc_pages)
-        if cache:
-            cache.write_text(json.dumps([{**{k: v for k, v in asdict(p).items() if k != "path"}} for p in doc_pages], ensure_ascii=False), encoding="utf-8")
+            r["engine_types"] = tuple(meta["engines"])  # yaml is the source of truth
+            r["document"] = meta["title"]
+            pages.append(ManualPage(**r))
     return pages

@@ -1,4 +1,4 @@
-"""Runtime settings. Secrets come from environment variables only."""
+"""Runtime settings. Secrets come from environment variables only (never logged)."""
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -6,18 +6,58 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    ml_service_url: str = "http://127.0.0.1:8101"
-    toir_service_url: str = "http://127.0.0.1:8102"
-    vehicles_path: str = "data/mock/vehicles.json"
-    manuals_dir: str = "data/mock/manuals"
+    # External services (TZ F6): swap mocks for production by editing .env only
+    ml_service_url: str = "http://127.0.0.1:8001"
+    toir_service_url: str = "http://127.0.0.1:8002"
+    http_timeout_s: float = 20.0
+
+    # Data
+    vehicles_path: str = "data/official/vehicles.json"
+    fault_types_path: str = "data/official/fault_types.json"
+    manuals_dir: str = "data/manuals"
     engine_docs_path: str = "data/engine_docs.yaml"
-    cache_dir: str = ".cache"
-    trace_dir: str = "runs/traces"
+    index_path: str = "data/index/pages.jsonl.gz"
+    extra_index_path: str = "data/index/extra_pages.jsonl.gz"
+    extra_images_dir: str = "data/extra"
+    extra_kb_enabled: bool = True
+    db_path: str = "var/app.db"
+    uploads_dir: str = "var/uploads"
+    page_cache_dir: str = "var/page_png"
+    log_path: str = "var/app.log.jsonl"
+    audit_retention_days: int = 90
+
+    # LLM: any OpenAI-compatible endpoint
     llm_base_url: str = "https://api.tokenrouter.com/v1"
-    llm_api_key: str = ""  # never logged, never committed
+    llm_api_key: str = ""
+    llm_api_key_file: str = ""
     llm_model: str = "deepseek/deepseek-v4.1-flash-1017-free"
+    llm_vision_model: str = ""  # defaults to llm_model
     llm_timeout_s: float = 90.0
-    ocr_enabled: bool = False
+    llm_max_tool_rounds: int = 5
+
+    # Voice
+    deepgram_api_key: str = ""
+    deepgram_model: str = "nova-3"
+    whisper_model: str = "small"  # local fallback (faster-whisper), optional
+    silero_enabled: bool = False  # local TTS (torch), optional; browser TTS otherwise
+
+    # Tracing (optional)
+    comet_api_key: str = ""
+    opik_project: str = "digital-mechanic"
+
+    # 152-FZ
+    pii_masking: bool = True
+    require_consent: bool = True
+
+    def api_key(self) -> str:
+        if self.llm_api_key:
+            return self.llm_api_key
+        if self.llm_api_key_file:
+            try:
+                return open(self.llm_api_key_file, encoding="utf-8").read().strip()
+            except OSError:
+                return ""
+        return ""
 
 
 def get_settings() -> Settings:

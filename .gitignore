@@ -5,3 +5,6 @@ __pycache__/
 .cache/
 runs/
 *.key
+var/
+data/manuals/*.pdf
+data/extra/images/
