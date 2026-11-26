@@ -74,11 +74,35 @@ async function models() {
     try { await api("/api/eng/models", {json: {values}}); models(); health(); } catch (e) { alert(e.message); }
   };
 }
-async function ask() {
-  const txt = $("#etxt").value.trim(); if (!txt) return; $("#etxt").value = "";
+function speak(text) {
+  if (!window.speechSynthesis || !text) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text); u.lang = "ru-RU"; u.rate = 1.05;
+  const v = speechSynthesis.getVoices().find(x => x.lang.startsWith("ru")); if (v) u.voice = v;
+  speechSynthesis.speak(u);
+}
+// Voice, same as the chief's agent tab: record -> /api/stt (server STT with the data-law routing) -> ask(); replies are spoken
+let EVOICE = false, EREC = null;
+async function micToggle() {
+  const b = $("#emic");
+  if (EREC) { EREC.stop(); return; }
+  let stream; try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); } catch (_) { alert("Нет доступа к микрофону"); return; }
+  const chunks = [], rec = new MediaRecorder(stream); EREC = rec; EVOICE = true; b.classList.add("on");
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  rec.onstop = async () => {
+    stream.getTracks().forEach(x => x.stop()); EREC = null; b.classList.remove("on");
+    const fd = new FormData(); fd.append("audio", new Blob(chunks, {type: rec.mimeType || "audio/webm"}), "q.webm"); fd.append("lang", (ME && ME.lang) || "ru");
+    try { const r = await api("/api/stt", {method: "POST", body: fd}); if (r.text) ask(r.text); } catch (e) { alert(e.message); }
+  };
+  rec.start();
+  setTimeout(() => { if (EREC === rec) rec.stop(); }, window.__micMs || 6000);
+}
+async function ask(textIn) {
+  const txt = (typeof textIn === "string" ? textIn : $("#etxt").value).trim(); if (!txt) return; $("#etxt").value = "";
   const add = (h, me) => { const d = document.createElement("div"); d.className = "msg " + (me ? "user" : "bot"); d.innerHTML = `<div class="b">${h}</div>`; $("#echat").appendChild(d); return d; };
   add(esc(txt), true); const th = add(`<div class="skeleton"><div class="line"></div></div>`); th.dataset.busy = 1;
-  try { const r = await api("/api/chat", {json: {text: txt}}); th.querySelector(".b").innerHTML = esc(r.text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>"); }
+  try { const r = await api("/api/chat", {json: {text: txt}}); th.querySelector(".b").innerHTML = esc(r.text).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
+    if (EVOICE) speak(r.speak || r.text.replace(/\*\*|\[[SX]\d+\]/g, "")); }
   catch (e) { th.querySelector(".b").textContent = e.message; }
   delete th.dataset.busy;
 }
@@ -88,7 +112,7 @@ function tab(name) {
   ({logs, mcp, models}[name] || (() => {}))();
 }
 $$("#tabs button").forEach(b => b.onclick = () => tab(b.dataset.tab));
-$("#esend").onclick = ask; $("#etxt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } };
+$("#esend").onclick = () => ask(); $("#emic").onclick = micToggle; $("#etxt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } };
 $("#logout").onclick = async () => { await fetch("/api/logout", {method: "POST"}); location.href = "/"; };
 (async () => {
   document.querySelectorAll("[data-icon]").forEach(el => el.innerHTML = icon(el.dataset.icon));

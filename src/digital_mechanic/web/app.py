@@ -463,7 +463,35 @@ def vehicle(vid: str, uid: str | None = Cookie(None)) -> dict:
 @app.get("/api/fleet")
 def fleet(uid: str | None = Cookie(None)) -> dict:
     user_of(uid, manager=True)
-    return AGENT.fleet_overview()
+    ov = AGENT.fleet_overview()
+    mech = _mechanics_by_vehicle()
+    for r in ov["vehicles"]:  # for the chief's filters: brand, assigned mechanics
+        v = AGENT.fleet.get(r["vehicle_id"])
+        r["make"] = v.make if v else None
+        r["mechanics"] = mech.get(r["vehicle_id"], [])
+    return ov
+
+
+def _mechanics_by_vehicle() -> dict[str, list[str]]:
+    """Mechanics assigned to each truck: demo accounts and accounts the chief created (their truck list) + open assignments."""
+    out: dict[str, list[str]] = {}
+    add = lambda vid, name: name and name not in out.setdefault(vid, []) and out[vid].append(name)  # noqa: E731
+    for a in DEMO.get("accounts", []):
+        if a.get("role") == "mechanic":
+            for vid in a.get("vehicles") or []:
+                add(vid, a.get("name"))
+    for u in STORE.q("SELECT id, name, vehicles FROM users WHERE role='mechanic' AND vehicles IS NOT NULL AND COALESCE(active, 1)=1"):
+        try:
+            for vid in json.loads(u["vehicles"] or "[]"):
+                add(vid, u["name"])
+        except (ValueError, TypeError):
+            pass
+    names = {u["id"]: u["name"] for u in STORE.q("SELECT id, name FROM users")} | {a["uid"]: a["name"] for a in DEMO.get("accounts", [])}
+    for h in STORE.handoffs(None):
+        p = h.get("payload") or {}
+        if h.get("kind") == "assign" and h.get("status") != "closed" and h.get("vehicle_id"):
+            add(h["vehicle_id"], names.get(p.get("assignee_uid")))
+    return out
 
 
 @app.get("/api/fleet/{vid}")

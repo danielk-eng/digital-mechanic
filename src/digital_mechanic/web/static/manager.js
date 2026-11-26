@@ -2,7 +2,7 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
-let I18N = {}, ME = null, FLEET = null, FILTER = null, STATUS = null;
+let I18N = {}, ME = null, FLEET = null, CUR = "fleet";
 const t = k => (I18N[(ME && ME.lang) || "ru"] || I18N.ru)[k] || I18N.ru[k] || k;
 async function api(p, o = {}) {
   if (o.json) { o.method = "POST"; o.headers = {"Content-Type": "application/json"}; o.body = JSON.stringify(o.json); }
@@ -14,6 +14,77 @@ const fmt = ts => new Date(ts * 1000).toLocaleString("ru-RU", {day: "2-digit", m
 const vSt = v => v.in_repair ? "repair" : v.status;
 const pill = v => `<span class="pill ${vSt(v)}">${esc(v.in_repair ? t("in_repair") : t(v.status))}</span>`;
 const URG = {high: "quarantine", medium: "attention", low: "ready"};
+
+// ---- Filters for the chief: one set for every vehicle list (fleet, tickets, repairs, handoffs), kept in the URL (?status=…&make=…)
+const FKEYS = ["q", "status", "make", "model", "mech", "urg", "code", "from", "to", "ops"];
+const OPF = {op_in_repair: v => v.ops === "in_repair", op_awaiting: v => v.awaiting, op_on_line: v => v.ops === "on_line", op_idle: v => v.ops === "idle"};
+let F = {};
+function readF() { const p = new URLSearchParams(location.search); F = {}; FKEYS.forEach(k => { const v = p.get(k); if (v) F[k] = v; }); }
+function writeF() {
+  const p = new URLSearchParams(location.search);
+  FKEYS.forEach(k => F[k] ? p.set(k, F[k]) : p.delete(k));
+  if (CUR && CUR !== "fleet") p.set("tab", CUR); else p.delete("tab");
+  const q = p.toString(); history.replaceState(null, "", location.pathname + (q ? "?" + q : ""));
+}
+const nActive = () => FKEYS.filter(k => F[k]).length;
+// plates are stored in Latin letters; people type Cyrillic look-alikes, spaces and dashes
+const LAT = {"А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T", "У": "Y", "Х": "X"};
+const plate = s => String(s || "").toUpperCase().replace(/[\s\-]/g, "").replace(/[АВЕКМНОРСТУХ]/g, c => LAT[c]);
+const vScan = v => ((v.last && v.last.checked_at) || "").slice(0, 10);
+const vCode = v => (v.last && v.last.status === "anomaly" && v.last.anomaly_type) || "";
+function vMatch(v) {
+  if (!v) return !nActive();
+  if (F.ops && OPF[F.ops] && !OPF[F.ops](v)) return false;
+  if (F.status && (F.status === "in_repair" ? !v.in_repair : v.status !== F.status)) return false;
+  if (F.make && v.make !== F.make) return false;
+  if (F.model && v.model !== F.model) return false;
+  if (F.mech && (F.mech === "-" ? (v.mechanics || []).length : !(v.mechanics || []).includes(F.mech))) return false;
+  if (F.urg && (F.urg === "-" ? v.urgency : v.urgency !== F.urg)) return false;
+  if (F.code && (F.code === "-" ? vCode(v) : vCode(v) !== F.code)) return false;
+  if (F.from && !(vScan(v) && vScan(v) >= F.from)) return false;
+  if (F.to && !(vScan(v) && vScan(v) <= F.to)) return false;
+  if (F.q && !(plate(v.vehicle_id).includes(plate(F.q)) || plate(v.garage_no).includes(plate(F.q)))) return false;
+  return true;
+}
+const vById = id => FLEET && FLEET.vehicles.find(v => v.vehicle_id === id);
+const FTABS = ["fleet", "tickets", "repairs", "handoffs"];
+function renderFbar() {
+  const box = $("#fbar"); if (!box || !FLEET) return;
+  box.classList.toggle("hidden", !FTABS.includes(CUR));
+  const vs = FLEET.vehicles, uniq = a => [...new Set(a.filter(Boolean))].sort((x, y) => String(x).localeCompare(String(y), "ru"));
+  const opt = (k, list, all, extra = "") => `<select class="input" id="f_${k}" aria-label="${esc(t("f_" + k))}"><option value="">${esc(all)}</option>${extra}` +
+    list.map(([v, l]) => `<option value="${esc(v)}" ${F[k] === v ? "selected" : ""}>${esc(l)}</option>`).join("") + `</select>`;
+  const makes = uniq(vs.map(v => v.make)), models = uniq(vs.filter(v => !F.make || v.make === F.make).map(v => v.model));
+  const mechs = uniq(vs.flatMap(v => v.mechanics || [])), codes = uniq(vs.map(vCode));
+  const shown = vs.filter(vMatch).length, n = nActive();
+  const wasOpen = box.querySelector("details") ? box.querySelector("details").open : (n > 0 || matchMedia("(min-width:721px)").matches);
+  box.innerHTML = `<details class="fbar" ${wasOpen ? "open" : ""}><summary>${icon("search", 16)}<b>${t("filters")}</b>${n ? `<span class="fcount">${n}</span>` : ""}<span class="small muted" id="f_found">${t("found")} ${shown} ${t("of")} ${vs.length}</span></summary>` +
+    `<div class="fgrid"><input class="input" type="search" id="f_q" inputmode="search" autocomplete="off" aria-label="${esc(t("f_q"))}" placeholder="${esc(t("f_q"))}" value="${esc(F.q || "")}">` +
+    opt("status", [["quarantine", t("quarantine")], ["attention", t("attention")], ["ready", t("ready")], ["in_repair", t("in_repair")]], t("f_status")) +
+    opt("make", makes.map(m => [m, m]), t("f_make")) + opt("model", models.map(m => [m, m]), t("f_model")) +
+    opt("mech", mechs.map(m => [m, m]), t("f_mech"), `<option value="-" ${F.mech === "-" ? "selected" : ""}>${esc(t("f_unassigned"))}</option>`) +
+    opt("urg", [["high", t("urg_high")], ["medium", t("urg_medium")], ["low", t("urg_low")]], t("f_urg"), `<option value="-" ${F.urg === "-" ? "selected" : ""}>${esc(t("f_no_urg"))}</option>`) +
+    opt("code", codes.map(c => [c, c]), t("f_code"), `<option value="-" ${F.code === "-" ? "selected" : ""}>${esc(t("f_no_code"))}</option>`) +
+    `<label class="fdate"><span class="small muted">${t("f_from")}</span><input class="input" type="date" id="f_from" value="${esc(F.from || "")}"></label>` +
+    `<label class="fdate"><span class="small muted">${t("f_to")}</span><input class="input" type="date" id="f_to" value="${esc(F.to || "")}"></label>` +
+    `<button class="btn ghost sm" id="f_reset" ${n ? "" : "disabled"}>${t("f_reset")}</button></div></details>`;
+  let tm = null;
+  box.querySelectorAll("select, input[type=date]").forEach(el => el.onchange = () => {
+    const k = el.id.slice(2); F[k] = el.value || undefined; if (k === "make") delete F.model; applyF(); });
+  const q = box.querySelector("#f_q");
+  q.oninput = () => { clearTimeout(tm); tm = setTimeout(() => { F.q = q.value.trim() || undefined; applyF(true); }, 200); };
+  box.querySelector("#f_reset").onclick = () => { F = {}; applyF(); };
+}
+function applyF(keepFocus) {
+  Object.keys(F).forEach(k => { if (!F[k]) delete F[k]; });
+  writeF();
+  if (keepFocus) { const n = nActive(), s = FLEET.vehicles.filter(vMatch).length; const f = $("#f_found"); if (f) f.textContent = `${t("found")} ${s} ${t("of")} ${FLEET.vehicles.length}`;
+    const c = $("#fbar .fcount"); if (c) c.textContent = n; else if (n) $("#fbar summary b").insertAdjacentHTML("afterend", `<span class="fcount">${n}</span>`); }
+  else renderFbar();
+  $$(".kpi").forEach(el => el.classList.toggle("on", el.dataset.k === F.ops));
+  refresh();
+}
+function refresh() { ({fleet: renderFleet, tickets: loadTickets, repairs: loadRepairs, handoffs: loadHandoffs}[CUR] || (() => {}))(); }
 
 function spark(scores) {
   if (!scores || scores.length < 2) return "";
@@ -27,28 +98,27 @@ async function loadFleet() {
   const o = FLEET.ops || {}, c = FLEET.counts;
   const idleMax = Math.max(0, ...FLEET.vehicles.filter(v => v.ops === "idle").map(v => v.idle_days || 0));
   $("#kpis").innerHTML = [["op_in_repair", o.in_repair, ""], ["op_awaiting", o.awaiting, ""], ["op_on_line", o.on_line, ""], ["op_idle", o.idle, idleMax ? `${t("idle_max")} ${idleMax} ${t("days")}` : ""]]
-    .map(([k, n, s]) => `<button class="kpi ${FILTER === k ? "on" : ""}" data-k="${k}"><div class="l">${t(k)}</div><div class="n">${n ?? 0}</div>${s ? `<div class="s">${s}</div>` : `<div class="s">&nbsp;</div>`}</button>`).join("");
-  $$(".kpi").forEach(el => el.onclick = () => { FILTER = FILTER === el.dataset.k ? null : el.dataset.k; tab("fleet"); loadFleetUI(); });
+    .map(([k, n, s]) => `<button class="kpi ${F.ops === k ? "on" : ""}" data-k="${k}"><div class="l">${t(k)}</div><div class="n">${n ?? 0}</div>${s ? `<div class="s">${s}</div>` : `<div class="s">&nbsp;</div>`}</button>`).join("");
+  $$(".kpi").forEach(el => el.onclick = () => { F.ops = F.ops === el.dataset.k ? undefined : el.dataset.k; if (CUR !== "fleet") tab("fleet"); applyF(); });
   window.__counts = c;
+  if (!document.activeElement || !document.activeElement.closest("#fbar")) renderFbar();  // do not steal the cursor from the search field
   if (!$("#tab-fleet").classList.contains("hidden")) renderFleet();
 }
-function loadFleetUI() { $$(".kpi").forEach(el => el.classList.toggle("on", el.dataset.k === FILTER)); renderFleet(); }
 function renderFleet() {
   const c = FLEET.counts;
-  const OPF = {op_in_repair: v => v.ops === "in_repair", op_awaiting: v => v.awaiting, op_on_line: v => v.ops === "on_line", op_idle: v => v.ops === "idle"};
-  const rows = FLEET.vehicles.filter(v => (!FILTER || OPF[FILTER](v)) && (!STATUS || v.status === STATUS));
-  const fchip = (k, n) => `<button class="fchip ${STATUS === k ? "on" : ""}" data-s="${k}">${t(k)} <span class="c">${n}</span></button>`;
-  $("#tab-fleet").innerHTML = `<div class="filters"><button class="fchip ${!STATUS ? "on" : ""}" data-s="">${t("all")} <span class="c">${c.total}</span></button>${fchip("quarantine", c.quarantine)}${fchip("attention", c.attention)}${fchip("ready", c.ready)}</div>` +
+  const rows = FLEET.vehicles.filter(vMatch);
+  const fchip = (k, n) => `<button class="fchip ${F.status === k ? "on" : ""}" data-s="${k}">${t(k)} <span class="c">${n}</span></button>`;
+  $("#tab-fleet").innerHTML = `<div class="filters"><button class="fchip ${!F.status ? "on" : ""}" data-s="">${t("all")} <span class="c">${c.total}</span></button>${fchip("quarantine", c.quarantine)}${fchip("attention", c.attention)}${fchip("ready", c.ready)}</div>` +
     `<div class="panel"><table class="tbl"><thead><tr><th>${t("vehicle")}</th><th class="hide-m">${t("model_engine")}</th><th>${t("status")}</th><th class="hide-m">${t("last_check")}</th><th class="hide-m">${t("trend")}</th><th>${t("priority")}</th></tr></thead><tbody>` +
     (rows.length ? rows.map(v => { const l = v.last || {};
       const lastTxt = l.status === "anomaly" ? `${esc(l.anomaly_type)} ${esc(l.anomaly_title)}` : l.status === "check_failed" ? t("check_failed_short") : t("status_normal");
       const extra = [v.awaiting ? t("op_awaiting") : "", v.idle_days != null ? `${t("op_idle")} ${v.idle_days} ${t("days")}` : ""].filter(Boolean).join(", ");
       return `<tr class="click" data-v="${esc(v.vehicle_id)}"><td><b class="mono">${esc(v.vehicle_id)}</b><div class="sub">${esc(v.garage_no)}</div></td>` +
-        `<td class="hide-m">${esc(v.model)}<div class="sub">${esc(v.engine_model)}</div></td><td>${pill(v)}${extra ? `<div class="sub" style="margin-top:4px">${extra}</div>` : ""}</td>` +
+        `<td class="hide-m">${esc(v.model)}<div class="sub">${esc(v.engine_model)}${(v.mechanics || []).length ? ", " + esc(v.mechanics.join(", ")) : ""}</div></td><td>${pill(v)}${extra ? `<div class="sub" style="margin-top:4px">${extra}</div>` : ""}</td>` +
         `<td class="hide-m">${lastTxt}<div class="sub">${esc((l.checked_at || "").slice(0, 10))}${l.anomaly_score != null ? `, ${l.anomaly_score}` : ""}</div></td><td class="hide-m">${spark(v.scores)}</td>` +
         `<td>${v.urgency ? `<span class="pill ${URG[v.urgency]}">${t("urg_" + v.urgency)}</span>` : ""}</td></tr>`; }).join("")
-      : `<tr><td colspan="6" class="muted">${t("no_vehicles")}</td></tr>`) + `</tbody></table></div>`;
-  $$("#tab-fleet [data-s]").forEach(b => b.onclick = () => { STATUS = b.dataset.s || null; renderFleet(); });
+      : `<tr><td colspan="6" class="muted">${nActive() ? t("f_nothing") : t("no_vehicles")}</td></tr>`) + `</tbody></table></div>`;
+  $$("#tab-fleet [data-s]").forEach(b => b.onclick = () => { F.status = b.dataset.s || undefined; applyF(); });
   $$("#tab-fleet tr[data-v]").forEach(tr => tr.onclick = () => openVehicle(tr.dataset.v));
 }
 
@@ -113,11 +183,11 @@ function attHtml(a) {
 }
 const TSTATUS = {created: "t_created", approved: "t_approved", returned: "t_returned"};
 async function loadTickets() {
-  const r = await api("/api/tickets"), rows = r.tickets;
+  const r = await api("/api/tickets"), rows = r.tickets.filter(x => vMatch(vById(x.vehicle_id)));
   $("#tab-tickets").innerHTML = `<div class="panel">` + (rows.length ? `<table class="tbl"><thead><tr><th>№</th><th>${t("vehicle")}</th><th>${t("priority")}</th><th class="hide-m">${t("diagnosis")}</th><th class="hide-m">${t("created")}</th><th>${t("status")}</th></tr></thead><tbody>` + rows.map((x, i) =>
     `<tr class="click" data-i="${i}"><td><b class="mono">${esc(x.ticket_id)}</b></td><td class="mono">${esc(x.vehicle_id)}</td><td><span class="pill ${URG[x.urgency] || ""}">${t("urg_" + x.urgency)}</span></td><td class="hide-m">${esc(x.anomaly_type)}. ${esc(x.conclusion)}</td><td class="hide-m sub">${esc(x.at)}</td><td>${esc(t(TSTATUS[x.status] || x.status || ""))}</td></tr>` +
     `<tr class="hidden" id="tk${i}"><td colspan="6" style="background:var(--surface-2)">${attHtml(x.attachments)}<div class="card-actions" style="justify-content:flex-start">${reviewHtml(x)}<button class="btn ghost sm" data-veh="${esc(x.vehicle_id)}">${t("vehicle_card")}</button></div></td></tr>`).join("") + `</tbody></table>`
-    : `<div class="pad muted">${t("no_tickets")}</div>`) + `</div>`;
+    : `<div class="pad muted">${nActive() ? t("f_nothing") : t("no_tickets")}</div>`) + `</div>`;
   $$("#tab-tickets tr[data-i]").forEach(tr => tr.onclick = () => $("#tk" + tr.dataset.i).classList.toggle("hidden"));
   $$("#tab-tickets [data-veh]").forEach(b => b.onclick = ev => { ev.stopPropagation(); openVehicle(b.dataset.veh); });
   $$("#tab-tickets button[data-rv]").forEach(b => b.onclick = async ev => {
@@ -134,6 +204,7 @@ function reviewHtml(x) {
 async function loadHandoffs() {
   const r = await api("/api/handoffs");
   const st = {open: "h_open", taken: "h_taken", closed: "h_closed"}, stc = {open: "attention", taken: "repair", closed: "ready"};
+  r.handoffs = r.handoffs.filter(h => vMatch(vById(h.vehicle_id)));
   r.handoffs.forEach(h => { h.payload = Object.assign({pages: [], photos: [], dialog: [], items: []}, h.payload); });
   $("#tab-handoffs").innerHTML = r.handoffs.length ? r.handoffs.map(h => `<div class="panel"><div class="pad">` +
     `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><b class="mono">${esc(h.vehicle_id)}</b><span class="small muted">${h.kind === "inspection" ? t("inspection") + ", " : ""}${new Date(h.ts * 1000).toLocaleString("ru-RU")}, ${esc(h.user_name)}</span><span class="pill ${stc[h.status]}" style="margin-left:auto">${t(st[h.status] || h.status)}</span></div>` +
@@ -142,15 +213,15 @@ async function loadHandoffs() {
     (h.payload.pages.length ? `<div style="margin-top:8px">${h.payload.pages.map(pageLink).join(" ")}</div>` : "") +
     (h.payload.dialog.length ? `<details class="more"><summary>${icon("chevron-right", 16)}${t("dialog")} (${h.payload.dialog.length})</summary>${h.payload.dialog.map(d => `<div class="msg ${d.role === "user" ? "user" : "bot"}" style="margin:8px 0"><div class="b small">${mdl(d.text)}</div></div>`).join("")}</details>` : "") +
     `<div class="card-actions" style="justify-content:flex-start">${h.status === "open" ? `<button class="btn primary sm" data-h="${h.id}" data-s="taken">${t("take")}</button>` : ""}${h.status !== "closed" ? `<button class="btn ghost sm" data-h="${h.id}" data-s="closed">${t("close_case")}</button>` : ""}<button class="btn ghost sm" data-veh="${esc(h.vehicle_id)}">${t("vehicle_card")}</button></div></div></div>`).join("")
-    : `<div class="panel"><div class="pad muted">${t("no_handoffs")}</div></div>`;
+    : `<div class="panel"><div class="pad muted">${nActive() ? t("f_nothing") : t("no_handoffs")}</div></div>`;
   $$("#tab-handoffs button[data-h]").forEach(b => b.onclick = async () => {
     const comment = b.dataset.s === "closed" ? (prompt(t("comment_opt")) || "") : "";
     await api(`/api/handoff/${b.dataset.h}`, {json: {status: b.dataset.s, comment}}); loadHandoffs(); loadFleet(); });
   $$("#tab-handoffs [data-veh]").forEach(b => b.onclick = () => openVehicle(b.dataset.veh));
 }
 async function loadRepairs() {
-  const vs = FLEET.vehicles.filter(v => v.in_repair);
-  if (!vs.length) { $("#tab-repairs").innerHTML = `<div class="panel"><div class="pad muted">${t("no_repairs")}</div></div>`; return; }
+  const vs = FLEET.vehicles.filter(v => v.in_repair && vMatch(v));
+  if (!vs.length) { $("#tab-repairs").innerHTML = `<div class="panel"><div class="pad muted">${nActive() ? t("f_nothing") : t("no_repairs")}</div></div>`; return; }
   let h = `<div class="panel"><table class="tbl"><thead><tr><th>${t("vehicle")}</th><th>${t("works")}</th><th>${t("progress")}</th><th class="hide-m">${t("in_work")}</th></tr></thead><tbody>`;
   for (const v of vs) { const d = await api(`/api/fleet/${encodeURIComponent(v.vehicle_id)}`); const r = d.repair; if (!r) continue;
     const done = r.steps.filter(s => s.done).length, mins = Math.round((Date.now() / 1000 - r.started) / 60);
@@ -169,6 +240,7 @@ async function loadEcon() {
     .map(([l, n]) => `<div class="kpi" style="cursor:default"><div class="l">${l}</div><div class="n" style="font-size:1.5rem">${n}</div></div>`).join("") + `</div><p class="small muted">${t("econ_note")}</p>`;
 }
 function tab(name) {
+  CUR = name; writeF(); renderFbar();
   $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   $$("section[id^=tab-]").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
   ({fleet: renderFleet, tickets: loadTickets, repairs: loadRepairs, audit: loadAudit, econ: loadEcon, handoffs: loadHandoffs, users: loadUsers}[name] || (() => {}))();
@@ -292,8 +364,10 @@ document.addEventListener("click", e => {
   $$("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
   $("#whoami").textContent = `${ME.name}, ${t("role_chief")}`;
   if (!ME.chief) { const ub = $('#tabs button[data-tab="users"]'); if (ub) ub.remove(); }  // staff: only the chief signed in by code + PIN
-  if (new URLSearchParams(location.search).get("tab")) tab(new URLSearchParams(location.search).get("tab"));
+  readF();
   themeIcon();
-  await loadFleet(); renderFleet();
+  await loadFleet();
+  const t0 = new URLSearchParams(location.search).get("tab");
+  if (t0 && $(`#tabs button[data-tab="${t0}"]`)) tab(t0); else { renderFbar(); renderFleet(); }
   setInterval(loadFleet, 30000);
 })();
