@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Главный механик — Цифровой механик</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>
+<header><h1>📊 <span data-t="manager">Панель главного механика</span></h1><div class="grow"></div><a class="chip" href="/">🔧 <span data-t="role_mechanic">Механик</span></a><button id="logout" data-t="logout">Выйти</button></header>
+<main class="wide">
+  <div class="tiles" id="tiles"></div>
+  <div class="tabs">
+    <button data-tab="fleet" class="on" data-t="priority_list">Приоритетный список</button>
+    <button data-tab="tickets" data-t="tickets">Заявки</button>
+    <button data-tab="repairs" data-t="in_repair">В ремонте</button>
+    <button data-tab="audit" data-t="audit">Журнал запросов</button>
+    <button data-tab="ask">💬 Агент</button>
+    <button data-tab="econ">₽ Экономика</button>
+  </div>
+  <section id="tab-fleet" class="card"></section>
+  <section id="tab-tickets" class="card hidden"></section>
+  <section id="tab-repairs" class="card hidden"></section>
+  <section id="tab-audit" class="card hidden"></section>
+  <section id="tab-ask" class="card hidden">
+    <div id="mchat"></div>
+    <div class="row" style="flex-wrap:nowrap;margin-top:.6em"><input id="mtxt" type="text" placeholder="Сколько машин в карантине и что с ними?"><button class="primary" id="msend">➤</button></div>
+  </section>
+  <section id="tab-econ" class="card hidden"></section>
+</main>
+<div id="drawer" class="modal hidden"><div class="head"><button id="dClose">✕</button><b id="dTitle" class="grow"></b></div><div class="body" id="dBody"></div></div>
+<script src="/static/manager.js"></script>
+</body></html>

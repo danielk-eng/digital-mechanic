@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b1013"><link rel="manifest" href="/static/manifest.json">
+<title>Цифровой механик</title><link rel="stylesheet" href="/static/app.css">
+</head><body>
+<!-- login -->
+<section id="login" class="login card hidden">
+  <h2 data-t="app_title">Цифровой механик</h2>
+  <label data-t="language">Язык</label><select id="l_lang"></select>
+  <label data-t="login_name">Ваше имя</label><input id="l_name" type="text" autocomplete="off">
+  <div class="row" style="margin-top:.6em">
+    <label><input type="radio" name="role" value="mechanic" checked> <span data-t="role_mechanic">Механик</span></label>
+    <label><input type="radio" name="role" value="manager"> <span data-t="role_manager">Главный механик</span></label>
+  </div>
+  <div style="margin-top:.4em">
+    <label><input type="radio" name="exp" value="experienced" checked> <span data-t="exp_expert">Опытный</span></label>
+    <label><input type="radio" name="exp" value="novice"> <span data-t="exp_novice">Новичок</span></label>
+  </div>
+  <label style="margin-top:.8em"><input id="l_consent" type="checkbox"> <span data-t="consent">Согласие 152-ФЗ</span> — <a href="/privacy" target="_blank" style="color:var(--accent)">?</a></label>
+  <button class="primary" id="l_go" style="width:100%;margin-top:1em" data-t="enter">Войти</button>
+</section>
+
+<!-- app -->
+<div id="app" class="hidden">
+<header>
+  <h1>🔧 <span data-t="app_title">Цифровой механик</span></h1>
+  <div class="grow"><select id="vehicle"></select></div>
+  <button id="btnSettings" title="settings">⚙️</button>
+</header>
+<main>
+  <div id="settings" class="card hidden">
+    <div class="row"><b data-t="settings">Настройки</b></div>
+    <label data-t="language">Язык</label><select id="s_lang"></select>
+    <div style="margin:.5em 0">
+      <label><input type="radio" name="s_exp" value="experienced"> <span data-t="exp_expert"></span></label><br>
+      <label><input type="radio" name="s_exp" value="novice"> <span data-t="exp_novice"></span></label>
+    </div>
+    <label><input type="checkbox" id="s_big"> <span data-t="big_font">Крупный шрифт</span></label><br>
+    <label><input type="checkbox" id="s_voice"> <span data-t="voice_out">Читать ответы вслух</span></label><br>
+    <label><input type="checkbox" id="s_hands"> 🖐 Без рук: после ответа слушать снова</label>
+    <div class="row" style="margin-top:.7em"><button id="s_logout" data-t="logout">Выйти</button><button id="s_delete">Удалить мои данные (152-ФЗ)</button><a class="muted" href="/privacy" target="_blank">Политика ПДн</a></div>
+  </div>
+  <div id="vehInfo" class="card hidden"></div>
+  <div class="row">
+    <button class="primary" id="btnDiag" style="flex:1;font-size:1.1em;padding:.9em" data-t="get_result">Получить результат диагностики</button>
+    <select id="sess" style="width:auto"></select>
+  </div>
+  <div id="chat"></div>
+</main>
+<div class="bar"><div class="inner">
+  <div class="quick" id="quick"></div>
+  <div class="row" style="flex-wrap:nowrap">
+    <button class="mic" id="mic" title="voice">🎤</button>
+    <textarea id="txt" data-tp="ask_placeholder"></textarea>
+    <label class="chip" style="padding:.6em .8em;margin:0;font-size:1.2em" title="photo">📷<input id="photo" type="file" accept="image/*" capture="environment" hidden></label>
+    <button class="primary" id="send">➤</button>
+  </div>
+</div></div>
+</div>
+
+<div id="modal" class="modal hidden"><div class="head"><button id="mClose">✕</button><b id="mTitle" class="grow"></b><a id="mPdf" class="chip" target="_blank">PDF</a></div><div class="body" id="mBody"></div></div>
+<script src="/static/app.js"></script>
+</body></html>
