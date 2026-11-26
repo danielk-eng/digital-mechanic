@@ -86,6 +86,8 @@ class Conv:
     decision: Optional[PolicyDecision] = None
     draft: Optional[dict] = None
     lang: str = "ru"
+    recalled: bool = False  # memory callback already used in this conversation
+    pending: Optional[dict] = None  # manager briefing: proposed ticket waiting for a yes/no
     frags: dict[str, dict] = field(default_factory=dict)
     n_s: int = 0
     n_x: int = 0
@@ -110,10 +112,11 @@ class Turn:
     facts: list[dict] = field(default_factory=list)
     understood: list = field(default_factory=list)  # [(original, manual term)] "did you mean"
     actions: list[dict] = field(default_factory=list)  # contextual buttons under the answer (instead of offer-questions in the text)
+    speak: str = ""  # what to say aloud when different from the text (manager briefing)
 
     def as_dict(self) -> dict:
         return {"text": self.text, "cards": self.cards, "sources": self.sources, "tools": self.tools, "facts": self.facts,
-                "understood": self.understood, "actions": self.actions}
+                "understood": self.understood, "actions": self.actions, "speak": self.speak}
 
 
 ALT_PROMPT = ("Другие варианты: предложи до 3 других возможных причин, которые мы ещё НЕ обсуждали, и как проверить каждую — "
@@ -323,11 +326,13 @@ class Agent:
 
     def _system(self, c: Conv, user: dict, manager: bool = False, detail: str | None = None) -> str:
         lang = LANGS[answer_lang(user)]["llm"]
+        personal = "".join("\n" + user[k] for k in ("_style", "_memory") if user.get(k))  # agent/style.py, agent/memory.py
         if manager:
-            return MANAGER_SYSTEM.format(lang_name=lang, context=f"Сейчас {time.strftime('%d.%m.%Y %H:%M')}.")
+            return MANAGER_SYSTEM.format(lang_name=lang, context=f"Сейчас {time.strftime('%d.%m.%Y %H:%M')}.") + personal
         rule = EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"])
         if user.get("_vocab_hint"):
             rule += "\n" + user["_vocab_hint"]  # adaptive profile: the mechanic's own terms (agent/profile.py)
+        rule += personal
         return MECHANIC_SYSTEM.format(lang_name=lang, experience_rule=rule,
                                       length_rule=DETAIL.get(detail or user.get("detail") or "brief", DETAIL["brief"]), context=self._context(c))
 
@@ -596,8 +601,12 @@ class Agent:
         turn = Turn()
         self.progress[c.cid] = []
         self.drafts[c.cid] = ""
-        manager = user.get("role") == "manager" and c.vehicle is None
+        manager = user.get("role") in ("manager", "engineer") and c.vehicle is None
         raw = (text or "").strip()
+        if manager and getattr(self, "briefing", None) and not event:
+            t = self.briefing.route(c, user, raw, turn)  # deterministic: last scanned truck, insights, ticket + assignment
+            if t is not None:
+                return t
         masked = pii.mask(raw) if self.pii_masking else raw
         if event == "expand":
             return self._expand(c, user, raw, turn)

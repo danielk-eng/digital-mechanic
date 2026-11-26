@@ -62,7 +62,10 @@ class Store:
         if "answer_lang" not in cols:  # answers may use a different language than the interface
             self._con.execute("ALTER TABLE users ADD COLUMN answer_lang TEXT DEFAULT ''")
             self._con.commit()
-        for col, ddl in (("country", "TEXT DEFAULT 'RU'"), ("profile", "TEXT DEFAULT ''")):  # data-law country; adaptive profile (JSON)
+        for col, ddl in (("country", "TEXT DEFAULT 'RU'"), ("profile", "TEXT DEFAULT ''"),
+                         # accounts the chief manages: login code + PIN hash, job title, assigned trucks, active flag, onboarding done
+                         ("login", "TEXT"), ("pin_hash", "TEXT"), ("title", "TEXT"), ("vehicles", "TEXT"), ("active", "INTEGER DEFAULT 1"),
+                         ("onboarded", "INTEGER DEFAULT 1"), ("created_by", "TEXT")):  # data-law country; adaptive profile (JSON)
             if col not in cols:
                 self._con.execute(f"ALTER TABLE users ADD COLUMN {col} {ddl}")
                 self._con.commit()
@@ -92,7 +95,8 @@ class Store:
         if not u:
             self.x("INSERT INTO users(id, created_at) VALUES (?,?)", (uid, time.time()))
         for k, v in kw.items():
-            if k in {"name", "role", "lang", "experience", "detail", "answer_lang", "big_font", "voice_out", "consent_at", "country", "profile"}:
+            if k in {"name", "role", "lang", "experience", "detail", "answer_lang", "big_font", "voice_out", "consent_at", "country", "profile",
+                     "login", "pin_hash", "title", "vehicles", "active", "onboarded", "created_by"}:
                 self.x(f"UPDATE users SET {k}=? WHERE id=?", (v, uid))
         return self.one("SELECT * FROM users WHERE id=?", (uid,))
 

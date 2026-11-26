@@ -57,11 +57,15 @@ function side(title, html) {
   $("#scrim").onclick = closeSide; $("#sClose").onclick = closeSide;
 }
 function closeSide() { $("#layer").innerHTML = ""; }
-async function openVehicle(vid) {
+async function openVehicle(vid, brief) {
   side(vid, `<div class="skeleton"><div class="line"></div><div class="line"></div><div class="line"></div></div>`);
   const h = await api(`/api/fleet/${encodeURIComponent(vid)}`);
   const v = h.vehicle, row = FLEET.vehicles.find(r => r.vehicle_id === vid) || {};
   let b = `<div class="top" style="display:flex;justify-content:space-between;gap:12px"><div><div style="font-weight:600">${esc(v.model && v.model.startsWith(v.make) ? v.model : v.make + " " + (v.model || ""))}</div><div class="small muted">${esc(v.engine_model)}, ${esc(v.garage_no)}</div></div>${pill(row)}</div>`;
+  if (brief) {
+    b += `<div class="brief"><p class="small">${t("scanned_by")}: <b>${esc(brief.scanned_by || "—")}</b>, ${esc((brief.checked_at || "").slice(0, 16).replace("T", " "))}. ${t("responsible")}: <b>${esc(brief.owner || "—")}</b></p>` +
+      (brief.insights || []).map(i => `<div class="insight ${i.kind}">${icon(i.kind === "repeat" ? "rotate-ccw" : "shuffle", 16)}<span>${i.kind === "repeat" ? `${t("ins_repeat")} ${i.days} ${t("days_ago")}: ${esc(i.ticket_id)}, ${esc(i.mechanic || "")}` : `${t("ins_similar")} ${esc(i.vehicle_id)}: ${esc(i.ticket_id)}, ${esc(i.mechanic || "")}${i.result === "normal" ? ", " + t("recheck_ok") : ""}`}</span></div>`).join("") + `</div>`;
+  }
   if (row.urgency_basis && row.urgency_basis.length) b += `<p class="small muted">${t("priority")} ${t("urg_" + row.urgency)}: ${row.urgency_basis.map(esc).join("; ")}</p>`;
   try { const tl = await api(`/api/history/${encodeURIComponent(vid)}`); b += arrivalCard(tl, t) + `<div class="section-label">${t("history")}</div>${renderTimeline(tl)}`; } catch (_) {}
   b += `<div class="section-label">${t("tickets")}</div>` + (h.tickets.length ? `<div class="list">` + h.tickets.map(x => `<div class="item" style="cursor:default"><span class="t"><b class="mono">${esc(x.ticket_id)}</b><span>${esc(x.at)}. ${esc(x.conclusion)}</span></span><span class="pill ${URG[x.urgency] || ""}">${t("urg_" + x.urgency)}</span></div>`).join("") + `</div>` : `<p class="muted small">${t("none")}</p>`);
@@ -160,17 +164,108 @@ async function loadEcon() {
 function tab(name) {
   $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   $$("section[id^=tab-]").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
-  ({fleet: renderFleet, tickets: loadTickets, repairs: loadRepairs, audit: loadAudit, econ: loadEcon, handoffs: loadHandoffs}[name] || (() => {}))();
+  ({fleet: renderFleet, tickets: loadTickets, repairs: loadRepairs, audit: loadAudit, econ: loadEcon, handoffs: loadHandoffs, users: loadUsers}[name] || (() => {}))();
 }
 $$("#tabs button").forEach(b => b.onclick = () => tab(b.dataset.tab));
-async function ask() {
-  const txt = $("#mtxt").value.trim(); if (!txt) return; $("#mtxt").value = "";
-  const add = (h, me) => { const d = document.createElement("div"); d.className = "msg " + (me ? "user" : "bot"); d.innerHTML = `<div class="b">${h}</div>`; $("#mchat").appendChild(d); return d; };
-  add(esc(txt), true); const th = add(`<div class="skeleton"><div class="line"></div><div class="line"></div></div>`); th.dataset.busy = 1;
-  try { const r = await api("/api/chat", {json: {text: txt}}); th.querySelector(".b").innerHTML = mdl(r.text); delete th.dataset.busy; }
-  catch (e) { th.querySelector(".b").textContent = e.message; delete th.dataset.busy; }
+// Agent tab: text or voice. The briefing answer opens the vehicle card, cites pages and is read aloud.
+function mdc(text, sources) {
+  const by = Object.fromEntries((sources || []).map(s => [s.label, s]));
+  return mdl(text).replace(/\[(S\d+)\]/g, (m, l) => by[l] ? pageLink(by[l]) : "");
 }
-$("#msend").onclick = ask; $("#mtxt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } };
+function speak(text) {
+  if (!window.speechSynthesis || !text) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text); u.lang = "ru-RU"; u.rate = 1.05;
+  const v = speechSynthesis.getVoices().find(x => x.lang.startsWith("ru")); if (v) u.voice = v;
+  speechSynthesis.speak(u);
+}
+async function ask(textIn) {
+  const txt = (textIn || $("#mtxt").value).trim(); if (!txt) return; $("#mtxt").value = "";
+  const add = (h, me) => { const d = document.createElement("div"); d.className = "msg " + (me ? "user" : "bot"); d.innerHTML = `<div class="b">${h}</div>`; $("#mchat").appendChild(d); d.scrollIntoView({block: "end"}); return d; };
+  add(esc(txt), true); const th = add(`<div class="skeleton"><div class="line"></div><div class="line"></div></div>`); th.dataset.busy = 1;
+  try {
+    const r = await api("/api/chat", {json: {text: txt}});
+    th.querySelector(".b").innerHTML = mdc(r.text, r.sources) +
+      ((r.actions || []).length ? `<div class="answer-actions">${r.actions.map((a, i) => `<button class="btn sm ${i ? "ghost" : "primary"}" data-say="${esc(a.text || a.label)}">${esc(a.label)}</button>`).join("")}</div>` : "");
+    th.querySelectorAll("[data-say]").forEach(b => b.onclick = () => ask(b.dataset.say));
+    delete th.dataset.busy;
+    const brief = (r.cards || []).find(c => c.kind === "vehicle_brief");
+    if (brief) { await loadFleet(); openVehicle(brief.vehicle_id, brief); }
+    if ((r.cards || []).some(c => c.kind === "ticket_created")) { loadFleet(); }
+    if (MVOICE) speak(r.speak || r.text.replace(/\*\*|\[S\d+\]/g, ""));
+  } catch (e) { th.querySelector(".b").textContent = e.message; delete th.dataset.busy; }
+}
+// Voice: record -> /api/stt (server STT with the data-law routing) -> the same ask(); replies are spoken
+let MVOICE = false, MREC = null;
+async function micToggle() {
+  const b = $("#mmic");
+  if (MREC) { MREC.stop(); return; }
+  let stream; try { stream = await navigator.mediaDevices.getUserMedia({audio: true}); } catch (_) { alert(t("mic_denied")); return; }
+  const chunks = [], rec = new MediaRecorder(stream); MREC = rec; MVOICE = true; b.classList.add("on");
+  rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+  rec.onstop = async () => {
+    stream.getTracks().forEach(x => x.stop()); MREC = null; b.classList.remove("on");
+    const fd = new FormData(); fd.append("audio", new Blob(chunks, {type: rec.mimeType || "audio/webm"}), "q.webm"); fd.append("lang", (ME && ME.lang) || "ru");
+    try { const r = await api("/api/stt", {method: "POST", body: fd}); if (r.text) ask(r.text); } catch (e) { alert(e.message); }
+  };
+  rec.start();
+  setTimeout(() => { if (MREC === rec) rec.stop(); }, window.__micMs || 6000);  // short commands; tap again to stop earlier
+}
+
+// ---------------------------------------------------------------- employees (only the chief: server-side RBAC)
+async function loadUsers() {
+  const r = await api("/api/admin/users");
+  const ROLE = {mechanic: t("role_mechanic"), manager: t("role_chief"), engineer: t("role_engineer")};
+  $("#tab-users").innerHTML = `<div class="filters"><button class="btn primary sm" id="uNew">${icon("plus", 16)}<span>${t("user_new")}</span></button></div>` +
+    `<div class="panel" style="overflow:auto"><table class="tbl"><thead><tr><th>${t("employee")}</th><th>${t("role")}</th><th class="hide-m">${t("vehicles_assigned")}</th><th class="hide-m">${t("style_short")}</th><th>${t("status")}</th></tr></thead><tbody>` +
+    r.users.map(u => `<tr class="click" data-u="${esc(u.id)}"><td><b>${esc(u.name)}</b><div class="sub mono">${esc(u.login)}</div><div class="sub">${esc(u.title || "")}</div></td><td>${esc(ROLE[u.role] || u.role)}</td>` +
+      `<td class="hide-m mono small">${u.vehicles.map(esc).join(", ")}</td><td class="hide-m small">${esc(u.style.slice(0, 90))}… <span class="sub">v${u.style_v}</span></td>` +
+      `<td>${u.active ? `<span class="pill ready">${t("active")}</span>` : `<span class="pill quarantine">${t("inactive")}</span>`}${u.onboarded ? "" : `<div class="sub">${t("not_onboarded")}</div>`}</td></tr>`).join("") + `</tbody></table></div>`;
+  $$("#tab-users tr[data-u]").forEach(tr => tr.onclick = () => userCard(tr.dataset.u));
+  $("#uNew").onclick = () => newUser(r);
+}
+function newUser(r) {
+  side(t("user_new"), `<div class="field"><label class="label" for="nu_name">${t("login_name")}</label><input id="nu_name" class="input"></div>` +
+    `<div class="field"><label class="label" for="nu_title">${t("job_title")}</label><input id="nu_title" class="input"></div>` +
+    `<div class="field"><label class="label" for="nu_role">${t("role")}</label><select id="nu_role" class="input">${r.roles.map(x => `<option value="${x}">${esc({mechanic: t("role_mechanic"), manager: t("role_chief"), engineer: t("role_engineer")}[x])}</option>`).join("")}</select></div>` +
+    `<div class="field"><label class="label" for="nu_exp">${t("level")}</label><select id="nu_exp" class="input">${r.levels.map(x => `<option value="${x}" ${x === "experienced" ? "selected" : ""}>${esc(t("lvl_" + x))}</option>`).join("")}</select></div>` +
+    `<div class="field"><label class="label" for="nu_lang">${t("language")}</label><select id="nu_lang" class="input">${Object.keys(I18N).map(l => `<option value="${l}">${l}</option>`).join("")}</select></div>` +
+    `<div class="field"><label class="label" for="nu_country">${t("country")}</label><select id="nu_country" class="input">${["RU", "UZ", "KZ", "KG", "BY", "TJ", "IN", "VN"].map(c => `<option>${c}</option>`).join("")}</select></div>` +
+    `<div class="field"><span class="label">${t("vehicles_assigned")}</span><div class="vpick">${r.vehicles.map(v => `<label><input type="checkbox" value="${esc(v)}"> <span class="mono">${esc(v)}</span></label>`).join("")}</div></div>` +
+    `<div class="card-actions"><button class="btn primary" id="nu_go">${t("create")}</button></div><div id="nu_out"></div>`);
+  $("#nu_go").onclick = async () => {
+    const body = {name: $("#nu_name").value.trim(), title: $("#nu_title").value.trim(), role: $("#nu_role").value, experience: $("#nu_exp").value, lang: $("#nu_lang").value,
+                  country: $("#nu_country").value, vehicles: $$(".vpick input:checked").map(x => x.value)};
+    if (!body.name) return;
+    try {
+      const x = await api("/api/admin/users", {json: body});
+      $("#nu_out").innerHTML = `<div class="panel"><div class="pad"><p>${t("user_created")}</p><p>${t("login_code")}: <b class="mono">${esc(x.login)}</b>, ${t("pin")}: <b class="mono">${esc(x.pin)}</b></p>` +
+        `<p class="small muted">${t("pin_once")}</p><p class="small">${t("invite")}: <span class="mono">${esc(location.origin + x.invite)}</span></p></div></div>`;
+      $("#nu_go").disabled = true; loadUsers();
+    } catch (e) { $("#nu_out").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
+  };
+}
+async function userCard(id) {
+  side(id, `<div class="skeleton"><div class="line"></div><div class="line"></div></div>`);
+  const c = await api(`/api/admin/users/${encodeURIComponent(id)}`), u = c.user;
+  const chips = xs => xs.length ? xs.map(x => `<span class="term">${esc(x)}</span>`).join(" ") : `<span class="muted">${t("none")}</span>`;
+  let b = `<div style="font-weight:600">${esc(u.name)}</div><div class="small muted">${esc(u.title || "")}, ${esc(u.login)}, ${esc(u.lang)}/${esc(u.country)}</div>` +
+    `<div class="section-label">${t("style_title")}</div><p class="small">${esc(c.style.text)}</p><p class="sub">v${c.style.v}, ${esc(c.style.source || "")}${c.style.memory ? "" : ", " + t("memory_off")}</p>` +
+    (c.note ? `<p class="small muted">${esc(c.note)}</p>` : "") +
+    `<div class="section-label">${t("interests")}</div><div class="terms">${chips(c.interests)}</div>` +
+    `<div class="section-label">${t("topics")}</div><div class="terms">${chips(c.topics)}</div>` +
+    `<div class="section-label">${t("vehicles_assigned")}</div><div class="terms">${chips(c.vehicles)}</div>` +
+    `<div class="section-label">${t("worked_on")}</div><div class="terms">${chips(c.worked_on)}</div>` +
+    `<div class="section-label">${t("history")}</div>` + (c.history.length ? `<ul class="small">${c.history.map(h => `<li><b class="mono">${esc(h.vehicle_id)}</b> ${esc(h.date || "")} ${esc(h.ticket_id || "")}: ${esc((h.done || (h.repair_steps || []).join("; ")).slice(0, 160))}</li>`).join("")}</ul>` : `<p class="muted small">${t("none")}</p>`) +
+    (c.assigned.length ? `<div class="section-label">${t("assigned_to_him")}</div><ul class="small">${c.assigned.map(a => `<li class="mono">${esc(a.ticket_id)} ${esc(a.vehicle_id)} (${esc(a.status)})</li>`).join("")}</ul>` : "") +
+    (c.recent_questions.length ? `<div class="section-label">${t("recent_questions")}</div><ul class="small">${c.recent_questions.map(q => `<li>${esc(q.text)} <span class="sub mono">${esc(q.vehicle_id || "")}</span></li>`).join("")}</ul>` : "") +
+    `<div class="card-actions" style="justify-content:flex-start"><button class="btn ghost sm" id="uc_pin">${t("new_pin")}</button>` +
+    `<button class="btn ${u.active ? "danger" : "primary"} sm" id="uc_act">${u.active ? t("deactivate") : t("activate")}</button></div><div id="uc_out"></div>`;
+  const body = $("#layer .vbd"); if (body) body.innerHTML = b;
+  $("#uc_pin").onclick = async () => { const x = await api(`/api/admin/users/${encodeURIComponent(id)}`, {json: {new_pin: true}}); $("#uc_out").innerHTML = `<p>${t("pin")}: <b class="mono">${esc(x.pin)}</b> <span class="small muted">${t("pin_once")}</span></p>`; };
+  $("#uc_act").onclick = async () => { await api(`/api/admin/users/${encodeURIComponent(id)}`, {json: {active: !u.active}}); loadUsers(); userCard(id); };
+}
+$("#msend").onclick = () => ask(); $("#mmic").onclick = micToggle; $("#mtxt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } };
 $("#logout").onclick = async () => { await fetch("/api/logout", {method: "POST"}); location.href = "/"; };
 const TH_IC = {dark: "moon", light: "sun", contrast: "contrast"};
 function themeIcon() { $("#theme").innerHTML = icon(TH_IC[A11Y.theme()]); }
@@ -184,8 +279,10 @@ document.addEventListener("click", e => {
   document.querySelectorAll("[data-icon]").forEach(el => el.innerHTML = icon(el.dataset.icon));
   I18N = await (await fetch("/static/i18n.json")).json();
   ME = (await api("/api/session")).user;
-  if (!ME || ME.role !== "manager") { location.href = "/"; return; }
+  if (!ME || ME.role !== "manager") { location.href = ME && ME.role === "engineer" ? "/engineer" : "/"; return; }
   $$("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
+  $("#whoami").textContent = `${ME.name}, ${t("role_chief")}`;
+  if (new URLSearchParams(location.search).get("tab")) tab(new URLSearchParams(location.search).get("tab"));
   themeIcon();
   await loadFleet(); renderFleet();
   setInterval(loadFleet, 30000);

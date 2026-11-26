@@ -12,6 +12,7 @@ import json
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -24,7 +25,9 @@ from pydantic import BaseModel
 
 from .. import media as umedia, pii, privacy_laws, voice
 from ..translate import Translator
-from ..agent import profile as uprofile
+from ..agent import profile as uprofile, style as ustyle, memory as umemory
+from ..agent.briefing import Briefing
+from .. import demo_seed
 from ..agent.llm import LlmUnavailable
 from ..agent.prompts import VISION_PROMPT
 from ..bootstrap import build_agent
@@ -39,6 +42,12 @@ TR = Translator(AGENT.llm, AGENT.store, os.environ.get("I18N_DIR", "data/i18n"))
 for _lang, _pages in TR.pages.items():  # human translations of the manuals: search in the user's language, cite the original page
     AGENT.index.add_translations(_lang, _pages)
 STORE = AGENT.store
+DEMO = demo_seed.load(os.environ.get("DEMO_USERS", "data/demo_users.json"))
+AGENT.briefing = Briefing(AGENT, DEMO)
+try:
+    demo_seed.seed(STORE, AGENT.fleet, DEMO)  # demo accounts + who scanned which truck (idempotent)
+except Exception as _e:  # noqa: BLE001 - the stand must start even if the fleet stub is down
+    print("demo seed skipped:", type(_e).__name__)
 STATIC = Path(__file__).parent / "static"
 app = FastAPI(title="Цифровой механик", version="1.0")
 
@@ -113,12 +122,17 @@ async def _restore_session(request, call_next):
     return await call_next(request)
 
 
-def user_of(uid: str | None, manager: bool = False) -> dict:
+def user_of(uid: str | None, manager: bool = False, roles: tuple[str, ...] | None = None) -> dict:
+    """RBAC on the server: every endpoint states who may call it; the UI only hides what the role cannot do."""
     u = STORE.user(uid) if uid else None
     if not u:
         raise HTTPException(401, "login required")
     if manager and u["role"] != "manager":
         raise HTTPException(403, "manager only")
+    if roles and u["role"] not in roles:
+        raise HTTPException(403, f"{'/'.join(roles)} only")
+    if not u.get("active", 1):
+        raise HTTPException(401, "account deactivated")
     return u
 
 
@@ -188,6 +202,64 @@ def login(body: LoginIn, response: Response) -> dict:
     return {"user": u}
 
 
+class DemoLoginIn(BaseModel):
+    account: str
+    pin: str
+    lang: str = "ru"
+    consent: bool = False
+    country: str = "RU"
+
+
+@app.get("/api/demo/accounts")
+def demo_accounts() -> dict:
+    """Login screen: demo accounts with their demo PINs (no other secrets)."""
+    return {"accounts": demo_seed.public_accounts(DEMO)}
+
+
+def _pin_hash(pin: str, salt: str | None = None) -> str:
+    salt = salt or uuid.uuid4().hex[:16]
+    return salt + "$" + hashlib.pbkdf2_hmac("sha256", pin.encode(), salt.encode(), 120_000).hex()
+
+
+def _pin_ok(pin: str, stored: str | None) -> bool:
+    return bool(stored and "$" in stored and hmac.compare_digest(_pin_hash(pin, stored.split("$", 1)[0]), stored))
+
+
+@app.post("/api/login/demo")
+def login_demo(body: DemoLoginIn, response: Response) -> dict:
+    """Login by code + PIN: demo accounts (PIN shown on the login screen) and employees the chief created."""
+    code = body.account.strip().lower()[:40]
+    db = STORE.one("SELECT * FROM users WHERE login=?", (code,))
+    if db and db.get("pin_hash"):
+        if not _pin_ok(body.pin, db["pin_hash"]):
+            STORE.audit(user_id=None, role=None, action="login_pin", input=code, ok=0)
+            raise HTTPException(403, "wrong PIN")
+        if not db.get("active", 1):
+            raise HTTPException(403, "account deactivated")
+        if S.require_consent and not body.consent:
+            raise HTTPException(400, f"consent required ({privacy_laws.COUNTRIES[privacy_laws.country(body.country)]['short']})")
+        u = STORE.upsert_user(db["id"], consent_at=time.time(), **({"lang": lang_or_default(body.lang)} if db.get("onboarded") else {}))
+        response.set_cookie("uid", db["id"], httponly=True, samesite="lax", max_age=30 * 86400)
+        set_profile_cookie(response, u)
+        STORE.audit(user_id=db["id"], role=db["role"], action="login_pin", ok=1)
+        return {"user": u, "account": {"key": code, "title": db.get("title"), "vehicles": json.loads(db.get("vehicles") or "[]")}}
+    a = demo_seed.account(DEMO, code)
+    if not a or body.pin != a["pin"]:
+        STORE.audit(user_id=None, role=None, action="login_demo", input=code, ok=0)
+        raise HTTPException(403, "wrong PIN")
+    if db and not db.get("active", 1):
+        raise HTTPException(403, "account deactivated")
+    if S.require_consent and not body.consent:
+        raise HTTPException(400, f"consent required ({privacy_laws.COUNTRIES[privacy_laws.country(body.country)]['short']})")
+    if not STORE.user(a["uid"]):
+        demo_seed.seed(STORE, AGENT.fleet, DEMO)
+    u = STORE.upsert_user(a["uid"], lang=lang_or_default(body.lang), consent_at=time.time(), country=privacy_laws.country(body.country), role=a["role"])
+    response.set_cookie("uid", a["uid"], httponly=True, samesite="lax", max_age=30 * 86400)
+    set_profile_cookie(response, u)
+    STORE.audit(user_id=a["uid"], role=a["role"], action="login_demo", ok=1)
+    return {"user": u, "account": {k: a.get(k) for k in ("key", "title", "vehicles")}}
+
+
 @app.get("/api/session")
 def session(uid: str | None = Cookie(None)) -> dict:
     """Boot check without a 401 in the browser console: {"user": null} when not logged in."""
@@ -198,7 +270,31 @@ def session(uid: str | None = Cookie(None)) -> dict:
 @app.get("/api/me")
 def me(uid: str | None = Cookie(None)) -> dict:
     u = user_of(uid)
-    return {"user": u, "profile": uprofile.public(uprofile.load(u)), "langs": {k: v["name"] for k, v in LANGS.items()}}
+    p = uprofile.load(u)
+    acc = next((a for a in DEMO["accounts"] if a["uid"] == u["id"]), None)
+    return {"user": u, "profile": uprofile.public(p), "style": ustyle.public(p, u), "langs": {k: v["name"] for k, v in LANGS.items()},
+            "account": {k: acc.get(k) for k in ("key", "title", "vehicles")} if acc else None}
+
+
+class StyleIn(BaseModel):
+    text: str | None = None
+    memory: bool | None = None
+    reset: bool = False
+
+
+@app.post("/api/me/style")
+def edit_style(body: StyleIn, uid: str | None = Cookie(None)) -> dict:
+    """Settings: «Как помощник с вами говорит» — the user reads and edits his style card; memory callbacks on/off."""
+    u = user_of(uid)
+    p = uprofile.load(u)
+    if body.reset:
+        p.pop("style", None)
+    if body.text is not None:
+        ustyle.set_text(p, u, pii.mask(body.text), "user")
+    if body.memory is not None:
+        p["memory"] = bool(body.memory)
+    STORE.upsert_user(u["id"], profile=uprofile.dump(p))
+    return {"style": ustyle.public(p, u)}
 
 
 class ProfileEditIn(BaseModel):
@@ -499,23 +595,41 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
         c = AGENT.conv(u["id"], body.vehicle_id)
     except KeyError:
         raise HTTPException(404, "unknown vehicle")
-    if c.vehicle is None and u["role"] != "manager":
+    if c.vehicle is None and u["role"] not in ("manager", "engineer"):
         raise HTTPException(400, "choose a vehicle")
     # adaptive profile: learn the mechanic's terms, answer in them; novices get short glosses the first few times
     prof = uprofile.load(u)
     if u["role"] == "mechanic":
         uprofile.update_from_message(prof, body.text or "", body.event)
     level = u.get("experience") or "experienced"
-    turn = AGENT.handle(c, {**u, "_vocab_hint": uprofile.prompt_hint(prof, level)}, body.text[:4000], event=body.event)
+    mem, recalled = ("", []) if c.recalled else umemory.hint(STORE, DEMO, u, c.vehicle.vehicle_id if c.vehicle else None, prof.get("memory", True))
+    turn = AGENT.handle(c, {**u, "_vocab_hint": uprofile.prompt_hint(prof, level), "_style": ustyle.prompt(prof, u), "_memory": mem},
+                        body.text[:4000], event=body.event)
+    if recalled:
+        c.recalled = True
+        turn.tools.append({"tool": "memory.recent_work", "ok": True, "items": [w.get("ref") or w["what"] for w in recalled]})
     turn.text, glossed = uprofile.gloss(turn.text, prof, level)
     if level != "novice":  # an experienced mechanic does not need "ГБЦ -> головка блока цилиндров" explained back to him
         turn.understood = [p for p in (turn.understood or []) if not uprofile.terms_in(p[0])]
-    if u["role"] == "mechanic":
-        STORE.upsert_user(u["id"], profile=uprofile.dump(prof))
+    if not body.event and body.text:
+        recent = [m["content"] for m in STORE.q("SELECT content FROM messages WHERE user_id=? AND role='user' ORDER BY id DESC LIMIT 12", (u["id"],))][::-1] + [body.text]
+        if u["role"] != "mechanic":
+            prof["messages"] = prof.get("messages", 0) + 1
+        threading.Thread(target=_evolve_style, args=(u["id"], recent), daemon=True).start() if (prof.get("messages", 0) % ustyle.EVOLVE_EVERY == 0) else None
+    STORE.upsert_user(u["id"], profile=uprofile.dump(prof))
     # "expand" re-renders the previous answer: do not store it again as a user message
     shown = {"expand": "", "alternatives": "Другие варианты"}.get(body.event or "", None)
     _record(u, c, "chat" if not body.event else body.event, body.text if shown is None else shown, turn, t0)
     return {**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000)}
+
+
+def _evolve_style(uid: str, recent: list[str]) -> None:
+    u = STORE.user(uid)
+    if not u:
+        return
+    p = uprofile.load(u)
+    if ustyle.maybe_evolve(AGENT.llm, p, u, recent):
+        STORE.upsert_user(uid, profile=uprofile.dump(p))
 
 
 @app.get("/api/progress")
@@ -876,6 +990,380 @@ def health() -> dict:
 def usage(uid: str | None = Cookie(None)) -> dict:
     user_of(uid, manager=True)
     return AGENT.llm.usage.as_dict()
+
+
+# ---------------------------------------------------------------- engineer menu (role "engineer" only)
+STORE.x("CREATE TABLE IF NOT EXISTS kv(k TEXT PRIMARY KEY, v TEXT, ts REAL, by TEXT)")
+STORE.x("CREATE TABLE IF NOT EXISTS mcp_servers(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, url TEXT, transport TEXT, token_env TEXT, "
+        "enabled INTEGER DEFAULT 1, status TEXT, tools TEXT, checked_at REAL, created_at REAL, by TEXT)")
+# runtime knobs the engineer may change; secrets (keys) are never here: they stay in env / Vercel env
+MODEL_KNOBS = {"llm_model": str, "llm_vision_model": str, "llm_timeout_s": float, "llm_max_tool_rounds": int,
+               "stt_order": str, "deepgram_model": str}
+STT_ORDERS = ("local-first", "cloud-first")
+for _r in STORE.q("SELECT k, v FROM kv WHERE k LIKE 'cfg.%'"):
+    _k = _r["k"][4:]
+    if _k in MODEL_KNOBS:
+        try:
+            setattr(S, _k, MODEL_KNOBS[_k](_r["v"]))
+        except (ValueError, TypeError):
+            pass
+
+
+def _models_view() -> dict:
+    opts = [m.strip() for m in os.environ.get("LLM_MODELS", "").split(",") if m.strip()]
+    cur = {k: getattr(S, k, None) for k in MODEL_KNOBS}
+    return {"current": cur, "llm_options": sorted(set(opts + [S.llm_model])), "stt_orders": STT_ORDERS,
+            "stt_engines": {"whisper_local": bool(S.speech_url), "deepgram": bool(S.deepgram_api_key), "browser": True},
+            "deepgram_langs": sorted(voice.DEEPGRAM_LANGS), "no_whisper": sorted(voice.NO_WHISPER), "llm_configured": AGENT.llm.available}
+
+
+@app.get("/engineer", response_class=HTMLResponse)
+def engineer_page() -> str:
+    return (STATIC / "engineer.html").read_text(encoding="utf-8")
+
+
+@app.get("/api/eng/logs")
+def eng_logs(after: int = 0, limit: int = 100, action: str | None = None, uid: str | None = Cookie(None)) -> dict:
+    """Live log / query history: audit rows newer than `after` (the page polls)."""
+    user_of(uid, roles=("engineer",))
+    q = "SELECT a.id, a.ts, a.role, a.vehicle_id, a.action, a.input, a.output, a.tools, a.latency_ms, a.tokens, a.ok, u.name AS user_name FROM audit a LEFT JOIN users u ON u.id=a.user_id WHERE a.id>?"
+    args: list = [after]
+    if action:
+        q += " AND a.action=?"; args.append(action)
+    rows = STORE.q(q + " ORDER BY a.id DESC LIMIT ?", (*args, min(limit, 500)))
+    for r in rows:
+        r["input"], r["output"] = (r["input"] or "")[:200], (r["output"] or "")[:240]
+        try:
+            r["tools"] = [t.get("tool") for t in json.loads(r["tools"] or "[]")]
+        except (json.JSONDecodeError, AttributeError):
+            r["tools"] = []
+    return {"rows": rows, "last": max([r["id"] for r in rows] + [after])}
+
+
+@app.get("/api/eng/trace/{aid}")
+def eng_trace(aid: int, uid: str | None = Cookie(None)) -> dict:
+    """Debug view of one request: input, answer, every tool call with its result flags, sources, tokens, latency."""
+    user_of(uid, roles=("engineer",))
+    r = STORE.one("SELECT a.*, u.name AS user_name FROM audit a LEFT JOIN users u ON u.id=a.user_id WHERE a.id=?", (aid,))
+    if not r:
+        raise HTTPException(404, "no such request")
+    for k in ("tools", "sources"):
+        try:
+            r[k] = json.loads(r[k]) if r[k] else []
+        except json.JSONDecodeError:
+            pass
+    r["user_id"] = (r["user_id"] or "")[:8]
+    return r
+
+
+@app.get("/api/eng/models")
+def eng_models(uid: str | None = Cookie(None)) -> dict:
+    user_of(uid, roles=("engineer",))
+    return _models_view()
+
+
+class KnobsIn(BaseModel):
+    values: dict
+
+
+@app.post("/api/eng/models")
+def eng_models_set(body: KnobsIn, uid: str | None = Cookie(None)) -> dict:
+    u = user_of(uid, roles=("engineer",))
+    changed = {}
+    for k, v in body.values.items():
+        if k not in MODEL_KNOBS or v in (None, ""):
+            continue
+        if k == "stt_order" and v not in STT_ORDERS:
+            raise HTTPException(400, "stt_order: local-first | cloud-first")
+        try:
+            val = MODEL_KNOBS[k](v)
+        except (ValueError, TypeError):
+            raise HTTPException(400, f"bad value for {k}")
+        if k == "llm_timeout_s" and not 5 <= val <= 300 or k == "llm_max_tool_rounds" and not 1 <= val <= 10:
+            raise HTTPException(400, f"{k} out of range")
+        setattr(S, k, val)
+        STORE.x("INSERT OR REPLACE INTO kv(k, v, ts, by) VALUES (?,?,?,?)", (f"cfg.{k}", str(val), time.time(), u["id"]))
+        changed[k] = val
+    if "llm_max_tool_rounds" in changed and hasattr(AGENT, "max_rounds"):
+        AGENT.max_rounds = changed["llm_max_tool_rounds"]
+    STORE.audit(user_id=u["id"], role=u["role"], action="eng_models", input=json.dumps(changed, ensure_ascii=False), ok=1)
+    return _models_view()
+
+
+@app.get("/api/eng/health")
+def eng_health(uid: str | None = Cookie(None)) -> dict:
+    """ML / TOiR stubs and the other services, each with its response time."""
+    user_of(uid, roles=("engineer",))
+    out = {}
+    for name, fn in (("ml", AGENT.ml.health), ("toir", AGENT.toir.health)):
+        t0 = time.time()
+        try:
+            ok = bool(fn())
+        except Exception:  # noqa: BLE001
+            ok = False
+        out[name] = {"ok": ok, "ms": int((time.time() - t0) * 1000)}
+    out["llm"] = {"ok": AGENT.llm.available, "model": S.llm_model, "usage": AGENT.llm.usage.as_dict()}
+    out["stt"] = {"ok": True, "engines": _models_view()["stt_engines"], "order": S.stt_order}
+    out["index"] = {"ok": True, "pages": len(AGENT.index.pages), "extra_pages": len(AGENT.extra.pages) if AGENT.extra else 0}
+    out["translate"] = {"ok": True, **TR.stats()}
+    errs = STORE.q("SELECT action, COUNT(*) AS n FROM audit WHERE ok=0 AND ts>? GROUP BY action ORDER BY n DESC LIMIT 8", (time.time() - 86400,))
+    return {"services": out, "errors_24h": errs}
+
+
+class McpIn(BaseModel):
+    name: str
+    url: str
+    transport: str = "http"
+    token_env: str = ""
+    enabled: bool = True
+
+
+def _mcp_probe(url: str, token_env: str) -> tuple[str, list[str]]:
+    """Streamable-HTTP MCP: initialize + tools/list. The token is read from an env variable named by the engineer
+    (keys are never stored in the DB)."""
+    import httpx
+
+    h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
+    if token_env and os.environ.get(token_env):
+        h["Authorization"] = f"Bearer {os.environ[token_env]}"
+    def rpc(cl, method, params, sid=None, i=1):
+        hh = dict(h, **({"Mcp-Session-Id": sid} if sid else {}))
+        r = cl.post(url, json={"jsonrpc": "2.0", "id": i, "method": method, "params": params}, headers=hh)
+        txt = r.text
+        body = json.loads(txt.split("data:", 1)[1].split("\n", 1)[0]) if txt.lstrip().startswith(("event:", "data:")) else r.json()
+        return r, body
+    try:
+        with httpx.Client(timeout=8, follow_redirects=False) as cl:
+            r, b = rpc(cl, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "digital-mechanic", "version": "1"}})
+            if r.status_code >= 400 or "error" in b:
+                return f"error {r.status_code}", []
+            sid = r.headers.get("mcp-session-id")
+            cl.post(url, json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=dict(h, **({"Mcp-Session-Id": sid} if sid else {})))
+            _, t = rpc(cl, "tools/list", {}, sid, 2)
+            return "ok", [x.get("name", "") for x in (t.get("result") or {}).get("tools", [])][:50]
+    except Exception as e:  # noqa: BLE001
+        return f"unreachable ({type(e).__name__})", []
+
+
+@app.get("/api/eng/mcp")
+def eng_mcp(uid: str | None = Cookie(None)) -> dict:
+    user_of(uid, roles=("engineer",))
+    rows = STORE.q("SELECT * FROM mcp_servers ORDER BY id")
+    for r in rows:
+        r["tools"] = json.loads(r["tools"] or "[]")
+    return {"servers": rows}
+
+
+@app.post("/api/eng/mcp")
+def eng_mcp_add(body: McpIn, uid: str | None = Cookie(None)) -> dict:
+    u = user_of(uid, roles=("engineer",))
+    if not re.match(r"^https?://[^\s]+$", body.url) or body.transport not in ("http", "sse"):
+        raise HTTPException(400, "url must be http(s); transport http | sse")
+    if body.token_env and not re.match(r"^[A-Z][A-Z0-9_]{1,63}$", body.token_env):
+        raise HTTPException(400, "token_env: name of an environment variable (the key itself is never stored)")
+    STORE.x("INSERT INTO mcp_servers(name,url,transport,token_env,enabled,created_at,by) VALUES (?,?,?,?,?,?,?)",
+            (body.name[:60], body.url[:300], body.transport, body.token_env, int(body.enabled), time.time(), u["id"]))
+    STORE.audit(user_id=u["id"], role=u["role"], action="eng_mcp_add", input=f"{body.name} {body.url}", ok=1)
+    return eng_mcp(uid)
+
+
+@app.post("/api/eng/mcp/{sid}/check")
+def eng_mcp_check(sid: int, uid: str | None = Cookie(None)) -> dict:
+    user_of(uid, roles=("engineer",))
+    r = STORE.one("SELECT * FROM mcp_servers WHERE id=?", (sid,))
+    if not r:
+        raise HTTPException(404, "no such server")
+    st, tools = _mcp_probe(r["url"], r["token_env"] or "")
+    STORE.x("UPDATE mcp_servers SET status=?, tools=?, checked_at=? WHERE id=?", (st, json.dumps(tools), time.time(), sid))
+    return {"status": st, "tools": tools}
+
+
+class McpPatch(BaseModel):
+    enabled: bool | None = None
+    delete: bool = False
+
+
+@app.post("/api/eng/mcp/{sid}")
+def eng_mcp_edit(sid: int, body: McpPatch, uid: str | None = Cookie(None)) -> dict:
+    u = user_of(uid, roles=("engineer",))
+    if body.delete:
+        STORE.x("DELETE FROM mcp_servers WHERE id=?", (sid,))
+    elif body.enabled is not None:
+        STORE.x("UPDATE mcp_servers SET enabled=? WHERE id=?", (int(body.enabled), sid))
+    STORE.audit(user_id=u["id"], role=u["role"], action="eng_mcp_edit", input=f"{sid} {body.model_dump()}", ok=1)
+    return eng_mcp(uid)
+
+
+# ---------------------------------------------------------------- users (the chief manages employees)
+class NewUserIn(BaseModel):
+    name: str
+    role: str = "mechanic"
+    experience: str = "experienced"
+    title: str = ""
+    vehicles: list[str] = []
+    lang: str = "ru"
+    country: str = "RU"
+
+
+class UserPatch(BaseModel):
+    active: bool | None = None
+    vehicles: list[str] | None = None
+    experience: str | None = None
+    title: str | None = None
+    role: str | None = None
+    new_pin: bool = False
+
+
+def _new_pin() -> str:
+    import secrets
+    return f"{secrets.randbelow(9000) + 1000}"
+
+
+def _user_row(u: dict) -> dict:
+    p = uprofile.load(u)
+    return {"id": u["id"], "login": u.get("login"), "name": u["name"], "role": u["role"], "title": u.get("title"), "experience": u.get("experience"),
+            "lang": u.get("lang"), "country": u.get("country"), "active": bool(u.get("active", 1)), "onboarded": bool(u.get("onboarded", 1)),
+            "vehicles": json.loads(u.get("vehicles") or "[]"), "style": ustyle.public(p, u)["text"], "style_v": ustyle.public(p, u)["v"],
+            "persona": ustyle.public(p, u)["persona"], "created_by": (u.get("created_by") or "")[:12]}
+
+
+@app.get("/api/admin/users")
+def admin_users(uid: str | None = Cookie(None)) -> dict:
+    user_of(uid, manager=True)
+    rows = STORE.q("SELECT * FROM users WHERE login IS NOT NULL ORDER BY role, name")
+    return {"users": [_user_row(u) for u in rows], "roles": ["mechanic", "manager", "engineer"], "levels": list(EXPERIENCE_LEVELS),
+            "vehicles": AGENT.fleet.ids()}
+
+
+@app.post("/api/admin/users")
+def admin_create_user(body: NewUserIn, uid: str | None = Cookie(None)) -> dict:
+    """Only the chief creates accounts. The PIN is shown once in the answer (stored as a salted hash)."""
+    me_ = user_of(uid, manager=True)
+    if body.role not in ("mechanic", "manager", "engineer") or body.experience not in EXPERIENCE_LEVELS:
+        raise HTTPException(400, "bad role or level")
+    bad = [v for v in body.vehicles if v not in AGENT.fleet.ids()]
+    if bad:
+        raise HTTPException(400, f"unknown vehicles: {', '.join(bad)}")
+    name = pii.mask(body.name.strip()[:60]) or "—"
+    new = "u" + uuid.uuid4().hex[:10]
+    login = f"{re.sub(r'[^a-z0-9]', '', name.lower().translate(str.maketrans('абвгдеёжзийклмнопрстуфхцчшщъыьэюя', 'abvgdeejziiklmnoprstufhccss_y_eua'))) or 'user'}{secrets_suffix()}"
+    pin = _new_pin()
+    STORE.upsert_user(new, name=name, role=body.role, experience=body.experience, title=body.title[:80], vehicles=json.dumps(body.vehicles),
+                      lang=lang_or_default(body.lang), country=privacy_laws.country(body.country), login=login, pin_hash=_pin_hash(pin), active=1,
+                      onboarded=0, created_by=me_["id"])
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="admin_user_create", input=f"{login} {body.role}", ok=1)
+    return {"user": _user_row(STORE.user(new)), "login": login, "pin": pin, "invite": f"/?login={login}"}
+
+
+def secrets_suffix() -> str:
+    import secrets
+    return str(secrets.randbelow(90) + 10)
+
+
+@app.post("/api/admin/users/{user_id}")
+def admin_edit_user(user_id: str, body: UserPatch, uid: str | None = Cookie(None)) -> dict:
+    me_ = user_of(uid, manager=True)
+    u = STORE.user(user_id)
+    if not u:
+        raise HTTPException(404, "no such user")
+    if user_id == me_["id"] and body.active is False:
+        raise HTTPException(400, "cannot deactivate yourself")
+    kw: dict = {}
+    if body.active is not None:
+        kw["active"] = int(body.active)
+    if body.vehicles is not None:
+        bad = [v for v in body.vehicles if v not in AGENT.fleet.ids()]
+        if bad:
+            raise HTTPException(400, f"unknown vehicles: {', '.join(bad)}")
+        kw["vehicles"] = json.dumps(body.vehicles)
+    if body.experience in EXPERIENCE_LEVELS:
+        kw["experience"] = body.experience
+    if body.title is not None:
+        kw["title"] = body.title[:80]
+    if body.role in ("mechanic", "manager", "engineer"):
+        kw["role"] = body.role
+    pin = None
+    if body.new_pin:
+        pin = _new_pin()
+        kw["pin_hash"] = _pin_hash(pin)
+    STORE.upsert_user(user_id, **kw)
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="admin_user_edit", input=f"{user_id} {sorted(kw)}", ok=1)
+    return {"user": _user_row(STORE.user(user_id)), **({"pin": pin} if pin else {})}
+
+
+@app.get("/api/admin/users/{user_id}")
+def admin_user_card(user_id: str, uid: str | None = Cookie(None)) -> dict:
+    """Profile card by user ID: style, interests and typical topics, trucks worked on, history."""
+    user_of(uid, manager=True)
+    u = STORE.user(user_id)
+    if not u:
+        raise HTTPException(404, "no such user")
+    p = uprofile.load(u)
+    acc = next((a for a in DEMO["accounts"] if a["uid"] == user_id), {})
+    msgs = STORE.q("SELECT ts, vehicle_id, content FROM messages WHERE user_id=? AND role='user' ORDER BY ts DESC LIMIT 40", (user_id,))
+    from collections import Counter
+    topics = Counter()
+    for m in msgs:
+        for k in uprofile.terms_in(m["content"]):
+            topics[k] += 1
+    trucks = Counter(m["vehicle_id"] for m in msgs if m["vehicle_id"])
+    scans = STORE.q("SELECT vehicle_id, COUNT(*) AS n, MAX(ts) AS last FROM diagnoses WHERE user_id=? GROUP BY vehicle_id ORDER BY last DESC", (user_id,))
+    hist = [dict(e, vehicle_id=vid) for vid, evs in AGENT.demo.items() for e in evs if e.get("mechanic") == u["name"]]
+    hist += [{"vehicle_id": r["vehicle_id"], "date": time.strftime("%Y-%m-%d", time.localtime(r["started"])), "ticket_id": r["ticket_id"],
+              "repair_steps": [x.get("text") for x in json.loads(r["steps"] or "[]")], "title": r["title"]}
+             for r in STORE.q("SELECT * FROM repairs WHERE user_id=? ORDER BY started DESC LIMIT 20", (user_id,))]
+    assigned = [h for h in STORE.handoffs(None) if h.get("kind") == "assign" and (h.get("payload") or {}).get("assignee_uid") == user_id]
+    return {"user": _user_row(u), "style": ustyle.public(p, u), "interests": acc.get("interests") or [],
+            "topics": [k for k, _ in topics.most_common(8)] or sorted(p.get("terms", {}), key=lambda k: -p["terms"][k])[:8],
+            "note": acc.get("note"), "vehicles": json.loads(u.get("vehicles") or "[]"),
+            "worked_on": sorted(set([s_["vehicle_id"] for s_ in scans] + list(trucks) + [h["vehicle_id"] for h in hist])),
+            "scans": scans[:12], "history": sorted(hist, key=lambda e: e.get("date") or "", reverse=True)[:12],
+            "assigned": [{"ticket_id": h["payload"].get("ticket_id"), "vehicle_id": h["vehicle_id"], "status": h["status"]} for h in assigned],
+            "recent_questions": [{"ts": m["ts"], "vehicle_id": m["vehicle_id"], "text": m["content"][:160]} for m in msgs[:6]]}
+
+
+# ---------------------------------------------------------------- onboarding (first login of a new employee)
+@app.get("/api/onboarding")
+def onboarding_sample(uid: str | None = Cookie(None)) -> dict:
+    u = user_of(uid)
+    return {"needed": not u.get("onboarded", 1), "sample": ustyle.ONBOARD_SAMPLE, "levels": list(EXPERIENCE_LEVELS), "details": list(DETAIL_LEVELS),
+            "experience": u.get("experience"), "detail": u.get("detail") or "brief"}
+
+
+class OnboardIn(BaseModel):
+    formality: str
+    detail: str = "brief"
+    experience: str = "experienced"
+
+
+@app.post("/api/onboarding")
+def onboarding_done(body: OnboardIn, uid: str | None = Cookie(None)) -> dict:
+    """The choice seeds the style card (v1); it then evolves after sessions and stays editable in settings."""
+    u = user_of(uid)
+    if body.formality not in ustyle.FORMALITY or body.detail not in DETAIL_LEVELS or body.experience not in EXPERIENCE_LEVELS:
+        raise HTTPException(400, "bad choice")
+    u = STORE.upsert_user(u["id"], detail=body.detail, experience=body.experience, onboarded=1)
+    p = uprofile.load(u)
+    p["formality"] = body.formality
+    p.pop("style", None)
+    st = ustyle.card(p, u)
+    st["source"] = "onboarding"
+    STORE.upsert_user(u["id"], profile=uprofile.dump(p))
+    STORE.audit(user_id=u["id"], role=u["role"], action="onboarding", input=f"{body.formality} {body.detail} {body.experience}", ok=1)
+    return {"user": STORE.user(u["id"]), "style": ustyle.public(p, u)}
+
+
+@app.get("/api/my/assignments")
+def my_assignments(uid: str | None = Cookie(None)) -> dict:
+    """Mechanic: tickets the chief handed to him (manager briefing -> «назначить»)."""
+    u = user_of(uid, roles=("mechanic",))
+    out = []
+    for h in STORE.handoffs(None):
+        p = h.get("payload") or {}
+        p = json.loads(p) if isinstance(p, str) else p
+        if h.get("kind") == "assign" and p.get("assignee_uid") == u["id"] and h.get("status") != "closed":
+            out.append({"id": h["id"], "vehicle_id": h["vehicle_id"], "ticket_id": p.get("ticket_id"), "summary": h.get("summary"), "ts": h["ts"]})
+    return {"assignments": out}
 
 
 @app.exception_handler(Exception)

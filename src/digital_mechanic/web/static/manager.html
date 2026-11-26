@@ -5,7 +5,7 @@
 <body>
 <header class="mgr-bar">
   <h1 data-t="manager">Панель главного механика</h1>
-  <a class="btn ghost sm" href="/?mechanic=1" data-t="role_mechanic">Механик</a>
+  <span class="small muted" id="whoami"></span><a class="btn ghost sm" href="/?mechanic=1" data-t="role_mechanic">Механик</a>
   <button class="icon-btn" id="theme" aria-label="theme" data-icon="moon"></button>
   <button class="icon-btn" id="logout" aria-label="logout" data-icon="log-out"></button>
 </header>
@@ -17,6 +17,7 @@
     <button data-tab="repairs" data-t="in_repair">В ремонте</button>
     <button data-tab="handoffs" data-t="handoffs_tab">Передано главному</button>
     <button data-tab="ask" data-t="agent_tab">Агент</button>
+    <button data-tab="users" data-t="users_tab">Сотрудники</button>
     <button data-tab="audit" data-t="audit">Журнал запросов</button>
     <button data-tab="econ" data-t="econ_tab">Экономика</button>
   </nav>
@@ -25,8 +26,9 @@
   <section id="tab-repairs" class="hidden"></section>
   <section id="tab-handoffs" class="hidden"></section>
   <section id="tab-audit" class="hidden"></section>
+  <section id="tab-users" class="hidden"></section>
   <section id="tab-ask" class="hidden"><div class="panel"><div class="pad"><div id="mchat" class="chat mchat"></div>
-    <div class="inputbox" style="margin-top:16px"><textarea id="mtxt" rows="1" placeholder="Сколько машин в карантине и что с ними?"></textarea><button class="icon-btn send-btn" id="msend" aria-label="send" data-icon="arrow-up"></button></div></div></div></section>
+    <div class="inputbox" style="margin-top:16px"><textarea id="mtxt" rows="1" placeholder="Покажите последнюю машину"></textarea><button class="icon-btn mic-btn" id="mmic" aria-label="voice" data-icon="mic"></button><button class="icon-btn send-btn" id="msend" aria-label="send" data-icon="arrow-up"></button></div></div></div></section>
   <section id="tab-econ" class="hidden"></section>
   <p class="small muted" style="margin-top:24px" data-t="privacy_note"></p>
 </main>

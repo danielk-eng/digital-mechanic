@@ -918,6 +918,7 @@ function settingsSheet() {
     `<div class="field"><span class="label">${t("theme")}</span>${segHtml("s_theme", [["dark", t("theme_dark")], ["light", t("theme_light")], ["contrast", t("theme_contrast")]], A11Y.theme())}</div>` +
     `<label class="switch"><span>${t("voice_speaks")}</span><input type="checkbox" id="s_vtts" ${A11Y.voiceSpeaks() ? "checked" : ""}></label>` +
     `<label class="switch"><span>${t("captions")}</span><input type="checkbox" id="s_cc" ${A11Y.captions() ? "checked" : ""}></label>` +
+    `<div class="sep"></div><div class="field"><span class="label">${t("style_title")}</span><div id="s_style">${t("loading")}</div></div>` +
     `<div class="sep"></div><div class="field"><span class="label">${t("my_profile")}</span><div id="s_prof" class="small muted">${t("loading")}</div></div>` +
     `<div class="sep"></div><p class="small muted">${t("privacy_note")} <a href="/privacy?country=${esc(ME.country || "RU")}" target="_blank">${t("policy")}</a></p>` +
     `<div class="card-actions"><button class="btn ghost" id="s_logout">${icon("log-out", 18)}<span>${t("logout")}</span></button><button class="btn danger" id="s_delete">${t("delete_data")}</button></div>`, sh => {
@@ -927,7 +928,7 @@ function settingsSheet() {
     loadCountries().then(() => { const sel = sh.querySelector("#s_country"); countryOptions(sel, ME.country || "RU");
       const law = () => { const c = COUNTRIES.find(x => x.code === sel.value); sh.querySelector("#s_law").textContent = c ? `${c.law}. ${c.localize ? t("stt_local") : ""}` : ""; };
       law(); sel.onchange = async () => { await saveProfile({country: sel.value}); law(); }; });
-    drawProfile(sh);
+    drawProfile(sh); drawStyle(sh);
     bindSeg(sh, "s_exp", v => saveProfile({experience: v}));
     bindSeg(sh, "s_detail", v => saveProfile({detail: v}));
     bindSeg(sh, "s_fs", v => { A11Y.setSize(v); layout(); });
@@ -937,6 +938,48 @@ function settingsSheet() {
     sh.querySelector("#s_logout").onclick = async () => { await api("/api/logout", {method: "POST"}); location.reload(); };
     sh.querySelector("#s_delete").onclick = async () => { if (confirm(t("delete_confirm"))) { await api("/api/me", {method: "DELETE"}); location.reload(); } };
   });
+}
+// ---------------------------------------------------------------- onboarding: pick how the assistant talks (seeds the style card)
+function onboarding() {
+  return new Promise(async done => {
+    let o; try { o = await api("/api/onboarding"); } catch (_) { return done(); }
+    if (!o.needed) return done();
+    const pick = {formality: "informal", detail: o.detail || "brief", experience: o.experience || "experienced"};
+    sheet(t("ob_title"),
+      `<p class="small muted">${t("ob_intro")}</p><p class="ob-q"><b>${esc(o.sample.question)}</b></p>` +
+      `<div class="ob-opts">` + ["informal", "formal"].map(k => `<button type="button" class="ob-opt ${k === pick.formality ? "on" : ""}" data-f="${k}"><span class="label">${t("ob_" + k)}</span><span>${esc(o.sample[k])}</span></button>`).join("") + `</div>` +
+      `<div class="field"><span class="label">${t("detail")}</span>${segHtml("ob_detail", [["brief", t("detail_brief")], ["detailed", t("detail_detailed")]], pick.detail)}</div>` +
+      `<div class="field"><span class="label">${t("level")}</span>${segHtml("ob_exp", [["novice", short(t("exp_novice"))], ["experienced", short(t("exp_expert"))], ["expert", short(t("exp_pro"))]], pick.experience)}</div>` +
+      `<p class="small muted">${t("ob_later")}</p><div class="card-actions"><button class="btn primary block" id="ob_go">${t("ob_go")}</button></div>`, sh => {
+      sh.querySelectorAll(".ob-opt").forEach(b => b.onclick = () => { pick.formality = b.dataset.f; sh.querySelectorAll(".ob-opt").forEach(x => x.classList.toggle("on", x === b)); });
+      bindSeg(sh, "ob_detail", v => pick.detail = v); bindSeg(sh, "ob_exp", v => pick.experience = v);
+      const c = sh.querySelector("#shClose"); if (c) c.classList.add("hidden");
+      sh.querySelector("#ob_go").onclick = async () => { try { ME = (await api("/api/onboarding", {json: pick})).user; } catch (e) { return toast(friendlyError(e)); } closeSheet(); done(); };
+    });
+  });
+}
+async function loadAssignments() {
+  if (!ME || ME.role !== "mechanic") return;
+  let r; try { r = await api("/api/my/assignments"); } catch (_) { return; }
+  const old = $("#assignBar"); if (old) old.remove();
+  if (!r.assignments.length) return;
+  const a = r.assignments[0], bar = document.createElement("button");
+  bar.id = "assignBar"; bar.className = "assign-bar";
+  bar.innerHTML = `${icon("clipboard-check", 18)}<span><b>${t("assigned_to_you")}: ${esc(a.ticket_id)}, ${esc(a.vehicle_id)}</b><span class="small">${esc((a.summary || "").slice(0, 120))}</span></span>`;
+  bar.onclick = () => { localStorage.setItem("vid", a.vehicle_id); VID = a.vehicle_id; location.reload(); };
+  $("#main").prepend(bar);
+}
+// «Как помощник с вами говорит»: versioned style card, editable; memory callbacks on/off
+async function drawStyle(sh) {
+  const box = sh.querySelector("#s_style"); if (!box) return;
+  let st; try { st = (await api("/api/me")).style; } catch (_) { return; }
+  const src = {seed: t("style_src_seed"), onboarding: t("style_src_onboarding"), model: t("style_src_model"), user: t("style_src_user")}[st.source] || "";
+  box.innerHTML = `<textarea id="s_style_t" class="input" rows="4">${esc(st.text)}</textarea><p class="small muted" style="margin-top:8px">v${st.v}${src ? ", " + esc(src) : ""}. ${t("style_note")}</p>` +
+    `<div class="card-actions" style="justify-content:flex-start"><button class="btn primary sm" id="s_style_save">${t("save")}</button><button class="btn ghost sm" id="s_style_reset">${t("prof_reset")}</button></div>` +
+    `<label class="switch"><span>${t("memory_callbacks")}</span><input type="checkbox" id="s_mem" ${st.memory ? "checked" : ""}></label>`;
+  box.querySelector("#s_style_save").onclick = async () => { await api("/api/me/style", {json: {text: box.querySelector("#s_style_t").value}}); toast(t("saved")); drawStyle(sh); };
+  box.querySelector("#s_style_reset").onclick = async () => { await api("/api/me/style", {json: {reset: true}}); drawStyle(sh); };
+  box.querySelector("#s_mem").onchange = e => api("/api/me/style", {json: {memory: e.target.checked}});
 }
 const ABBR = new Set(["гбц", "цпг", "кшм", "грм", "тнвд"]);
 // What the assistant learned about the user (agent/profile.py): visible, editable, deletable.
@@ -976,20 +1019,37 @@ window.addEventListener("resize", layout);
 
 let ROLE = "mechanic";
 $$("#l_role button").forEach(b => b.onclick = () => { ROLE = b.dataset.v; $$("#l_role button").forEach(x => x.classList.toggle("on", x === b)); });
+const ROLE_HOME = {manager: "/manager", engineer: "/engineer"};
 $("#l_go").onclick = async () => {
-  const body = {name: $("#l_name").value.trim() || "—", role: ROLE, lang: $("#l_lang").value, experience: "experienced", consent: $("#l_consent").checked, country: $("#l_country").value || "RU"};
-  if (!body.consent) return toast(t("consent_needed"));
-  try { ME = (await api("/api/login", {json: body})).user; } catch (e) { return toast(friendlyError(e)); }
-  if (ME.role === "manager") location.href = "/manager"; else start();
+  const consent = $("#l_consent").checked, lang = $("#l_lang").value, country = $("#l_country").value || "RU";
+  if (!consent) return toast(t("consent_needed"));
+  const code = $("#l_code").value.trim(), pin = $("#l_pin").value.trim();
+  try {
+    if (code && pin) ME = (await api("/api/login/demo", {json: {account: code, pin, lang, consent, country}})).user;
+    else ME = (await api("/api/login", {json: {name: $("#l_name").value.trim() || "—", role: ROLE, lang, experience: "experienced", consent, country}})).user;
+  } catch (e) { return toast(String(e.message || e).includes("PIN") ? t("wrong_pin") : String(e.message || e).includes("deactivated") ? t("deactivated") : friendlyError(e)); }
+  if (ROLE_HOME[ME.role]) location.href = ROLE_HOME[ME.role]; else start();
 };
+async function demoAccounts() {
+  const box = $("#l_demo"); if (!box) return;
+  const pre = new URLSearchParams(location.search).get("login"); if (pre) $("#l_code").value = pre;
+  try {
+    const r = await api("/api/demo/accounts");
+    box.innerHTML = r.accounts.map(a => `<button type="button" class="acc" data-k="${esc(a.key)}" data-p="${esc(a.pin)}"><b>${esc(a.name)}</b><span>${esc(a.title)}</span><span class="pin">${t("demo_pin")} ${esc(a.pin)}</span></button>`).join("");
+    box.querySelectorAll(".acc").forEach(b => b.onclick = () => { $("#l_code").value = b.dataset.k; $("#l_pin").value = b.dataset.p; box.querySelectorAll(".acc").forEach(x => x.classList.toggle("on", x === b)); });
+  } catch (_) { box.closest(".field").remove(); }
+}
 async function start() {
+  if (ROLE_HOME[ME.role] && !new URLSearchParams(location.search).get("mechanic")) { location.href = ROLE_HOME[ME.role]; return; }
   $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
-  applyI18n(); await loadVehicles(); autosize();
+  applyI18n();
+  await loadVehicles(); autosize(); loadAssignments();
+  if (!ME.onboarded) onboarding();
   ["#chat", "#quick", "#vehBtn", "#vehInfo"].forEach(sel => trQueue($(sel)));
 }
 (async () => {
   hydrateIcons();
   I18N = await (await fetch("/static/i18n.json")).json();
   try { ME = (await api("/api/session")).user; if (!ME) throw new Error("login"); start(); }
-  catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = () => { COUNTRIES = null; $("#l_country").innerHTML = ""; applyI18n(); }; $("#l_country").onchange = loginCountry; applyI18n(); $("#login").classList.remove("hidden"); }
+  catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = () => { COUNTRIES = null; $("#l_country").innerHTML = ""; applyI18n(); }; $("#l_country").onchange = loginCountry; applyI18n(); demoAccounts(); $("#login").classList.remove("hidden"); }
 })();
