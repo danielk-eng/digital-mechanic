@@ -29,6 +29,9 @@ from .grounding import cited_labels, quote_in_text, unverified_numbers
 from .llm import Llm, LlmUnavailable
 from .prompts import DETAIL, EXPAND_PROMPT, EXPERIENCE, MANAGER_SYSTEM, MECHANIC_SYSTEM
 
+URG_RU = {"high": "высокий", "medium": "средний", "low": "низкий"}
+
+
 CONFIRM_RE = re.compile(r"^\s*(да[,.!\s]*)?(подтвержда\w*|отправля\w*|отправь\w*|tasdiqla\w*|тасдиқ\w*|растаймын|xác nhận|पुष्टि)", re.I)
 CANCEL_RE = re.compile(r"^\s*(отмен\w*|не надо|не отправля\w*|отбой|bekor|бекор|болдырма\w*|hủy|रद्द)", re.I)
 NEXT_RE = re.compile(r"^\s*(готово|сделал\w*|сделано|дальше|следующ\w*|далее|tayyor|keyingi\w*|тайёр|дайын|келесі|xong|tiếp|हो गया|अगला)[\s.!]*$", re.I)
@@ -296,7 +299,7 @@ class Agent:
                 cur = r["steps"][r["current"]] if r["current"] < len(r["steps"]) else None
                 lines.append(f"ИДЁТ РЕМОНТ «{r['title']}»: шаг {r['current'] + 1} из {len(r['steps'])}" + (f" — {cur['text']} ({cur['document']}, стр. {cur['page']})" if cur else ""))
         if c.draft:
-            lines.append(f"Черновик заявки ждёт подтверждения механика (приоритет {c.draft['request']['urgency']}).")
+            lines.append(f"Черновик заявки ждёт подтверждения механика (приоритет {URG_RU.get(c.draft['request']['urgency'], c.draft['request']['urgency'])}).")
         if c.frags:
             lines.append("Уже найденные фрагменты: " + ", ".join(f"{k}={f['document']} стр.{f['page']}" for k, f in list(c.frags.items())[-12:]))
         return "\n".join(lines)
@@ -429,7 +432,7 @@ class Agent:
                             urgency=u, operations=[o["text"] for o in ops], spare_parts=[p["text"] for p in parts], references=refs)
         c.draft = {"id": uuid.uuid4().hex[:8], "request": req.model_dump(mode="json"), "operations": ops, "spare_parts": parts, "urgency_basis": why,
                    "requires_inspection": bool(policy.doubt_flags(ch)), "rejected": e1 + e2}
-        return {"draft_ready": True, "urgency": u.value, "operations": len(ops), "spare_parts": len(parts), "rejected": e1 + e2,
+        return {"draft_ready": True, "urgency": u.value, "urgency_ru": URG_RU.get(u.value, u.value), "operations": len(ops), "spare_parts": len(parts), "rejected": e1 + e2,
                 "requires_inspection": c.draft["requires_inspection"], "note": "Черновик показан механику, он подтвердит отправку кнопкой."}
 
     def tool_start_repair(self, c: Conv, args: dict) -> dict:
@@ -730,7 +733,7 @@ class Agent:
         if bad:
             sents = re.split(r"(?<=[.!?\n])\s+", answer)
             answer = " ".join(s for s in sents if not unverified_numbers(s, evidence, allowed)).strip()
-            answer += "\n\n⚠️ Часть цифр не подтверждена руководством и убрана — уточните по странице."
+            answer += "\n\nЧасть цифр не подтверждена руководством и убрана — уточните по странице."
             turn.tools.append({"tool": "number_guard", "removed": bad})
         return answer
 
@@ -823,7 +826,7 @@ class Agent:
             pass
         card = {"kind": "ticket_created", "ticket_id": ack.ticket_id, "request": c.draft["request"]}
         c.draft = None
-        return {"ticket_id": ack.ticket_id, "card": card, "text": f"✅ Заявка {ack.ticket_id} создана в ТОиР."}
+        return {"ticket_id": ack.ticket_id, "card": card, "text": f"Заявка {ack.ticket_id} создана в ТОиР."}
 
     def _confirm_turn(self, c: Conv, user: dict, inspection_ok: bool, turn: Turn) -> Turn:
         try:

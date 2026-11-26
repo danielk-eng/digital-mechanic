@@ -13,9 +13,13 @@ import time
 
 from .grounding import cited_labels, unverified_numbers
 
+STATUS_RU = {"anomaly": "отклонение", "normal": "норма", "check_failed": "сбой записи"}
+URG_RU = {"high": "высокий", "medium": "средний", "low": "низкий"}
+
 SUMMARY_PROMPT = """Составь резюме сессии ремонта для следующей смены и главного механика, 5–8 коротких строк, на {lang} языке, с жирными заголовками:
 **Машина**, **Проверка**, **Что сделано**, **Что нашли по руководству** (с метками [S#] из диалога), **Что осталось**, **Заявка / ремонт**.
-Только факты из данных ниже, ничего не добавляй и не советуй сверх сказанного. Числа — только как в данных."""
+Только факты из данных ниже, ничего не добавляй и не советуй сверх сказанного. Числа — только как в данных.
+Пиши человеческим языком: без служебных слов и значений из данных (anomaly, normal, medium, null, score, confidence, repair, session) — «отклонение», «норма», «приоритет средний», «оценка», «уверенность»; если ремонта нет — «ремонт не начат"."""
 
 
 def package(agent, c, limit_msgs: int = 40) -> dict:
@@ -51,14 +55,14 @@ def _plain(p: dict) -> str:
     v, ch = p["vehicle"], p["check"]
     lines = [f"**Машина**: {v['vehicle_id']} · {v.get('model') or ''} · {v['engine_model']}"]
     if ch:
-        lines.append(f"**Проверка**: {ch.get('session_id')} — {ch.get('status')} {ch.get('anomaly_type') or ''} {ch.get('anomaly_title') or ''}".strip())
+        lines.append(f"**Проверка**: {ch.get('session_id')}, {STATUS_RU.get(ch.get('status'), ch.get('status'))} {ch.get('anomaly_type') or ''} {ch.get('anomaly_title') or ''}".strip())
     asked = [d["text"] for d in p["dialog"] if d["role"] == "user"][-3:]
     if asked:
         lines.append("**Что спрашивали**: " + "; ".join(a[:120] for a in asked))
     if p["pages"]:
         lines.append("**Страницы**: " + ", ".join(f"{x['document']} стр. {x['page']}" for x in p["pages"][:6]))
     if p["ticket"]:
-        lines.append(f"**Заявка**: {p['ticket']['ticket_id']} ({p['ticket']['urgency']})")
+        lines.append(f"**Заявка**: {p['ticket']['ticket_id']} (приоритет {URG_RU.get(p['ticket']['urgency'], p['ticket']['urgency'])})")
     if p["repair"]:
         lines.append(f"**Ремонт**: {p['repair']['title']}, шаг {p['repair']['step']} из {p['repair']['steps']}")
     return "\n".join(lines)

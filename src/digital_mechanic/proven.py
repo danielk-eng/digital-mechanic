@@ -20,6 +20,13 @@ def _next_normal(sessions, after_session: str | None, after_ts: str | None = Non
     return getattr(later[0].status, "value", later[0].status) == "normal"
 
 
+def _op(o) -> dict:
+    """Ticket payload operations are plain strings (TicketRequest); older drafts stored dicts."""
+    if isinstance(o, str):
+        return {"text": o, "doc_id": None, "page": None, "document": None}
+    return {"text": o.get("text"), "doc_id": o.get("doc_id"), "page": o.get("page"), "document": o.get("document")}
+
+
 def proven_fixes(agent, vehicle_id: str, code: str | None, limit: int = 5) -> list[dict]:
     if not code:
         return []
@@ -35,12 +42,11 @@ def proven_fixes(agent, vehicle_id: str, code: str | None, limit: int = 5) -> li
                 continue
             rep = agent.store.one("SELECT * FROM repairs WHERE ticket_id=? OR (vehicle_id=? AND session_id=?) ORDER BY id DESC LIMIT 1",
                                   (t["ticket_id"], vid, t["session_id"]))
-            steps = json.loads(rep["steps"]) if rep else [{"text": o.get("text"), "doc_id": o.get("doc_id"), "page": o.get("page"),
-                                                            "document": o.get("document")} for o in t["payload"].get("operations", [])]
+            steps = json.loads(rep["steps"]) if rep else [_op(o) for o in t["payload"].get("operations", [])]
             out.append({"vehicle_id": vid, "date": time.strftime("%Y-%m-%d", time.localtime(t["ts"])), "ticket_id": t["ticket_id"],
                         "status": (rep or {}).get("status") or t.get("status"), "source": "fleet",
                         "steps": [{"text": s.get("text"), "doc_id": s.get("doc_id"), "page": s.get("page"), "document": s.get("document")} for s in steps][:8],
-                        "parts": [p.get("name") or p.get("text") for p in t["payload"].get("spare_parts", [])][:5],
+                        "parts": [p if isinstance(p, str) else (p.get("name") or p.get("text")) for p in t["payload"].get("spare_parts", [])][:5],
                         "verified": _next_normal(sessions, t["session_id"])})
         # 2) demo history (synthetic past tickets of this fleet)
         for e in agent.demo.get(vid, []):

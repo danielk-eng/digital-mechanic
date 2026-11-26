@@ -58,3 +58,15 @@ def test_proven_fixes_same_engine_and_code(make_agent):
     fixes = proven_fixes(a, "E549YT198", "F02")
     assert fixes and all(a.fleet.get(f["vehicle_id"]).engine_model == "ЯМЗ-236М2" for f in fixes)
     assert any(f["verified"] is True for f in fixes)
+
+
+def test_proven_fixes_with_real_ticket_payload(make_agent):
+    """Regression: TicketRequest stores operations/spare_parts as plain strings; /api/proven returned 500."""
+    from digital_mechanic.proven import proven_fixes
+    a = make_agent([])
+    s = next(s for s in a.fleet.sessions("M333YK47") if s.anomaly_type == "F08")
+    a.store.add_ticket("u1", {"vehicle_id": "M333YK47", "session_id": s.session_id, "urgency": "medium", "anomaly_type": "F08",
+                              "operations": ["Проверить форсунки"], "spare_parts": ["Форсунка"]}, "TKT-T1")
+    fixes = proven_fixes(a, "M333YK47", "F08")
+    f = next(f for f in fixes if f["ticket_id"] == "TKT-T1")
+    assert f["steps"][0]["text"] == "Проверить форсунки" and f["parts"] == ["Форсунка"]
