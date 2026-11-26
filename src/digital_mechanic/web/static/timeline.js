@@ -28,3 +28,24 @@ function renderTimeline(tl) {
   }
   return h + "</div>";
 }
+
+// Items 10-11: "service book / pre-arrival" card — what is already known about the vehicle before the first question.
+function arrivalCard(tl, tr) {
+  tr = tr || (k => k);
+  const es = tl.entries || [];
+  if (!es.length) return "";
+  const e = es[0], esc_ = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  const lines = [];
+  const ago = tl.days_since_last_check != null ? ` (${tl.days_since_last_check} ${tr("days_ago")})` : "";
+  lines.push(`🩺 ${tr("last_check")}: <b>${esc_(e.date)}</b>${ago} — ${esc_(e.status_ru)}${e.anomaly_type ? ` ${esc_(e.anomaly_type)} ${esc_(e.component || "")}` : ""}${e.anomaly_score != null ? ` · score ${(+e.anomaly_score).toFixed(2)}` : ""}`);
+  if ((tl.recurring || []).length) lines.push(`🔁 ${tr("recurring")}: ` + tl.recurring.map(r => `<b>${esc_(r.anomaly_type)}</b> ${esc_(r.component || "")} ×${r.count}`).join("; "));
+  const open = es.find(x => x.ticket && !["closed", "returned"].includes(x.ticket.status));
+  if (open) lines.push(`📝 ${tr("open_ticket")}: <b>${esc_(open.ticket.ticket_id)}</b> (${esc_(open.ticket.status)})`);
+  const rep = es.find(x => x.repair && x.repair.status === "open");
+  if (rep) lines.push(`🛠 ${tr("repair_in_progress")}: ${rep.repair.done}/${rep.repair.total}`);
+  const last = es.find(x => x.repair && x.repair.status === "done");
+  if (last) lines.push(`✅ ${tr("last_fix")}: ${esc_(last.repair.date || last.date)} — ${esc_((last.repair.steps_done || []).slice(0, 3).join("; "))}` +
+    (last.parts && last.parts.length ? ` · ${esc_(last.parts.map(p => p.name || p.text || p).join(", "))}` : "") +
+    (last.recheck ? ` · ${tr("recheck")}: ${esc_(last.recheck.status_ru)}` : ""));
+  return `<div class="arrival"><b>📋 ${tr("arrival")}</b>${lines.map(l => `<div>${l}</div>`).join("")}</div>`;
+}

@@ -79,3 +79,4 @@ html[data-fs=xl] .bar label.chip{padding:.4em .5em!important}
 .acts{gap:.4em;margin-top:.3em;flex-wrap:wrap}
 .thumb{height:72px;border-radius:6px;margin:.2em}.att{padding:.3em 0}tr.det td{background:rgba(255,255,255,.03)}
 .proven{margin-top:.5em;border-top:1px dashed #445;padding-top:.4em}.proven .fix{margin:.4em 0}
+.arrival{margin:.5em 0;padding:.5em .6em;border-radius:8px;background:rgba(61,139,253,.08);border:1px solid #3d8bfd;font-size:.95em;line-height:1.45}

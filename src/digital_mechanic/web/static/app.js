@@ -253,7 +253,8 @@ async function selectVehicle(vid) {
   $("#vehInfo").classList.remove("hidden");
   $("#vehInfo").innerHTML = `<b>${esc(v.vehicle_id)}</b> · ${esc(v.model && v.model.startsWith(v.make) ? v.model : v.make + " " + (v.model || ""))} · ${esc(v.vehicle_type)}<br>⚙️ <b>${esc(v.engine_model)}</b> (${esc(v.fuel)}) · гараж. ${esc(v.garage_no)}<div class="scope" title="${esc(r.manuals.map(m => m.title).join(" · "))}">🔎 ${t("scope_only")} <b>${esc(v.engine_model)}</b> · ${r.manuals.length} ${t("books")}</div><div class="muted">📚 ${r.manuals.map(m => esc(m.title)).join(" · ")}</div>` +
     (r.tickets.length ? `<div class="muted">${t("tickets")}: ${r.tickets.slice(0, 3).map(x => esc(x.ticket_id)).join(", ")}</div>` : "") +
-    `<div class="row acts"><button id="btnHist" class="expand">🗂 ${t("history")}</button><button id="btnSum" class="expand">📝 ${t("summary")}</button><button id="btnHand" class="expand">🙋 ${t("handoff")}</button></div><div id="histBox" class="hidden"></div>`;
+    `<div class="row acts"><button id="btnHist" class="expand">🗂 ${t("history")}</button><button id="btnSum" class="expand">📝 ${t("summary")}</button><button id="btnHand" class="expand">🙋 ${t("handoff")}</button></div><div id="arrBox"></div><div id="histBox" class="hidden"></div>`;
+  api(`/api/history/${encodeURIComponent(vid)}`).then(tl => { if (VID === vid && $("#arrBox")) $("#arrBox").innerHTML = arrivalCard(tl, t); }).catch(() => {});
   $("#btnSum").onclick = async () => {
     const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
     try { const s = await api("/api/summary", {json: {vehicle_id: VID}}); th.querySelector(".b").innerHTML = `<b>📝 ${t("summary")}</b><br>` + md(s.text) + pagesHtml(s.pages); }
