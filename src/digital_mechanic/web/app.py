@@ -24,6 +24,7 @@ from ..agent.prompts import VISION_PROMPT
 from ..bootstrap import build_agent
 from ..clients import ServiceError
 from ..config import get_settings
+from ..history import mask_name
 from ..i18n import LANGS, lang_or_default
 
 S = get_settings()
@@ -198,6 +199,78 @@ def _record(u: dict, c, action: str, inp: str, turn, t0: float, card_meta: dict 
     STORE.audit(user_id=u["id"], role=u["role"], vehicle_id=c.vehicle.vehicle_id if c.vehicle else None, action=action, input=pii.mask(inp)[:2000],
                 output=turn.text[:4000], tools=turn.tools, sources=[f"{s['document']} стр.{s['page']}" for s in turn.sources], latency_ms=lat, tokens=turn.tokens, ok=int(turn.ok))
     jlog(event=action, user=u["id"][:8], vehicle=c.vehicle.vehicle_id if c.vehicle else None, latency_ms=lat, tokens=turn.tokens, tools=[t["tool"] for t in turn.tools], ok=turn.ok)
+
+
+class VehIn(BaseModel):
+    vehicle_id: str
+    note: str = ""
+
+
+def _conv_for(u: dict, vid: str):
+    if vid not in AGENT.fleet.ids():
+        raise HTTPException(404, "unknown vehicle")
+    return AGENT.conv(u["id"], vid)
+
+
+@app.post("/api/summary")
+def session_summary(body: VehIn, uid: str | None = Cookie(None)) -> dict:
+    """Item 9: short summary of this vehicle's session for the next shift / the chief."""
+    u = user_of(uid)
+    s = AGENT.summary(_conv_for(u, body.vehicle_id), u)
+    STORE.audit(user_id=u["id"], role=u["role"], vehicle_id=body.vehicle_id, action="summary", output=s["text"][:2000], ok=1)
+    return {"text": s["text"], "llm": s["llm"], "pages": s["package"]["pages"]}
+
+
+@app.post("/api/handoff")
+def handoff(body: VehIn, uid: str | None = Cookie(None)) -> dict:
+    """Item 8: hand the case to the chief mechanic with a package (vehicle, ML verdict, dialog, pages, photos)."""
+    u = user_of(uid)
+    r = AGENT.handoff(_conv_for(u, body.vehicle_id), u, body.note)
+    STORE.audit(user_id=u["id"], role=u["role"], vehicle_id=body.vehicle_id, action="handoff", input=pii.mask(body.note)[:500], output=r["summary"][:2000], ok=1)
+    return r
+
+
+@app.get("/api/tickets")
+def tickets_list(uid: str | None = Cookie(None)) -> dict:
+    user_of(uid, manager=True)
+    out = []
+    for t in STORE.tickets():
+        p = t["payload"]
+        out.append({"ticket_id": t["ticket_id"], "vehicle_id": t["vehicle_id"], "urgency": t["urgency"], "anomaly_type": t["anomaly_type"],
+                    "at": time.strftime("%d.%m.%Y %H:%M", time.localtime(t["ts"])), "conclusion": p.get("conclusion", ""),
+                    "operations": p.get("operations", []), "status": t.get("status"), "attachments": t.get("attachments"), "review": t.get("review")})
+    return {"tickets": out}
+
+
+@app.get("/api/handoffs")
+def handoffs(status: str | None = None, uid: str | None = Cookie(None)) -> dict:
+    user_of(uid, manager=True)
+    rows = STORE.handoffs(status)
+    for r in rows:
+        r["user_name"] = mask_name(r.get("user_name") or "")
+    return {"handoffs": rows}
+
+
+class ResolveIn(BaseModel):
+    status: str
+    comment: str = ""
+
+
+@app.post("/api/handoff/{hid}")
+def resolve_handoff(hid: int, body: ResolveIn, uid: str | None = Cookie(None)) -> dict:
+    u = user_of(uid, manager=True)
+    if body.status not in ("taken", "closed", "open"):
+        raise HTTPException(400, "status")
+    STORE.resolve_handoff(hid, u["id"], body.status, pii.mask(body.comment)[:500])
+    return {"ok": True}
+
+
+@app.get("/api/photo/{name}")
+def photo_file(name: str, uid: str | None = Cookie(None)):
+    user_of(uid, manager=True)
+    if not re.fullmatch(r"[\w.-]{3,80}", name) or not (Path(S.uploads_dir) / name).is_file():
+        raise HTTPException(404)
+    return FileResponse(Path(S.uploads_dir) / name)
 
 
 class DiagIn(BaseModel):

@@ -62,6 +62,9 @@ function addMsg(role, html, cls = "") {
   return d;
 }
 
+function pagesHtml(pages) {
+  return pages && pages.length ? `<div class="muted" style="margin-top:.4em">` + pages.map(s => `<span class="chip ${s.extra ? "x" : ""}" data-doc="${s.doc_id}" data-page="${s.page}">${esc(s.document.slice(0, 30))}, ${t("page")} ${s.page}</span>`).join("") + "</div>" : "";
+}
 function sourcesHtml(sources) {
   if (!sources || !sources.length) return "";
   return `<div class="muted" style="margin-top:.4em">${t("source")}: ` + sources.map(s =>
@@ -237,7 +240,18 @@ async function selectVehicle(vid) {
   $("#vehInfo").classList.remove("hidden");
   $("#vehInfo").innerHTML = `<b>${esc(v.vehicle_id)}</b> · ${esc(v.model && v.model.startsWith(v.make) ? v.model : v.make + " " + (v.model || ""))} · ${esc(v.vehicle_type)}<br>⚙️ <b>${esc(v.engine_model)}</b> (${esc(v.fuel)}) · гараж. ${esc(v.garage_no)}<div class="scope" title="${esc(r.manuals.map(m => m.title).join(" · "))}">🔎 ${t("scope_only")} <b>${esc(v.engine_model)}</b> · ${r.manuals.length} ${t("books")}</div><div class="muted">📚 ${r.manuals.map(m => esc(m.title)).join(" · ")}</div>` +
     (r.tickets.length ? `<div class="muted">${t("tickets")}: ${r.tickets.slice(0, 3).map(x => esc(x.ticket_id)).join(", ")}</div>` : "") +
-    `<button id="btnHist" class="expand">🗂 ${t("history")}</button><div id="histBox" class="hidden"></div>`;
+    `<div class="row acts"><button id="btnHist" class="expand">🗂 ${t("history")}</button><button id="btnSum" class="expand">📝 ${t("summary")}</button><button id="btnHand" class="expand">🙋 ${t("handoff")}</button></div><div id="histBox" class="hidden"></div>`;
+  $("#btnSum").onclick = async () => {
+    const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
+    try { const s = await api("/api/summary", {json: {vehicle_id: VID}}); th.querySelector(".b").innerHTML = `<b>📝 ${t("summary")}</b><br>` + md(s.text) + pagesHtml(s.pages); }
+    catch (e) { th.querySelector(".b").textContent = e.message; }
+  };
+  $("#btnHand").onclick = async () => {
+    const note = prompt(t("handoff_note")); if (note === null) return;
+    const th = addMsg("bot", `<span class="thinking">${t("thinking")}</span>`);
+    try { const s = await api("/api/handoff", {json: {vehicle_id: VID, note}}); th.querySelector(".b").innerHTML = `<b>🙋 ${t("handoff_done")} №${s.id}</b><br>` + md(s.summary) + pagesHtml(s.pages); }
+    catch (e) { th.querySelector(".b").textContent = e.message; }
+  };
   $("#btnHist").onclick = async () => {
     const box = $("#histBox");
     if (!box.classList.contains("hidden")) { box.classList.add("hidden"); return; }

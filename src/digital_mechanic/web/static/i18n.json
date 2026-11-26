@@ -84,7 +84,11 @@
   "key_facts": "Важно из руководства",
   "alternatives": "Другие варианты",
   "hypothesis": "Проверить гипотезу",
-  "hypothesis_ph": "Ваша гипотеза: например «прокладка ГБЦ»"
+  "hypothesis_ph": "Ваша гипотеза: например «прокладка ГБЦ»",
+  "summary": "Резюме для смены",
+  "handoff": "Передать главному",
+  "handoff_note": "Что передать главному? (необязательно)",
+  "handoff_done": "Передано главному механику"
  },
  "uz": {
   "app_title": "Raqamli mexanik",
@@ -171,7 +175,11 @@
   "key_facts": "Qoʻllanmadan muhim",
   "alternatives": "Boshqa variantlar",
   "hypothesis": "Gipotezani tekshirish",
-  "hypothesis_ph": "Gipotezangiz: masalan «blok kallagi qistirmasi»"
+  "hypothesis_ph": "Gipotezangiz: masalan «blok kallagi qistirmasi»",
+  "summary": "Smena uchun xulosa",
+  "handoff": "Bosh mexanikka topshirish",
+  "handoff_note": "Bosh mexanikka nima deyish kerak? (ixtiyoriy)",
+  "handoff_done": "Bosh mexanikka topshirildi"
  },
  "tg": {
   "app_title": "Механики рақамӣ",
@@ -258,7 +266,11 @@
   "key_facts": "Муҳим аз дастур",
   "alternatives": "Вариантҳои дигар",
   "hypothesis": "Санҷиши фарзия",
-  "hypothesis_ph": "Фарзияи шумо: масалан «прокладкаи сари блок»"
+  "hypothesis_ph": "Фарзияи шумо: масалан «прокладкаи сари блок»",
+  "summary": "Хулоса барои баст",
+  "handoff": "Ба сармеханик супоридан",
+  "handoff_note": "Ба сармеханик чӣ гӯем? (ихтиёрӣ)",
+  "handoff_done": "Ба сармеханик супорида шуд"
  },
  "kk": {
   "app_title": "Цифрлық механик",
@@ -345,7 +357,11 @@
   "key_facts": "Нұсқаулықтан маңызды",
   "alternatives": "Басқа нұсқалар",
   "hypothesis": "Болжамды тексеру",
-  "hypothesis_ph": "Болжамыңыз: мысалы «блок қақпағының төсемі»"
+  "hypothesis_ph": "Болжамыңыз: мысалы «блок қақпағының төсемі»",
+  "summary": "Ауысымға қорытынды",
+  "handoff": "Бас механикке беру",
+  "handoff_note": "Бас механикке не айту керек? (міндетті емес)",
+  "handoff_done": "Бас механикке берілді"
  },
  "hi": {
   "app_title": "डिजिटल मैकेनिक",
@@ -432,7 +448,11 @@
   "key_facts": "पुस्तिका से महत्वपूर्ण",
   "alternatives": "अन्य विकल्प",
   "hypothesis": "अनुमान जाँचें",
-  "hypothesis_ph": "आपका अनुमान: जैसे «हेड गैस्केट»"
+  "hypothesis_ph": "आपका अनुमान: जैसे «हेड गैस्केट»",
+  "summary": "शिफ्ट के लिए सारांश",
+  "handoff": "मुख्य मैकेनिक को सौंपें",
+  "handoff_note": "मुख्य मैकेनिक को क्या बताना है? (वैकल्पिक)",
+  "handoff_done": "मुख्य मैकेनिक को सौंप दिया गया"
  },
  "vi": {
   "app_title": "Thợ máy số",
@@ -519,6 +539,10 @@
   "key_facts": "Quan trọng từ sổ tay",
   "alternatives": "Phương án khác",
   "hypothesis": "Kiểm tra giả thuyết",
-  "hypothesis_ph": "Giả thuyết của bạn: ví dụ «gioăng nắp máy»"
+  "hypothesis_ph": "Giả thuyết của bạn: ví dụ «gioăng nắp máy»",
+  "summary": "Tóm tắt cho ca sau",
+  "handoff": "Chuyển cho thợ trưởng",
+  "handoff_note": "Ghi chú cho thợ trưởng (không bắt buộc)",
+  "handoff_done": "Đã chuyển cho thợ trưởng"
  }
 }

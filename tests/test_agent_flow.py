@@ -194,3 +194,18 @@ def test_start_chips_and_bare_fault_code(make_agent):
     assert "code" in kinds and kinds.count("symptom") >= 2
     a.handle(c, {"lang": "ru"}, "F02")
     assert "Код неисправности F02 «Низкое давление масла»" in str(a.llm.calls[-1]["messages"])
+
+
+def test_summary_handoff_and_ticket_package(make_agent):
+    a = make_agent([msg("**Машина**: M333YK47\n**Что сделано**: момент 421-461 Н·м.\n**Что нашли**: выдуманные 777 Н·м.")])
+    a.llm.available = lambda: True
+    c = a.conv("u1", "M333YK47")
+    a.store.upsert_user("u1", name="Иван Петров", role="mechanic")
+    a.store.add_message(c.cid, "u1", "M333YK47", "user", "Какой момент?")
+    a.store.add_message(c.cid, "u1", "M333YK47", "assistant", "421-461 Н·м")
+    r = a.handoff(c, {"id": "u1", "lang": "ru"}, "застрял на шаге 3")
+    assert "421-461" in r["summary"] and "777" not in r["summary"]
+    h = a.store.handoffs("open")[0]
+    assert h["vehicle_id"] == "M333YK47" and h["payload"]["dialog"]
+    a.store.delete_user_data("u1")
+    assert not a.store.handoffs()

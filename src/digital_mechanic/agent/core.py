@@ -484,7 +484,7 @@ class Agent:
     def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None) -> Turn:
         with c.lock:
             turn = self._handle(c, user, text, image_note, event)
-            if turn.text and turn.sources:
+            if turn.text and turn.sources and not turn.text.startswith("LLM временно недоступна"):
                 from .facts import key_facts
 
                 frags = [{"label": l, **c.frags[l]} for l in cited_labels(turn.text) if l in c.frags and not c.frags[l].get("extra")]
@@ -688,6 +688,16 @@ class Agent:
             turn.tools.append({"tool": "number_guard", "removed": bad})
         return answer
 
+    def summary(self, c: Conv, user: dict) -> dict:
+        from .handoff import summarize
+
+        return summarize(self, c, LANGS[lang_or_default(user.get("lang"))]["llm"])
+
+    def handoff(self, c: Conv, user: dict, note: str = "") -> dict:
+        s = self.summary(c, user)
+        hid = self.store.add_handoff(user["id"], c.vehicle.vehicle_id, "handoff", pii.mask(note)[:500], s["text"], s["package"])
+        return {"id": hid, "summary": s["text"], "pages": s["package"]["pages"], "photos": s["package"]["photos"]}
+
     def _source_view(self, label: str, c: Conv) -> dict:
         f = c.frags[label]
         return {"label": label, "document": f["document"], "doc_id": f["doc_id"], "page": f["page"], "extra": bool(f.get("extra")), "image": f.get("image")}
@@ -726,6 +736,15 @@ class Agent:
         req = TicketRequest(**c.draft["request"])
         ack = self.toir.create_ticket(req)
         self.store.add_ticket(c.uid, c.draft["request"], ack.ticket_id)
+        try:  # item 7: the ticket carries its context (answer, pages, photos, summary), not just the JSON
+            from .handoff import package, _plain
+
+            p = package(self, c)
+            last = next((d["text"] for d in reversed(p["dialog"]) if d["role"] == "assistant"), "")
+            self.store.set_ticket_attachments(ack.ticket_id, {"summary": _plain(p), "answer": last[:2500], "pages": p["pages"],
+                                                              "photos": p["photos"], "check": p["check"]})
+        except Exception:
+            pass
         card = {"kind": "ticket_created", "ticket_id": ack.ticket_id, "request": c.draft["request"]}
         c.draft = None
         return {"ticket_id": ack.ticket_id, "card": card, "text": f"✅ Заявка {ack.ticket_id} создана в ТОиР."}

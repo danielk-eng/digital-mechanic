@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS diagnoses(
   anomaly_type TEXT, anomaly_score REAL, confidence REAL, signal_quality TEXT, decision TEXT, urgency TEXT, payload TEXT);
 CREATE TABLE IF NOT EXISTS tickets(
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user_id TEXT, vehicle_id TEXT, session_id TEXT, ticket_id TEXT,
-  urgency TEXT, anomaly_type TEXT, payload TEXT, status TEXT DEFAULT 'created');
+  urgency TEXT, anomaly_type TEXT, payload TEXT, status TEXT DEFAULT 'created', attachments TEXT, review TEXT);
 CREATE TABLE IF NOT EXISTS repairs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, started REAL, updated REAL, finished REAL, user_id TEXT, vehicle_id TEXT,
   session_id TEXT, ticket_id TEXT, title TEXT, steps TEXT, current INTEGER DEFAULT 0, status TEXT DEFAULT 'open');
@@ -31,6 +31,9 @@ CREATE TABLE IF NOT EXISTS messages(
 CREATE TABLE IF NOT EXISTS audit(
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user_id TEXT, role TEXT, vehicle_id TEXT, action TEXT,
   input TEXT, output TEXT, tools TEXT, sources TEXT, latency_ms INTEGER, tokens INTEGER, ok INTEGER);
+CREATE TABLE IF NOT EXISTS handoffs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, user_id TEXT, vehicle_id TEXT, kind TEXT, note TEXT, summary TEXT,
+  payload TEXT, status TEXT DEFAULT 'open', resolved_by TEXT, resolved_at REAL, comment TEXT);
 CREATE INDEX IF NOT EXISTS diag_v ON diagnoses(vehicle_id, ts);
 CREATE INDEX IF NOT EXISTS tick_v ON tickets(vehicle_id, ts);
 CREATE INDEX IF NOT EXISTS rep_v ON repairs(vehicle_id, status);
@@ -52,6 +55,11 @@ class Store:
         if "detail" not in cols:  # migrate DBs created before brief/detailed answers
             self._con.execute("ALTER TABLE users ADD COLUMN detail TEXT DEFAULT 'brief'")
             self._con.commit()
+        tcols = {r[1] for r in self._con.execute("PRAGMA table_info(tickets)")}
+        for col in ("attachments", "review"):  # ticket package (answer, pages, photos, summary) and chief's approval
+            if col not in tcols:
+                self._con.execute(f"ALTER TABLE tickets ADD COLUMN {col} TEXT")
+        self._con.commit()
 
     def x(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -81,7 +89,7 @@ class Store:
         return self.one("SELECT * FROM users WHERE id=?", (uid,))
 
     def delete_user_data(self, uid: str) -> None:
-        for t in ("messages", "audit"):
+        for t in ("messages", "audit", "handoffs"):
             self.x(f"DELETE FROM {t} WHERE user_id=?", (uid,))
         for t in ("diagnoses", "tickets", "repairs"):
             self.x(f"UPDATE {t} SET user_id=NULL WHERE user_id=?", (uid,))  # keep fleet records, unlink person
@@ -104,7 +112,15 @@ class Store:
             rows = self.q("SELECT * FROM tickets ORDER BY ts DESC")
         for r in rows:
             r["payload"] = json.loads(r["payload"])
+            r["attachments"] = json.loads(r.get("attachments") or "null")
+            r["review"] = json.loads(r.get("review") or "null")
         return rows
+
+    def set_ticket_attachments(self, ticket_id: str, att: dict) -> None:
+        self.x("UPDATE tickets SET attachments=? WHERE ticket_id=?", (json.dumps(att, ensure_ascii=False), ticket_id))
+
+    def set_ticket_review(self, ticket_id: str, review: dict, status: str) -> None:
+        self.x("UPDATE tickets SET review=?, status=? WHERE ticket_id=?", (json.dumps(review, ensure_ascii=False), status, ticket_id))
 
     def repair_open(self, vehicle_id: str) -> dict | None:
         r = self.one("SELECT * FROM repairs WHERE vehicle_id=? AND status='open' ORDER BY id DESC LIMIT 1", (vehicle_id,))
@@ -129,6 +145,25 @@ class Store:
         self.x("UPDATE repairs SET steps=?, current=?, status=?, updated=?, finished=? WHERE id=?",
                (json.dumps(r["steps"], ensure_ascii=False), r["current"], r["status"], time.time(), r.get("finished"), r["id"]))
 
+    def add_handoff(self, uid: str, vehicle_id: str, kind: str, note: str, summary: str, payload: dict) -> int:
+        cur = self.x("INSERT INTO handoffs(ts,user_id,vehicle_id,kind,note,summary,payload) VALUES(?,?,?,?,?,?,?)",
+                     (time.time(), uid, vehicle_id, kind, note, summary, json.dumps(payload, ensure_ascii=False)))
+        return cur.lastrowid
+
+    def handoffs(self, status: str | None = None, vehicle_id: str | None = None, limit: int = 100) -> list[dict]:
+        sql, args = "SELECT h.*, u.name AS user_name FROM handoffs h LEFT JOIN users u ON u.id=h.user_id WHERE 1=1", []
+        if status:
+            sql += " AND h.status=?"; args.append(status)
+        if vehicle_id:
+            sql += " AND h.vehicle_id=?"; args.append(vehicle_id)
+        rows = self.q(sql + " ORDER BY h.id DESC LIMIT ?", (*args, limit))
+        for r in rows:
+            r["payload"] = json.loads(r["payload"] or "{}")
+        return rows
+
+    def resolve_handoff(self, hid: int, uid: str, status: str, comment: str = "") -> None:
+        self.x("UPDATE handoffs SET status=?, resolved_by=?, resolved_at=?, comment=? WHERE id=?", (status, uid, time.time(), comment, hid))
+
     def add_message(self, conv: str, uid: str, vehicle_id: str | None, role: str, content: str, meta: dict | None = None) -> None:
         self.x("INSERT INTO messages(ts,conv,user_id,vehicle_id,role,content,meta) VALUES (?,?,?,?,?,?,?)",
                (time.time(), conv, uid, vehicle_id, role, content, json.dumps(meta or {}, ensure_ascii=False)))
@@ -145,4 +180,5 @@ class Store:
         cutoff = time.time() - retention_days * 86400
         n = self.x("DELETE FROM audit WHERE ts<?", (cutoff,)).rowcount
         n += self.x("DELETE FROM messages WHERE ts<?", (cutoff,)).rowcount
+        n += self.x("DELETE FROM handoffs WHERE ts<? AND status!='open'", (cutoff,)).rowcount
         return n

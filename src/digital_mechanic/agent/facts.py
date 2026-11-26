@@ -46,7 +46,8 @@ def clip(s: str, rx, width: int = 230) -> str:
 
 def key_facts(frags: list[dict], query: str, answer: str, limit: int = 4) -> list[dict]:
     """frags: [{"label","doc_id","page","text"}] cited by the answer, in citation order."""
-    q = set(tokens(query)) | set(tokens(answer))
+    qq = set(tokens(query))
+    q = qq | set(tokens(answer))
     cands = []
     for rank, f in enumerate(frags[:4]):
         for s in sentences(f.get("text", "")):
@@ -56,9 +57,10 @@ def key_facts(frags: list[dict], query: str, answer: str, limit: int = 4) -> lis
             kind, s = kr[0], clip(s, kr[1])
             if re.search(r"[А-ЯЁ]{4,}\s+[А-ЯЁ]{4,}\s+[А-ЯЁ]{4,}", s):
                 continue  # table header run-in, not a statement
-            ov = len(q & set(tokens(s)))
-            if ov < (1 if kind == "danger" else 2):
-                continue
+            st = set(tokens(s))
+            ov = len(q & st)
+            if ov < (1 if kind == "danger" else 2) or (qq and not qq & st):
+                continue  # must touch the question itself, not only the answer wording
             cands.append((ov - 0.3 * rank, kind, s, f))
     cands.sort(key=lambda x: -x[0])
     out, used, seen = [], {}, set()

@@ -60,12 +60,42 @@ async function openVehicle(vid) {
 }
 $("#dClose").onclick = () => $("#drawer").classList.add("hidden");
 
+function pageLink(x) {
+  return x.extra ? `<a class="chip" target="_blank" href="/page/${encodeURIComponent(x.doc_id)}/${x.page}.png">${esc(x.document.slice(0, 26))}, стр. ${x.page}</a>`
+    : `<a class="chip" target="_blank" href="/manuals/${encodeURIComponent(x.doc_id)}.pdf#page=${x.page}">${esc(x.document.slice(0, 26))}, стр. ${x.page}</a>`;
+}
+function mdl(s) { return esc(s || "").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>"); }
+function attHtml(a) {  // ticket package: summary, last answer, pages, photos
+  if (!a) return `<div class="muted">Вложений нет (заявка создана до версии с пакетом)</div>`;
+  return `<div class="att"><div>${mdl(a.summary)}</div>` + (a.answer ? `<details><summary>Ответ агента</summary><div>${mdl(a.answer)}</div></details>` : "") +
+    (a.pages && a.pages.length ? `<div>📄 ${a.pages.map(pageLink).join(" ")}</div>` : "") +
+    (a.photos && a.photos.length ? `<div>${a.photos.map(n => `<a target="_blank" href="/api/photo/${encodeURIComponent(n)}"><img class="thumb" src="/api/photo/${encodeURIComponent(n)}"></a>`).join("")}</div>` : "") + `</div>`;
+}
 async function loadTickets() {
-  const rows = []; // tickets come from the fleet endpoint per vehicle; aggregate via audit-safe endpoint
-  const vs = FLEET.vehicles.filter(v => v.tickets);
-  for (const v of vs) { const h = await api(`/api/fleet/${encodeURIComponent(v.vehicle_id)}`); h.tickets.forEach(x => rows.push({...x, vehicle_id: v.vehicle_id})); }
-  $("#tab-tickets").innerHTML = rows.length ? `<table><tr><th>№</th><th>ТС</th><th>Приоритет</th><th>Тип</th><th>Создана</th><th>Диагноз</th></tr>` + rows.map(x => `<tr class="click" data-v="${x.vehicle_id}"><td><b>${esc(x.ticket_id)}</b></td><td>${esc(x.vehicle_id)}</td><td>${esc(x.urgency)}</td><td>${esc(x.anomaly_type)}</td><td>${esc(x.at)}</td><td>${esc(x.conclusion)}</td></tr>`).join("") + "</table>" : `<div class="muted">Заявок пока нет</div>`;
-  document.querySelectorAll("#tab-tickets tr[data-v]").forEach(tr => tr.onclick = () => openVehicle(tr.dataset.v));
+  const r = await api("/api/tickets"); const rows = r.tickets;
+  $("#tab-tickets").innerHTML = rows.length ? `<table><tr><th>№</th><th>ТС</th><th>Приоритет</th><th>Тип</th><th>Создана</th><th>Диагноз</th><th>Статус</th></tr>` + rows.map((x, i) =>
+    `<tr class="click" data-i="${i}"><td><b>${esc(x.ticket_id)}</b> ${x.attachments ? "📎" : ""}</td><td>${esc(x.vehicle_id)}</td><td>${esc(x.urgency)}</td><td>${esc(x.anomaly_type)}</td><td>${esc(x.at)}</td><td>${esc(x.conclusion)}</td><td>${esc(TSTATUS[x.status] || x.status || "")}</td></tr>` +
+    `<tr class="hidden det" id="tk${i}"><td colspan="7">${attHtml(x.attachments)}<div class="row" style="margin-top:.4em"><button onclick="openVehicle('${x.vehicle_id}')">🗂 Машина</button>${reviewHtml(x)}</div></td></tr>`).join("") + "</table>" : `<div class="muted">Заявок пока нет</div>`;
+  document.querySelectorAll("#tab-tickets tr[data-i]").forEach(tr => tr.onclick = () => $("#tk" + tr.dataset.i).classList.toggle("hidden"));
+  bindReview();
+}
+const TSTATUS = {created: "создана", approved: "утверждена", returned: "возвращена"};
+function reviewHtml(x) { return ""; }
+function bindReview() {}
+async function loadHandoffs() {
+  const r = await api("/api/handoffs");
+  const st = {open: "🟠 новая", taken: "🔵 в работе у главного", closed: "✅ закрыта"};
+  $("#tab-handoffs").innerHTML = r.handoffs.length ? r.handoffs.map(h => `<div class="card"><div class="row"><b>${esc(h.vehicle_id)}</b><span class="muted">${new Date(h.ts * 1000).toLocaleString("ru-RU")} · ${esc(h.user_name)}</span><span>${st[h.status] || h.status}</span></div>` +
+    (h.note ? `<div>💬 ${esc(h.note)}</div>` : "") + `<div style="margin:.4em 0">${mdl(h.summary)}</div>` +
+    (h.payload.check ? `<div class="muted">ML: ${esc(h.payload.check.status)} ${esc(h.payload.check.anomaly_type || "")} · score ${h.payload.check.anomaly_score ?? "—"} · conf ${h.payload.check.confidence ?? "—"}</div>` : "") +
+    (h.payload.pages.length ? `<div>📄 ${h.payload.pages.map(pageLink).join(" ")}</div>` : "") +
+    (h.payload.photos.length ? `<div>${h.payload.photos.map(n => `<a target="_blank" href="/api/photo/${encodeURIComponent(n)}"><img class="thumb" src="/api/photo/${encodeURIComponent(n)}"></a>`).join("")}</div>` : "") +
+    `<details><summary>Диалог (${h.payload.dialog.length})</summary>${h.payload.dialog.map(d => `<div class="msg ${d.role === "user" ? "user" : "bot"}"><div class="b">${mdl(d.text)}</div></div>`).join("")}</details>` +
+    `<div class="row">${h.status === "open" ? `<button data-h="${h.id}" data-s="taken">Взять в работу</button>` : ""}${h.status !== "closed" ? `<button data-h="${h.id}" data-s="closed">Закрыть</button>` : ""}<button onclick="openVehicle('${h.vehicle_id}')">🗂 Машина</button></div></div>`).join("")
+    : `<div class="muted">Пока никто не передавал случаи главному</div>`;
+  document.querySelectorAll("#tab-handoffs button[data-h]").forEach(b => b.onclick = async () => {
+    const comment = b.dataset.s === "closed" ? (prompt("Комментарий (необязательно)") || "") : "";
+    await api(`/api/handoff/${b.dataset.h}`, {json: {status: b.dataset.s, comment}}); loadHandoffs(); });
 }
 async function loadRepairs() {
   const vs = FLEET.vehicles.filter(v => v.in_repair);
@@ -89,7 +119,7 @@ async function loadEcon() {
 function tab(name) {
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   document.querySelectorAll("section[id^=tab-]").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
-  ({tickets: loadTickets, repairs: loadRepairs, audit: loadAudit, econ: loadEcon}[name] || (() => {}))();
+  ({tickets: loadTickets, repairs: loadRepairs, audit: loadAudit, econ: loadEcon, handoffs: loadHandoffs}[name] || (() => {}))();
 }
 document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => tab(b.dataset.tab));
 
