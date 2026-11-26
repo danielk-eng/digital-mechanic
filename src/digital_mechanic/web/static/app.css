@@ -62,3 +62,7 @@ tr.click{cursor:pointer}tr.click:hover{background:#1c262e}
 .tl-e summary{cursor:pointer;list-style:none}.tl-e.anomaly{border-left:4px solid var(--stop)}.tl-e.normal{border-left:4px solid var(--go)}.tl-e.check_failed{border-left:4px solid var(--blue)}
 .tl-e.rec{box-shadow:0 0 0 2px var(--warn) inset}.tl-badge{background:var(--warn);color:#1b1300;border-radius:999px;padding:0 .5em;font-size:.8em;font-weight:700}
 .tl-ans{margin:.4em 0;padding:.4em;border-radius:8px;background:#11181e;font-size:.92em}
+/* large text: keep the input usable on a phone */
+html[data-fs=l] .bar .mic,html[data-fs=xl] .bar .mic{width:2.6em;height:2.6em;min-width:2.6em;padding:0;font-size:1em}
+html[data-fs=xl] .bar textarea{min-width:40%}html[data-fs=xl] .bar button:not(.mic){padding:.5em .6em}
+html[data-fs=xl] .bar label.chip{padding:.4em .5em!important}
