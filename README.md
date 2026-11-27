@@ -5,11 +5,11 @@
 Веб-чат для механика на посту ТО (работает с телефона). Механик выбирает машину и проверку, агент берёт
 результат из ML-сервиса, объясняет его простыми словами, отвечает на вопросы **только по руководствам на
 двигатель этой машины** со ссылкой на страницу PDF, составляет заявку на дефектовку и отправляет её в ТОиР
-после подтверждения механика. Есть режим главного механика (сводка по парку), голос, фото, 6 языков.
+после подтверждения механика. Есть режим главного механика (сводка по парку), голосовой ввод и диалог, фото, 9 языков интерфейса и ответов.
 
 **Стенды:** основной — deb (docker compose + Cloudflare tunnel, адрес в `stand/PUBLIC_URL.txt`, с картинками страниц
 и локальным распознаванием речи); резерв — https://digital-mechanic-iikuznitsa.vercel.app (те же код и индекс,
-встроенные заглушки ML/ТОиР, без PDF-картинок и без локального Whisper, данные во временной папке).
+встроенные заглушки ML/ТОиР, без PDF-картинок и локального Whisper; серверные STT/TTS — через Cloud.ru/NVIDIA при наличии ключей).
 
 ### Что умеет (кратко)
 - **Ответ по шаблону** «Жалоба → Вероятная причина → Что проверить → Как исправить → Источник», кратко/подробно,
@@ -97,8 +97,8 @@ FastAPI (web/app.py) ── журнал, согласие, маскирован
 | `ingest/pages.py`, `retrieval/bm25.py` | Постраничный индекс PDF (pdftotext/pypdf), BM25 со стеммингом |
 | `agent/` | LLM-клиент, промпты, инструменты, проверка ответа |
 | `store.py`, `pii.py` | SQLite (пользователи, проверки, заявки, ремонты, переписка, аудит), маскирование ПДн |
-| `i18n.py`, `web/static/i18n.json` | ru, uz, tg, kk, hi, vi |
-| `voice.py`, `services/speech/` | STT: локальный faster-whisper large-v3-turbo (сервис `speech`) → Deepgram (ru/hi/vi) → браузер; TTS: Silero → браузер |
+| `i18n.py`, `web/static/i18n.json` | ru, uz, tg, kk, hi, vi, bn, ky, be |
+| `voice.py`, `services/speech/` | STT: Cloud.ru GigaASR/whisper-large-v3 → локальный faster-whisper → NVIDIA Parakeet (ru) → Deepgram → браузер; TTS: Cloud.ru SaluteSpeech (ru) → NVIDIA Chatterbox/Magpie (ru/hi/vi) → Silero/браузер |
 | `retrieval/sections.py`, `retrieval/synonyms.py` | Разделы руководств для цитат; нормализация жаргона и опечаток |
 | `agent/facts.py`, `agent/suggest.py`, `agent/handoff.py`, `proven.py`, `inspection.py` | Важное из руководства, подсказки, резюме/передача, проверенные решения, акт осмотра |
 
@@ -108,21 +108,27 @@ FastAPI (web/app.py) ── журнал, согласие, маскирован
 | `ML_SERVICE_URL`, `TOIR_SERVICE_URL` | Адреса ML-сервиса и ТОиР (F6). Подставить рабочие — больше ничего менять не нужно |
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | Любой OpenAI-совместимый API. По умолчанию TokenRouter, `deepseek/deepseek-v4.1-flash-1017-free` |
 | `LLM_THINKING` | `off` (по умолчанию) — без «размышлений», ответ в 3–4 раза быстрее (10–20 с) |
-| `DEEPGRAM_API_KEY` | Голосовой ввод (необязательно; без ключа — распознавание браузера) |
-| `SILERO_ENABLED` | Локальный синтез речи (нужен torch); иначе — синтез браузера |
+| `CLOUDRU_API_KEY`, `CLOUDRU_TTS` | Резервная LLM GigaChat-4, серверный STT и основная русская озвучка SaluteSpeech |
+| `NVIDIA_API_KEY` | NVIDIA Build: пакетный перевод, серверные TTS Chatterbox/Magpie и русский Parakeet STT |
+| `DEEPGRAM_API_KEY` | Дополнительный резерв распознавания речи |
+| `SILERO_ENABLED` | Локальный синтез речи (нужен torch); иначе — Cloud.ru/NVIDIA или синтез браузера |
 | `COMET_API_KEY` | Трассировка в Opik (необязательно, `pip install opik`) |
 | `PII_MASKING`, `REQUIRE_CONSENT`, `AUDIT_RETENTION_DAYS` | 152-ФЗ, см. `docs/152-ФЗ.md` |
 
 Секреты — только в `.env` / переменных окружения, в репозиторий и логи не попадают.
 
 ## Голос и языки
-Микрофон в чате: запись с автоостановкой по тишине → `/api/stt`. По умолчанию звук распознаётся **локально** —
-сервис `speech` (faster-whisper large-v3-turbo int8, CPU; `docker compose --profile speech up -d`, `SPEECH_URL=http://speech:9000`),
-с подсказкой терминов. Запасные: Deepgram nova-3 (только ru/hi/vi, `mip_opt_out`), затем распознавание браузера.
-`STT_ORDER=cloud-first` ставит Deepgram первым (быстрее на слабом CPU). Замеры — `docs/STT_ЗАМЕРЫ.md`
-(deb без GPU под нагрузкой: ru 10–27 с, kk 12 с, hi 11–15 с, vi 12 с; Deepgram ~1 с; tg живым голосом не проверен).
-Ответы можно озвучивать; режим «руки свободны» читает ответ и снова включает микрофон.
-Язык интерфейса выбирается при входе, язык ответов можно задать отдельно в настройках; руководства русские, поэтому цитаты и названия документов остаются на русском.
+Микрофон в поле чата работает как диктовка в мессенджере: запись с таймером и волной, крестик удаляет аудио без отправки,
+галочка завершает запись и отправляет её в `/api/stt`; если сеть или STT временно не сработали, аудио остаётся локально
+и его можно повторить без перезаписи. Серверная цепочка STT: Cloud.ru GigaASR (ru) / whisper-large-v3 (другие языки),
+локальный сервис `speech` (faster-whisper large-v3-turbo int8, CPU; `docker compose --profile speech up -d`,
+`SPEECH_URL=http://speech:9000`), NVIDIA Parakeet для русского, Deepgram nova-3 (`mip_opt_out`) и браузерный Web Speech.
+Порядок учитывает страну пользователя и требования локализации данных. Замеры — `docs/STT_ЗАМЕРЫ.md`.
+Ответы озвучиваются сервером: русская речь — Cloud.ru Realtime `GigaChat/SaluteSpeech` (`Bab-Freespeech`), резерв —
+NVIDIA Chatterbox (ru/hi) и Magpie (vi), затем локальный Silero или браузер. Режим «руки свободны» читает ответ и снова
+включает микрофон; субтитры речи — отдельная accessibility-настройка и по умолчанию выключены, чтобы не дублировать ответ.
+Язык интерфейса выбирается при входе, язык ответов можно задать отдельно в настройках; руководства русские, поэтому
+исходные цитаты и названия документов остаются доступны на русском.
 
 ## База знаний
 Шесть PDF Заказчика (ЯМЗ-236М2 РЭ и РК, ЯМЗ-536 РЭ и РК, ЗМЗ-5234.10 РК, ЗМЗ-40904/40905.10), 1743 страницы, номера страниц — по PDF.
@@ -140,7 +146,7 @@ SQLite `var/app.db` (WAL) и `var/app.log.jsonl`: кто, когда, по ка�
 
 ## Тесты
 ```bash
-PYTHONPATH=src python -m pytest -q     # 63 теста: контракт с заглушками, политика, поиск и разделы, проверка цифр, агент, голос, веб
+PYTHONPATH=src python -m pytest -q     # 391 тест: контракт с заглушками, политика, поиск и разделы, проверка цифр, агент, голос, веб
 python scripts/smoke.py <URL>           # вход → машины → диагностика → чат → подсказки → история на любом стенде
 ```
 
@@ -151,6 +157,6 @@ python scripts/smoke.py <URL>           # вход → машины → диаг
 ## Сторонние компоненты
 FastAPI, Uvicorn, Pydantic, httpx, openai-python, pypdf, PyYAML, snowballstemmer (BSD/MIT/Apache-2.0); poppler-utils
 (GPL, вызывается как внешняя программа для текста и картинок страниц); опционально faster-whisper (MIT), Silero TTS
-(лицензия CC BY-NC-SA — только для некоммерческого демо), Opik (Apache-2.0). Внешние API: TokenRouter (LLM), Deepgram (STT).
+(лицензия CC BY-NC-SA — только для некоммерческого демо), Opik (Apache-2.0). Внешние API: TokenRouter и Cloud.ru (LLM), Cloud.ru (STT/TTS), NVIDIA Build (перевод/STT/TTS), Deepgram (резервный STT).
 Интерфейс: шрифт Inter (SIL OFL 1.1, локально в `web/static/fonts/`), иконки Lucide (ISC, подмножество в `web/static/icons.js`).
 Заглушки ML/ТОиР в `vendor/neurodvs_mock/` — материалы Заказчика, в git их нет: `scripts/fetch_task_materials.py` скачивает архив по `TASK_MATERIALS_URL` без изменений кода; в git только наш Dockerfile и `data/vehicle_overlay.json` (модель МАЗ-5340С2 там, где в карточке model=null).
