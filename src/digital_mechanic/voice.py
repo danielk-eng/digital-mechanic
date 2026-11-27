@@ -281,7 +281,7 @@ TTS_MAX = 1200   # whole message as the client sends it (was cut at 900)
 
 
 def speakable(text: str) -> bool:
-    """Letters in any script or digits: Hindi/Vietnamese/… are speakable too, not only Russian."""
+    """Letters in any script or digits are speakable, not only Russian."""
     return any(ch.isalpha() or ch.isdigit() for ch in text)
 
 

@@ -138,9 +138,10 @@ def test_session_restored_from_signed_cookie_on_another_instance():
 
 
 def test_country_consent_and_privacy_page(client):
+    from pathlib import Path
     from digital_mechanic import privacy_laws
     cs = client.get("/api/countries?lang=uz").json()
-    assert cs["default"] == "RU" and {c["code"] for c in cs["countries"]} == {"RU", "UZ", "KZ", "KG", "BY", "TJ", "IN", "VN"}
+    assert cs["default"] == "RU" and {c["code"] for c in cs["countries"]} == {"RU", "UZ", "KZ", "KG", "TJ"}
     assert next(c for c in cs["countries"] if c["code"] == "UZ")["name"] == "Oʻzbekiston"
     r = client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": False, "country": "KZ"})
     assert r.status_code == 400 and "94-V" in r.json()["detail"]
@@ -148,9 +149,12 @@ def test_country_consent_and_privacy_page(client):
     assert u["country"] == "UZ"
     page = client.get("/privacy").text
     assert "ЗРУ-547" in page and "{{" not in page and "локально" in page
-    assert "91/2025/QH15" in client.get("/privacy?country=VN").text and "152-ФЗ" in client.get("/privacy?country=RU").text
-    assert client.post("/api/me", json={"country": "IN"}).json()["user"]["country"] == "IN"
+    assert "152-ФЗ" in client.get("/privacy?country=RU").text and "94-V" in client.get("/privacy?country=KZ").text
+    assert client.post("/api/me", json={"country": "KG"}).json()["user"]["country"] == "KG"
+    assert client.post("/api/me", json={"country": "IN"}).json()["user"]["country"] == "RU"  # removed country -> safe default
     assert privacy_laws.country("xx") == "RU" and not privacy_laws.requires_localization("TJ")
+    mgr = (Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static/manager.js").read_text(encoding="utf-8")
+    assert not {"IN", "VN", "BY"} & {c["code"] for c in cs["countries"]} and '["RU", "UZ", "KZ", "KG", "TJ"]' in mgr
 
 
 def test_chat_stream_ndjson(client):

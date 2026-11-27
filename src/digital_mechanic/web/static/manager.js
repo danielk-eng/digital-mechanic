@@ -345,7 +345,7 @@ function newUser(r) {
     `<div class="field"><label class="label" for="nu_role">${t("role")}</label><select id="nu_role" class="input">${r.roles.map(x => `<option value="${x}">${esc({mechanic: t("role_mechanic"), manager: t("role_chief"), engineer: t("role_engineer")}[x])}</option>`).join("")}</select></div>` +
     `<div class="field"><label class="label" for="nu_exp">${t("level")}</label><select id="nu_exp" class="input">${r.levels.map(x => `<option value="${x}" ${x === "experienced" ? "selected" : ""}>${esc(t("lvl_" + x))}</option>`).join("")}</select></div>` +
     `<div class="field"><label class="label" for="nu_lang">${t("language")}</label><select id="nu_lang" class="input">${Object.keys(I18N).map(l => `<option value="${l}">${l}</option>`).join("")}</select></div>` +
-    `<div class="field"><label class="label" for="nu_country">${t("country")}</label><select id="nu_country" class="input">${["RU", "UZ", "KZ", "KG", "BY", "TJ", "IN", "VN"].map(c => `<option>${c}</option>`).join("")}</select></div>` +
+    `<div class="field"><label class="label" for="nu_country">${t("country")}</label><select id="nu_country" class="input">${["RU", "UZ", "KZ", "KG", "TJ"].map(c => `<option>${c}</option>`).join("")}</select></div>` +
     `<div class="field"><span class="label">${t("vehicles_assigned")}</span><div class="vpick">${r.vehicles.map(v => `<label><input type="checkbox" value="${esc(v)}"> <span class="mono">${esc(v)}</span></label>`).join("")}</div></div>` +
     `<div class="card-actions"><button class="btn primary" id="nu_go">${t("create")}</button></div><div id="nu_out"></div>`);
   $("#nu_go").onclick = async () => {

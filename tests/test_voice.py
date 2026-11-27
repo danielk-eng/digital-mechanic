@@ -75,8 +75,8 @@ def test_localization_country_forces_local_first_stt(monkeypatch):
     monkeypatch.setattr(voice, "deepgram_stt", lambda a, m, lang, s: "dg")
     monkeypatch.setattr(voice, "speech_stt", lambda a, m, lang, s: "wh")
     cf = Settings(stt_order="cloud-first", deepgram_api_key="k", speech_url="http://x")
-    for c, engine in (("UZ", "whisper-local"), ("KZ", "whisper-local"), ("RU", "whisper-local"), ("IN", "deepgram"), ("VN", "deepgram")):
-        assert voice.transcribe(b"x", "audio/webm", "uz" if c != "IN" else "hi", cf, local_first=privacy_laws.requires_localization(c))[1] == engine, c
+    for c, engine in (("UZ", "whisper-local"), ("KZ", "whisper-local"), ("RU", "whisper-local"), ("TJ", "deepgram")):
+        assert voice.transcribe(b"x", "audio/webm", "uz", cf, local_first=privacy_laws.requires_localization(c))[1] == engine, c
 
 
 def test_stt_configured_flag(monkeypatch):

@@ -1597,7 +1597,7 @@ def eng_health(uid: str | None = Cookie(None)) -> dict:
         except Exception:  # noqa: BLE001
             ok = False
         out[name] = {"ok": ok, "ms": int((time.time() - t0) * 1000)}
-    out["llm"] = {"ok": AGENT.llm.available, "model": S.llm_model, "providers": AGENT.llm.order("RU"), "providers_other": AGENT.llm.order("IN"),
+    out["llm"] = {"ok": AGENT.llm.available, "model": S.llm_model, "providers": AGENT.llm.order("RU"), "providers_other": AGENT.llm.order("XX"),
                   "cloudru_model": S.cloudru_model if S.cloudru_api_key else None, "usage": AGENT.llm.usage.as_dict()}
     out["stt"] = {"ok": True, "engines": _models_view()["stt_engines"], "order": S.stt_order}
     out["index"] = {"ok": True, "pages": len(AGENT.index.pages), "extra_pages": len(AGENT.extra.pages) if AGENT.extra else 0}

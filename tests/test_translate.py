@@ -36,10 +36,10 @@ def test_translate_cache_and_fallback(tmp_path):
     assert r2[0]["src"] == "cache" and r2[1]["src"] == "same" and llm.calls == 1
 
 
-def test_kg_by_local_stt_and_kyrgyz_has_no_whisper():
+def test_kg_local_stt_and_kyrgyz_has_no_whisper():
     from digital_mechanic import privacy_laws, voice
-    assert privacy_laws.requires_localization("KG") and privacy_laws.requires_localization("BY")
-    assert {"bn", "ky"} <= voice.DEEPGRAM_LANGS and "be" not in voice.DEEPGRAM_LANGS and "ky" in voice.NO_WHISPER
+    assert privacy_laws.requires_localization("KG")
+    assert "ky" in voice.DEEPGRAM_LANGS and "be" not in voice.DEEPGRAM_LANGS and "ky" in voice.NO_WHISPER
 
 
 def test_nvidia_translation_first_and_llm_repairs_rejected_items(tmp_path):

@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     cloudru_api_key: str = ""
     cloudru_base_url: str = "https://foundation-models.api.cloud.ru/v1"
     cloudru_model: str = "GigaChat/GigaChat-4-708B-A41"
-    cloudru_countries: str = "RU,BY,KZ,UZ,KG,TJ"
+    cloudru_countries: str = "RU,KZ,UZ,KG,TJ"
     # Bake-off 26.11 (audit/MODEL_BAKEOFF.md): GigaChat-4-708B (Cloud.ru, free) styles better but answers in 26-36 s vs 11 s,
     # so the current model stays primary and Cloud.ru is the fallback. "auto": Cloud.ru first for cloudru_countries (strict 152-FZ mode).
     llm_primary: str = "tokenrouter"
