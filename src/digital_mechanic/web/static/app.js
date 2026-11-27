@@ -162,7 +162,8 @@ function chunkWall(line) {
 }
 function md(text, sources) {
   const src = Object.fromEntries((sources || []).map(s => [s.label, s]));
-  const lines = esc(unflatten(text)).replace(/\r/g, "").replace(/[ \t]+([.,;:!?)])/g, "$1").replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?\s?/gu, "").split("\n");
+  const lines = esc(unflatten(text)).replace(/((?:[ \t]*\[[SX]\d+\])+)([.;:!?])(?=\s|$)/g, "$2$1")  // «пуска [S1].» -> «пуска. [S1]»: no lone «.» wrapped under the chip (390 px)
+    .replace(/\r/g, "").replace(/[ \t]+([.,;:!?)])/g, "$1").replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?\s?/gu, "").split("\n");
   let out = "", list = null, para = [];
   const flushP = () => { if (para.length) { out += `<p>${collapseCites(inline(para.join("<br>"), src), true)}</p>`; para = []; } };
   const flushL = () => { if (list) { out += `<${list.tag}>${collapseCites(list.items.map(i => `<li>${inline(i, src)}</li>`).join(""), true)}</${list.tag}>`; list = null; } };
