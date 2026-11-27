@@ -248,10 +248,11 @@ function renderTurn(turn, expanded = false) {
     const und = uu.length ? `<div class="understood">${t("understood")}: ${uu.map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join(", ")}</div>` : "";
     const actions = [];
     const isDraft = (turn.cards || []).some(c => c.kind === "ticket_draft" || c.kind === "ticket_created");  // the card is the detail: no «Подробнее» under it
-    if (hasSrc && !expanded && !isDraft && (ME.detail || "brief") === "brief") actions.push({label: t("expand"), onclick: (ev, b) => { b.remove(); eventTurn("expand", turn.text, null, true, turn.sources); }});
+    if (hasSrc && !expanded && !isDraft && (ME.detail || "brief") === "brief") actions.push({label: t("expand"), onclick: (ev, b) => { b.remove(); expandClick(turn); }});
     if (hasSrc && VID) actions.push({icon: "ellipsis", aria: t("more_actions"), onclick: () => turnMenu(turn)});
     const d = addMsg("bot", und + factsHtml(turn.facts) + md(turn.text, turn.sources) + answerActionsHtml(turn.actions), {speak: turn.text, actions});
     bindAnswerActions(d, turn.actions);
+    if (actions.some(a => a.label === t("expand"))) prefetchExpand(turn);
   }
   loadChips();
   prefetchExtracts([...document.querySelectorAll("#chat .cite")].filter(b => !citesBefore.has(b)));
@@ -609,6 +610,36 @@ async function ask(text, event = null, sources = null) {
   }
   catch (e) { th.remove(); errorMsg(e); return null; }
   finally { clearInterval(tick); BUSY = false; }
+}
+// «Подробнее» is written while the mechanic reads the brief answer (free model: 15–44 s at night, Vercel 27.11): the request starts
+// when the brief answer is shown, is not stored, and comes back signed; the click shows it at once (or waits for that run, with the
+// stages counting from its start) and only then stores it. Not in the hands-free dialog. Any failure -> the usual streamed run.
+const EXPANDS = new Map();
+function prefetchExpand(turn) {
+  if (VOICE.on || !VID || EXPANDS.has(turn)) return;
+  const payload = {vehicle_id: VID, text: turn.text, event: "expand", prefetch: true, ...(LAST_CHECK && LAST_CHECK.vid === VID ? {session_id: LAST_CHECK.sid} : {}),
+    sources: (turn.sources || []).map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))};
+  const x = {t0: Date.now(), vid: VID, r: undefined};
+  x.p = api("/api/chat", {json: payload, signal: AbortSignal.timeout ? AbortSignal.timeout(90000) : undefined})
+    .then(r => (r && r.sig && r.text ? r : null)).catch(() => null).then(r => (x.r = r));
+  if (EXPANDS.size > 20) EXPANDS.delete(EXPANDS.keys().next().value);
+  EXPANDS.set(turn, x);
+}
+async function expandClick(turn) {
+  Player.stop();
+  const x = EXPANDS.get(turn); EXPANDS.delete(turn);
+  if (!x || x.vid !== VID || BUSY || x.r === null) return eventTurn("expand", turn.text, null, true, turn.sources);
+  let r = x.r;
+  if (r === undefined) {
+    BUSY = true;
+    const th = skeleton(trStep(EXPAND_STAGES[0][1]));
+    const tick = setInterval(() => { const el = th.querySelector(".ptext"); if (!el) return; const sec = Math.round((Date.now() - x.t0) / 1000);
+      el.textContent = `${trStep(EXPAND_STAGES.filter(s => sec >= s[0]).pop()[1])} · ${sec} ${t("sec")}`; }, 500);
+    try { r = await x.p; } finally { clearInterval(tick); th.remove(); BUSY = false; }
+    if (!r) return eventTurn("expand", turn.text, null, true, turn.sources);
+  }
+  api("/api/chat", {json: {vehicle_id: VID, text: turn.text, event: "expand", ready: {text: r.text, sources: r.sources, sig: r.sig}}}).catch(() => {});  // store it in the history
+  return renderTurn(r, true);
 }
 async function eventTurn(event, text, shown, expanded = false, sources = null) {
   Player.stop();

@@ -180,3 +180,23 @@ def test_pdf_link_without_pdfs_is_a_printable_section_not_404(client, monkeypatc
     assert "421-461" in r.text and "Сохранить в PDF" in r.text and "Страница 41" in r.text
     assert client.get("/manuals/YAMZ236-RK.pdf?page=99999").status_code == 404
     assert client.get("/manuals/YAMZ236-RK.pdf").status_code == 200  # old link without ?page=: start of the manual, not 404
+
+
+def test_expand_prefetch_is_signed_and_stored_only_on_click(client):
+    import digital_mechanic.web.app as m
+    client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True})
+    uid = client.get("/api/me").json()["user"]["id"]
+    n0 = len(m.STORE.q("SELECT id FROM messages WHERE user_id=?", (uid,)))
+    src = [{"label": "S1", "doc_id": "YAMZ236-RK", "page": 41}]
+    r = client.post("/api/chat", json={"vehicle_id": "M333YK47", "text": "Момент 421-461 Н·м [S1].", "event": "expand", "prefetch": True, "sources": src})
+    assert r.status_code == 200 and r.json().get("prefetched")
+    assert len(m.STORE.q("SELECT id FROM messages WHERE user_id=?", (uid,))) == n0  # not stored ahead of the click
+    bad = client.post("/api/chat", json={"vehicle_id": "M333YK47", "text": "x", "event": "expand", "ready": {"text": "Выдумка", "sources": [], "sig": "0" * 40}})
+    assert bad.status_code == 403
+    txt = "Подробно: момент 421-461 Н·м [S1]."
+    sig = m.expand_sig(uid, "M333YK47", txt, src)
+    ok = client.post("/api/chat", json={"vehicle_id": "M333YK47", "text": "x", "event": "expand", "ready": {"text": txt, "sources": src, "sig": sig}})
+    assert ok.status_code == 200 and ok.json()["text"] == txt
+    assert len(m.STORE.q("SELECT id FROM messages WHERE user_id=?", (uid,))) == n0 + 1
+    other = client.post("/api/chat", json={"vehicle_id": "A777AA77", "text": "x", "event": "expand", "ready": {"text": txt, "sources": src, "sig": sig}})
+    assert other.status_code in (403, 404)  # bound to user and vehicle

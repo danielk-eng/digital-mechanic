@@ -249,6 +249,31 @@ def _drop_leadin(text: str) -> str:
     return rest[:1].upper() + rest[1:]
 
 
+def _cap_extract(text: str, max_sent: int = 4, max_items: int = 5, max_chars: int = 650) -> str:
+    """The extract is a glance before the full section: 2–4 sentences or 3–5 points (the prompt asks, the free model sometimes
+    writes 7 sentences / 9 points — Vercel 27.11). Cut at sentence / line boundaries, never mid-sentence."""
+    t = (text or "").strip()
+    lines = [l for l in t.split("\n") if l.strip()]
+    items = [l for l in lines if re.match(r"\s*(?:[-*•]|\d+[.)])\s", l)]
+    if len(items) >= 2:  # a list: the lead line(s) + the first points
+        out, n = [], 0
+        for l in lines:
+            is_item = l in items
+            if is_item:
+                n += 1
+                if n > max_items:
+                    break
+            elif n and not is_item:
+                break  # a paragraph after the list: other topic
+            out.append(l)
+        return "\n".join(out)
+    parts = re.split(r"(?<=[.!?…])\s+(?=[А-ЯЁA-Z«\d])", " ".join(lines))
+    out = parts[:max_sent]
+    while len(out) > 1 and len(" ".join(out)) > max_chars:  # one long sentence stays whole
+        out.pop()
+    return " ".join(out) if len(out) < len(parts) else t
+
+
 def _drop_absence_claims(text: str) -> str:
     """The extract must not say what the section lacks («код F08 не упоминается»): drop such sentences, keep the rest
     (a bullet list keeps its lines)."""
@@ -344,6 +369,7 @@ class Agent:
             row = self.store.one("SELECT out FROM extract_cache WHERE k=?", (pk,))
             if row:
                 out = json.loads(row["out"])
+                out["text"] = _cap_extract(out.get("text") or "")
                 self._extracts[key] = out
                 return out
         except Exception:
@@ -367,7 +393,7 @@ class Agent:
         if bad:  # drop sentences carrying numbers not found in the section
             parts = re.split(r"(?<=[.!?])\s+|\n", text)
             text = " ".join(x for x in parts if not any(b in x or b.replace(".", ",") in x for b in bad)).strip()
-        text = _drop_leadin(_drop_absence_claims(text))
+        text = _cap_extract(_drop_leadin(_drop_absence_claims(text)))
         out = {"text": text, "ok": bool(text), "dropped_numbers": bad}
         self._extracts[key] = out
         if text:
@@ -844,8 +870,22 @@ class Agent:
 
     # ------------------------------------------------------------------ chat turn
     def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None,
-               sources: list[dict] | None = None, session_id: str | None = None) -> Turn:
+               sources: list[dict] | None = None, session_id: str | None = None, detached: bool = False) -> Turn:
         from .llm import REQUEST_DEADLINE
+
+        if detached and event == "expand":
+            # «Подробнее» written ahead of the click (client prefetch): on a copy of the conversation, so the mechanic's next
+            # question is not held by this conversation's lock and its live lines do not mix with this run's
+            snap = Conv(cid=c.cid + "#pf", uid=c.uid, vehicle=c.vehicle, check=c.check, decision=c.decision, draft=None,
+                        frags={k: dict(v) for k, v in c.frags.items()}, n_s=c.n_s, n_x=c.n_x, lang=c.lang)
+            with self._lock:  # join the server-side prefetch of the same answer, if any
+                pf = self._prefetch.pop(c.cid, None)
+                if pf is not None:
+                    self._prefetch[snap.cid] = pf
+            try:
+                return self.handle(snap, user, text, image_note, event, sources, session_id)
+            finally:
+                self.progress.pop(snap.cid, None); self.drafts.pop(snap.cid, None)
 
         budget = getattr(getattr(self.llm, "s", None), "llm_turn_budget_s", 0) or 0
         tok = REQUEST_DEADLINE.set(time.time() + budget) if budget > 0 and REQUEST_DEADLINE.get() is None else None

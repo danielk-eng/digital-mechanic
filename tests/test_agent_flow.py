@@ -489,3 +489,21 @@ def test_facts_pass_streams_verified_facts_as_draft(make_agent):
     cb('{"answerable": true, "facts": [{"src": "S1", "text": "Зазор 0,25–0,30 мм на холодном"}, {"src": "S1", "text": "Момент 999 Н·м"}, {"src": "S1", "text": "недопис')
     d = a.drafts[c.cid]
     assert d.startswith("Нашёл в руководстве:") and "0,25–0,30 мм" in d and "999" not in d and "недопис" not in d
+
+
+def test_expand_detached_leaves_conversation_alone(make_agent):
+    """Client prefetch of «Подробнее»: runs on a copy (no lock held, no frags/progress/draft written to the dialog)."""
+    a = make_agent([
+        msg(None, [tool_call("search_manual", {"query": "момент затяжки болтов крышек коренных подшипников"}, 1)]),
+        msg("421-461 Н·м [S1]."),
+        msg("Подробно: момент 421-461 Н·м [S1]."),
+    ])
+    c = a.conv("u1", "M333YK47")
+    a.diagnose(c, "S-0005")
+    short = a.handle(c, {"lang": "ru"}, "Момент затяжки коренных?")
+    src = [{"label": s["label"], "doc_id": s["doc_id"], "page": s["page"]} for s in short.sources]
+    frags = {k: dict(v) for k, v in c.frags.items()}
+    with c.lock:  # the dialog is busy with the next question: the prefetch must not wait for it
+        long = a.handle(c, {"lang": "ru"}, short.text, event="expand", sources=src, detached=True)
+    assert "421" in long.text and long.sources
+    assert c.frags == frags and (c.cid + "#pf") not in a.progress and (c.cid + "#pf") not in a.drafts

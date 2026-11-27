@@ -559,7 +559,7 @@ def _record(u: dict, c, action: str, inp: str, turn, t0: float, card_meta: dict 
     STORE.add_message(c.cid, u["id"], c.vehicle.vehicle_id if c.vehicle else None, "assistant", turn.text,
                       {"cards": turn.cards, "sources": turn.sources, **(card_meta or {})})
     STORE.audit(user_id=u["id"], role=u["role"], vehicle_id=c.vehicle.vehicle_id if c.vehicle else None, action=action, input=pii.mask(inp)[:2000],
-                output=turn.text[:4000], tools=turn.tools, sources=[f"{s['document']} стр.{s['page']}" for s in turn.sources], latency_ms=lat, tokens=turn.tokens, ok=int(turn.ok))
+                output=turn.text[:4000], tools=turn.tools, sources=[f"{s.get('document')} стр.{s.get('page')}" for s in turn.sources], latency_ms=lat, tokens=turn.tokens, ok=int(turn.ok))
     jlog(event=action, user=u["id"][:8], vehicle=c.vehicle.vehicle_id if c.vehicle else None, latency_ms=lat, tokens=turn.tokens, tools=[t["tool"] for t in turn.tools], ok=turn.ok)
 
 
@@ -748,6 +748,14 @@ class ChatIn(BaseModel):
     sources: list[dict] | None = None  # «Подробнее»: the brief answer's sources (labels -> pages), see Agent.rehydrate_frags
     session_id: str | None = None  # the check last diagnosed in this dialog (another instance may not have it), see Agent.restore_check
     draft_token: str | None = None  # the signed ticket draft shown in this dialog («Подтверждаю заявку» by voice/text on another instance)
+    prefetch: bool = False  # «Подробнее» written ahead of the click: not stored, comes back signed (see expand_sig)
+    ready: dict | None = None  # the click on a prefetched «Подробнее»: {text, sources, sig} -> stored as is, no LLM call
+
+
+def expand_sig(uid: str, vid: str | None, text: str, sources: list | None) -> str:
+    """A prefetched «Подробнее» is stored only on the click; the client sends it back, the signature proves it is ours."""
+    raw = json.dumps([text, [[s.get("label"), s.get("doc_id"), s.get("page")] for s in (sources or [])]], ensure_ascii=False)
+    return hmac.new(_cookie_key(), f"expand:{uid}:{vid or '-'}:{raw}".encode(), hashlib.sha256).hexdigest()[:40]
 
 
 @app.post("/api/chat")
@@ -760,6 +768,27 @@ def chat(body: ChatIn, uid: str | None = Cookie(None)) -> dict:
         raise HTTPException(404, "unknown vehicle")
     if c.vehicle is None and u["role"] not in ("manager", "engineer"):
         raise HTTPException(400, "choose a vehicle")
+    vid = c.vehicle.vehicle_id if c.vehicle else None
+    if body.event == "expand" and body.ready:
+        r = body.ready
+        txt, srcs = str(r.get("text") or ""), list(r.get("sources") or [])
+        if not txt or not hmac.compare_digest(str(r.get("sig") or ""), expand_sig(u["id"], vid, txt, srcs)):
+            raise HTTPException(403, "bad prefetch signature")
+        from ..agent.core import Turn
+
+        turn = Turn(text=txt, sources=srcs, tools=[{"tool": "expand_prefetched"}])
+        _record(u, c, "expand", "", turn, t0)
+        return {**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000)}
+    if body.event == "expand" and body.prefetch:
+        prof = uprofile.load(u)
+        level = u.get("experience") or "experienced"
+        turn = AGENT.handle(c, {**u, "_vocab_hint": uprofile.prompt_hint(prof, level), "_style": ustyle.prompt(prof, u), "_memory": ""},
+                            body.text[:4000], event="expand", sources=body.sources, session_id=body.session_id, detached=True)
+        turn.text, _ = uprofile.gloss(turn.text, prof, level)
+        out = {**turn.as_dict(), "latency_ms": int((time.time() - t0) * 1000), "prefetched": True}
+        if turn.ok and turn.text:
+            out["sig"] = expand_sig(u["id"], vid, turn.text, turn.sources)
+        return out
     if c.draft is None and body.draft_token and c.vehicle:
         d = draft_from_token(u["id"], c.vehicle.vehicle_id, body.draft_token)
         if d:
