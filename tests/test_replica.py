@@ -48,3 +48,18 @@ def test_two_instances_share_companies_users_and_qr(tmp_path):
 def test_off_without_token(tmp_path):
     r = Replica(Store(tmp_path / "c.db"), token="")
     assert not r.on and not r.pull(True) and not r.push()
+
+
+def test_ticket_and_handoff_made_on_one_instance_show_on_another(tmp_path):
+    """C1 on Vercel: the mechanic's ticket/handoff hit instance A, the chief's dashboard is served by instance B."""
+    cli = fake_blob()
+    a, b = Store(tmp_path / "a.db"), Store(tmp_path / "b.db")
+    ra, rb = Replica(a, token="vercel_blob_rw_STORE1_x"), Replica(b, token="vercel_blob_rw_STORE1_x")
+    ra.http = rb.http = cli
+    ra.pull(True); rb.pull(True)
+    a.add_ticket("u1", {"vehicle_id": "M333YK47", "session_id": "S-0005", "urgency": "high", "anomaly_type": "fuel"}, "TKT-0001")
+    a.add_handoff("u1", "M333YK47", "chief", "Прошу посмотреть", "сводка", {})
+    assert ra.push()
+    assert rb.pull(True)
+    assert [t["ticket_id"] for t in b.tickets()] == ["TKT-0001"]
+    assert len(b.handoffs()) == 1

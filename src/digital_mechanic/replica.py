@@ -1,5 +1,5 @@
 """Shared state for serverless instances (Vercel): every instance has its own SQLite in /tmp, so the tables that must be the
-same everywhere (companies, which truck belongs to whom, people, QR login links) are mirrored to one private Vercel Blob.
+same everywhere (companies, which truck belongs to whom, people, QR login links, tickets, handoffs, repairs) are mirrored to one private Vercel Blob.
 
 Pull before each request (at most every PULL_TTL s; always before a write request, so a write starts from the latest state),
 push after a write request when the mirrored tables changed. Last writer wins: fine for a demo stand with a handful of admins.
@@ -16,7 +16,7 @@ import time
 import httpx
 
 log = logging.getLogger(__name__)
-TABLES = ("companies", "company_vehicles", "users", "login_tokens")
+TABLES = ("companies", "company_vehicles", "users", "login_tokens", "tickets", "handoffs", "repairs")  # + the chief's inbox: a ticket or handoff made on one instance shows on the dashboard served by another
 API = "https://vercel.com/api/blob"
 PATH = os.environ.get("REPLICA_BLOB_PATH", "state/tenancy.json")
 PULL_TTL = float(os.environ.get("REPLICA_PULL_TTL_S", "2"))

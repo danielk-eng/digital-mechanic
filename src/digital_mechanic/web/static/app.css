@@ -412,3 +412,18 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
   .mgr-bar h1{flex:1 1 100%;font-size:1rem}
   .mgr-bar #whoami{flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 }
+/* 26.11 18:40: manager on a phone — nothing wider than the screen (table 40 px and filter selects 8 px over at 390 px made the
+   whole page pan and pushed the vehicle sheet off the left edge); KPI numbers on one line across a row even when a label wraps */
+@media (max-width:720px){
+  .fgrid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .fgrid .input,.fdate{min-width:0;width:100%;box-sizing:border-box}
+  table.tbl{font-size:.84rem}
+  .tbl th,.tbl td{padding:10px 6px}
+  .tbl .pill{padding-left:8px;padding-right:8px}
+  .tbl th:first-child,.tbl td:first-child{padding-left:12px}
+  .tbl th:last-child,.tbl td:last-child{padding-right:12px}
+  .panel{max-width:100%;overflow-x:auto}
+  .kpi{display:flex;flex-direction:column;padding:12px 14px}
+  .kpi .l{min-height:2.5em;align-items:flex-start;line-height:1.25}
+  .kpi .n{font-size:1.75rem;margin-top:2px}
+}
