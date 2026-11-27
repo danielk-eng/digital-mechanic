@@ -53,4 +53,4 @@ window.WebSTT = {
   },
 };
 // BCP-47 tag for the UI language (same table as SPEECH_LANG in app.js)
-window.SPEECH_LANG_OF = l => ({ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG", be: "be-BY"})[l] || "ru-RU";
+window.SPEECH_LANG_OF = l => ({ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG"})[l] || "ru-RU";

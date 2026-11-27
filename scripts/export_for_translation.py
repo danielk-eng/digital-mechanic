@@ -3,7 +3,7 @@
 Usage: PYTHONPATH=src python scripts/export_for_translation.py OUT_DIR [--tickets deb_tickets.json]
 
 Each record is one JSON line:
-  {"id", "type", "source", "doc_id"?, "page"?, "text_ru", "text_uz": "", "text_tg": "", ..., "text_be": ""}
+  {"id", "type", "source", "doc_id"?, "page"?, "text_ru", "text_uz": "", "text_tg": "", ...}
 `id` is stable: import_translations.py maps the translation back by id (manual pages by doc_id + page,
 so search in the user's language cites the original Russian page). Files are split at ~200 KB."""
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-LANGS = ["uz", "tg", "kk", "hi", "vi", "bn", "ky", "be"]
+LANGS = ["uz", "tg", "kk", "hi", "vi", "bn", "ky"]
 CYR = re.compile(r"[А-Яа-яЁё]")
 WORD = re.compile(r"[а-яё]{3,}")
 EXCLUDE_DOCS = re.compile(r"KAMAZ|КАМАЗ", re.I)  # avtoalfa mirror stays out

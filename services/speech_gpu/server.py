@@ -28,7 +28,7 @@ WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
 WHISPER_COMPUTE = os.getenv("WHISPER_COMPUTE", "int8")
 TTS_ON = os.getenv("TTS_ENABLED", "1") == "1"
 TTS_MODEL = os.getenv("TTS_MODEL", "v5_cis_base_nostress")
-TTS_SPEAKER = os.getenv("TTS_SPEAKER", "ru_zhadyra")
+TTS_SPEAKER = os.getenv("TTS_SPEAKER", "ru_zinaida")
 os.environ.setdefault("HF_HOME", f"{ROOT}/hf")
 
 app = FastAPI(title="speech-gpu")
@@ -141,7 +141,7 @@ class TtsIn(BaseModel):
 def tts(body: TtsIn):
     if not TTS_ON:
         raise HTTPException(404, "tts disabled")
-    sp = body.speaker if body.speaker.startswith(("ru_", "kaz_", "uzb_")) else TTS_SPEAKER
+    sp = body.speaker if body.speaker.startswith(("ru_", "kaz_", "uzb_", "kir_", "tgk_")) else TTS_SPEAKER
     with _lock:
         text = ru_tts.prepare(body.text[:900]) if sp.startswith("ru_") else body.text[:900]  # digits + stress for Russian
         audio = _tts().apply_tts(text=text, speaker=sp, sample_rate=24000)

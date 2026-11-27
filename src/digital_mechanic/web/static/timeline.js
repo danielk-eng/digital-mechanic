@@ -3,11 +3,11 @@ const _dec = x => typeof x === "number" ? x.toFixed(2).replace(".", ",") : Strin
 const _esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const _ic = (n, s = 16) => (typeof icon === "function" ? icon(n, s) : "");
 // "2026-11-19" / "2026-10-29T15:20" -> "19 ноя 2026" / "29 окт 2026, 15:20" (string parts, no time-zone shift),
-// month names in the interface language (own tables: phone ICU data for uz/kk/tg/ky/be is often missing)
+// month names in the interface language (own tables: phone ICU data for uz/kk/tg/ky is often missing)
 const _MONS = {
   ru: "янв фев мар апр мая июн июл авг сен окт ноя дек", uz: "yan fev mar apr may iyn iyl avg sen okt noy dek",
   tg: "янв фев мар апр май июн июл авг сен окт ноя дек", ky: "янв фев мар апр май июн июл авг сен окт ноя дек",
-  kk: "қаң ақп нау сәу мам мау шіл там қыр қаз қар жел", be: "сту лют сак кра тра чэр ліп жні вер кас ліс сне",
+  kk: "қаң ақп нау сәу мам мау шіл там қыр қаз қар жел",
   hi: "जन॰ फ़र॰ मार्च अप्रैल मई जून जुल॰ अग॰ सित॰ अक्टू॰ नव॰ दिस॰", bn: "জানু ফেব মার্চ এপ্রি মে জুন জুল আগ সেপ অক্টো নভে ডিসে"};
 const _MON = _MONS.ru.split(" ");
 const _ulang = () => (typeof ME !== "undefined" && ME && ME.lang) || "ru";

@@ -5,7 +5,7 @@
 Веб-чат для механика на посту ТО (работает с телефона). Механик выбирает машину и проверку, агент берёт
 результат из ML-сервиса, объясняет его простыми словами, отвечает на вопросы **только по руководствам на
 двигатель этой машины** со ссылкой на страницу PDF, составляет заявку на дефектовку и отправляет её в ТОиР
-после подтверждения механика. Есть режим главного механика (сводка по парку), голосовой ввод и диалог, фото, 9 языков интерфейса и ответов.
+после подтверждения механика. Есть режим главного механика (сводка по парку), голосовой ввод и диалог, фото, 8 языков интерфейса и ответов.
 
 **Стенды:** основной — deb (docker compose + Cloudflare tunnel, адрес в `stand/PUBLIC_URL.txt`, с картинками страниц
 и локальным распознаванием речи); резерв — https://digital-mechanic-iikuznitsa.vercel.app (те же код и индекс,
@@ -97,7 +97,7 @@ FastAPI (web/app.py) ── журнал, согласие, маскирован
 | `ingest/pages.py`, `retrieval/bm25.py` | Постраничный индекс PDF (pdftotext/pypdf), BM25 со стеммингом |
 | `agent/` | LLM-клиент, промпты, инструменты, проверка ответа |
 | `store.py`, `pii.py` | SQLite (пользователи, проверки, заявки, ремонты, переписка, аудит), маскирование ПДн |
-| `i18n.py`, `web/static/i18n.json` | ru, uz, tg, kk, hi, vi, bn, ky, be |
+| `i18n.py`, `web/static/i18n.json` | ru, uz, tg, kk, hi, vi, bn, ky |
 | `voice.py`, `services/speech/` | STT: Cloud.ru GigaASR/whisper-large-v3 → локальный faster-whisper → NVIDIA Parakeet (ru) → Deepgram → браузер; TTS: Cloud.ru SaluteSpeech (ru) → NVIDIA Chatterbox gRPC (ru) / Magpie HTTP (hi/vi) → Silero/браузер |
 | `retrieval/sections.py`, `retrieval/synonyms.py` | Разделы руководств для цитат; нормализация жаргона и опечаток |
 | `agent/facts.py`, `agent/suggest.py`, `agent/handoff.py`, `proven.py`, `inspection.py` | Важное из руководства, подсказки, резюме/передача, проверенные решения, акт осмотра |
@@ -146,7 +146,7 @@ SQLite `var/app.db` (WAL) и `var/app.log.jsonl`: кто, когда, по ка�
 
 ## Тесты
 ```bash
-PYTHONPATH=src python -m pytest -q     # 392 теста: контракт с заглушками, политика, поиск и разделы, проверка цифр, агент, голос, веб
+PYTHONPATH=src python -m pytest -q     # 397 тестов: контракт с заглушками, политика, поиск и разделы, проверка цифр, агент, голос, веб
 python scripts/smoke.py <URL>           # вход → машины → диагностика → чат → подсказки → история на любом стенде
 ```
 

@@ -25,7 +25,7 @@ from .i18n import LANGS
 
 CYR = re.compile(r"[А-Яа-яЁё]")
 # letters a Russian text never has; their presence means the text is already in that language
-OWN_LETTERS = {"kk": "әғқңөұүһі", "ky": "ңөү", "tg": "ғӣқӯҳҷ", "be": "ўі", "uz": "ўқғҳ"}
+OWN_LETTERS = {"kk": "әғқңөұүһі", "ky": "ңөү", "tg": "ғӣқӯҳҷ", "uz": "ўқғҳ"}
 NUM = re.compile(r"\d+(?:[.,]\d+)?")
 TOKENS = re.compile(r"\[(?:S|X)\d+\]|\b[A-Z]{1,4}-?\d[\w.-]*|\b[А-ЯЁ]{2,5}-\d[\w.-]*|\bF\d{2}\b")  # [S1], ЯМЗ-236 style codes, F08
 

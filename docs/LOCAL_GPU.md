@@ -139,12 +139,12 @@ tok/s ≈ η · BW / (P_active · bpw/8 + KV_bytes_per_token · L_ctx)
 - «качество» `gpu3090`: `unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M`, llama.cpp `server-cuda-b12808`, `enable_thinking=false`, MTP n=2, 2 слота × 12k, KV q8_0, mmproj — понимает фото узлов; ответ ~20–27 с;
 - «быстрый» `gpu3090-fast`: `unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:Q4_K_M`, 3 слота × 12k, ~190 tok/s, ответ 5–8 с, фото не распознаёт;
 - автоматический резерв без смены кода возможен только через второй слот приложения (слот Cloud.ru, `CLOUDRU_BASE_URL` → второй локальный сервер), но второй сервер на ту же карту не помещается; 30B-A3B с экспертами в ОЗУ (`--n-cpu-moe`) — вариант, если у ПК ≥ 32 ГБ RAM [оценка скорости ~15–25 tok/s, не замерено];
-- ASR: GigaAM-v3 (ru) + GigaAM-Multilingual-v2 (kk, uz) на GPU; whisper-large-v3-turbo int8 на CPU (hi, vi); TTS Silero v5_cis_base_nostress на CPU (MIT).
+- ASR: GigaAM-v3 (ru) + GigaAM-Multilingual-v2 (kk, uz) на GPU; whisper-large-v3-turbo int8 на CPU (hi, vi); TTS Silero v5_cis_base_nostress на CPU (MIT), голоса ru/kk/uz/ky/tg.
 
 **DGX Spark (сервер предприятия / филиала):**
 - основной: `Qwen/Qwen3.6-35B-A3B-FP8` в vLLM (`vllm/vllm-openai:v0.32.0`, arm64, tool parser `qwen3_coder`, без «рассуждения»); NVFP4 + MTP — 90 tok/s [20]. Прежний `Qwen/Qwen3-30B-A3B-Instruct-2507-FP8` остаётся через `SPARK_MODEL`;
 - второй сервер `llm-quality`: `nvidia/Qwen3.8-27B-NVFP4-QAD` (или `Qwen/Qwen3.8-27B-FP8`) + MTP, без «рассуждения». На 27B на Spark всего ~19 tok/s, поэтому ему отдаются только фоновые шаги: «Подробнее» (`expand`) и резюме смены. Маршрутизация — `LLM_QUALITY_URL=http://llm-quality:8080/v1` (шаги — `LLM_QUALITY_STEPS`, по умолчанию `expand,session_summary`). Если сервер не отвечает, шаг уходит на основную модель;
-- ASR/TTS — как на 3090, всё на GPU (whisper — CPU, на Grace 20 ядер).
+- ASR/TTS — как на 3090, всё на GPU (whisper — CPU, на Grace 20 ядер); TTS Silero CIS покрывает ru/kk/uz/ky/tg.
 
 **Гибрид (рекомендуемый режим продукта):**
 - Локальная LLM — основная для всех запросов с персональными данными (а с маскированием ПДн — для всех).
@@ -169,7 +169,7 @@ python scripts/bench_local.py speech --speech http://localhost:9000 --audio-dir 
 
 - На реальных 3090 и Spark конфигурация **ещё не запускалась**: числа в §5 — замеры чужих стендов и оценки. Первый запуск — `bench_local.py`, затем обновить таблицы.
 - `LLM_PRIMARY=local` — псевдоним OpenAI-совместимого слота: он указывает на локальный сервер (`LOCAL_LLM_URL`), облачный резерв — слот Cloud.ru. Значение `local` есть и в списке провайдера у компании в меню инженера.
-- Русская речь в Silero `v5_cis_base_nostress` требует ударений (`+`) в тексте; без них интонация хуже, чем у текущей некоммерческой `v4_ru`. Нужен расстановщик ударений с коммерческой лицензией или браузерный TTS по умолчанию.
+- Русская речь в Silero `v5_cis_base_nostress` требует ударений (`+`) в тексте; они расставляются `silero-stress` (MIT), цифры/единицы — `ru_tts.prepare`. Для kk/uz/ky/tg используются опубликованные speaker-префиксы CIS; качество против SaluteSpeech нужно проверять носителями. Готовой маленькой открытой модели «качества SaluteSpeech» с коммерческой лицензией и покрытием всех языков СНГ на 27.11.2026 не найдено.
 - Фото узлов (vision) в локальном режиме: работает с Qwen3.8-27B (профиль `gpu3090` грузит mmproj; на Spark — `llm-quality`), шаг vision приложения идёт в ту же модель. С 30B-A3B фото локально не распознаются.
 - Поддержка архитектуры Qwen3.8 (`qwen3_5`): vLLM ≥ 0.17 (рецепт vLLM), llama.cpp — qwen35 + MTP с PR #22673 (16.05.2026); образы закреплены: `ghcr.io/ggml-org/llama.cpp:server-cuda-b12808`, `vllm/vllm-openai:v0.32.0` (amd64 + arm64). На наших образах не запускалось.
 - На 3090 рабочий стол не должен занимать эту же карту (иначе не хватит ~1 ГБ); иначе — `LOCAL_SLOTS=2` или gpt-oss-20b.

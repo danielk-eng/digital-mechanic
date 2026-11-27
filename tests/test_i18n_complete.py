@@ -33,7 +33,7 @@ def test_language_picker_offers_every_language():
     from digital_mechanic.i18n import LANGS
     js = (ROOT / "src/digital_mechanic/web/static/app.js").read_text(encoding="utf-8")
     names = dict(re.findall(r'(\w+): "([^"]+)"', re.search(r"const LANG_NAMES = \{([^}]*)\}", js).group(1)))
-    assert names == {k: v["name"] for k, v in LANGS.items()}  # bn/ky/be were imported but not selectable
+    assert names == {k: v["name"] for k, v in LANGS.items()}
     assert set(I18N) == set(LANGS)
 
 

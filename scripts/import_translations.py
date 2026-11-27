@@ -14,7 +14,7 @@ import argparse, csv, glob, gzip, json, re, sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-LANGS = ["uz", "tg", "kk", "hi", "vi", "bn", "ky", "be"]
+LANGS = ["uz", "tg", "kk", "hi", "vi", "bn", "ky"]
 NUM = re.compile(r"\d+(?:[.,]\d+)?")
 TOKENS = re.compile(r"\[(?:S|X)\d+\]|\b[A-Z]{1,4}-?\d[\w.-]*|\b[А-ЯЁ]{2,5}-\d[\w.-]*|\bF\d{2}\b|\bTKT-[\w-]+|\bS-\d+")
 PLACEHOLDER = re.compile(r"\{[\w.]*\}|%\(?\w*\)?[sd]|\$\{[^}]*\}")
@@ -22,7 +22,7 @@ CYR, LAT = re.compile(r"[а-яёА-ЯЁ]"), re.compile(r"[a-zA-Z]")
 SCRIPT = {  # letters that must be present, and Russian-only letters that must not remain in running text
     "uz": (re.compile(r"[a-zA-Zʻʼ‘’]"), CYR), "vi": (re.compile(r"[a-zA-ZÀ-ỹ]"), CYR),
     "tg": (re.compile(r"[а-яёғӣқӯҳҷ]", re.I), None), "kk": (re.compile(r"[а-яёәғқңөұүһі]", re.I), None),
-    "ky": (re.compile(r"[а-яёңөү]", re.I), None), "be": (re.compile(r"[а-яёіў]", re.I), re.compile(r"[ищъ]", re.I)),
+    "ky": (re.compile(r"[а-яёңөү]", re.I), None),
     "hi": (re.compile(r"[\u0900-\u097F]"), CYR), "bn": (re.compile(r"[\u0980-\u09FF]"), CYR),
 }
 PAGE_TYPES = {"manual_page"}

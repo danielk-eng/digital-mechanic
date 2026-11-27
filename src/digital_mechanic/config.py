@@ -69,8 +69,10 @@ class Settings(BaseSettings):
     llm_quality_url: str = ""
     llm_quality_model: str = "local-llm"
     llm_quality_steps: str = "expand,session_summary"
-    cloudru_stt: bool = True  # STT on Cloud.ru: GigaASR (ru), whisper-large-v3 (other languages)
-    cloudru_tts: bool = True  # TTS on Cloud.ru Realtime: GigaChat/SaluteSpeech, primary Russian server voice
+    cloudru_stt: bool = True  # STT on Cloud.ru: GigaASR where enabled, whisper-large-v3 for the other languages
+    cloudru_asr_langs: str = "ru,kk,uz,ky"  # SaluteSpeech CIS target matrix; narrow to "ru" if access is unavailable
+    cloudru_tts: bool = True  # TTS on Cloud.ru Realtime: GigaChat/SaluteSpeech, primary server voice
+    cloudru_tts_langs: str = "ru,kk,uz,ky"  # short ru/kk/uz/ky phrases verified live; narrow to "ru" if access is unavailable
     cloudru_tts_model: str = "GigaChat/SaluteSpeech"
     cloudru_tts_voice: str = "Bab-Freespeech"
     cloudru_tts_timeout_s: float = 35.0

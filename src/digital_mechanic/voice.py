@@ -76,7 +76,7 @@ def whisper_stt(audio: bytes, lang: str, s: Settings) -> str:
 
 # Deepgram nova-3 languages used here. Measured on the stand (audit/asr2): uz WER 0.00 (2.9 s) vs Whisper 0.86+
 # (Cyrillic or prompt echo); kk 0.14 (2.3 s) vs Whisper with a Kazakh prompt 0.00 (11 s) -> kk keeps Whisper first.
-DEEPGRAM_LANGS = {"ru", "hi", "vi", "uz", "kk", "bn", "be", "ky"}  # bn/be/ky: nova-3 monolingual (Deepgram changelog 21.01 and 16.11.2026)
+DEEPGRAM_LANGS = {"ru", "hi", "vi", "uz", "kk", "bn", "ky"}  # bn/ky: nova-3 monolingual (Deepgram changelog 21.01 and 16.11.2026)
 # Whisper has no Kyrgyz: for ky there is no local model, only the cloud one (the KG consent text says so).
 NO_WHISPER = {"ky"}
 DEEPGRAM_FIRST = {"ru", "hi", "vi", "uz"}  # with STT_ORDER=cloud-first (local-first: Whisper + uz Cyrillic->Latin fix)
@@ -96,7 +96,6 @@ LANG_PROMPTS = {
     "hi": "ट्रक डायग्नोस्टिक। इंजन आइडल पर खटखट, तेल का दबाव कम, कूलेंट, कामाज़।",
     "vi": "Chẩn đoán xe tải. Động cơ bị gõ, áp suất dầu thấp, chạy không tải, nước làm mát.",
     "bn": "ট্রাক ডায়াগনস্টিক। ইঞ্জিনে ঠকঠক শব্দ, তেলের চাপ কম, কুল্যান্ট, কামাজ।",
-    "be": "Дыягностыка грузавіка. Рухавік стукае, нізкі ціск масла, халасты ход, ЯМЗ-236.",
 }
 
 
@@ -152,18 +151,34 @@ def postprocess(text: str, lang: str) -> str:
     return text
 
 
-CLOUDRU_STT = {"ru": "GigaChat/GigaASR"}  # other languages: openai/whisper-large-v3
-CLOUDRU_STT_SKIP = {"uz"}  # measured worse than the stand's own fine-tune (docs/STT_ЗАМЕРЫ.md)
+CLOUDRU_ASR_MODEL = "GigaChat/GigaASR"
+CLOUDRU_STT_SKIP = {"uz"}  # whisper-large-v3 measured worse than the stand's own fine-tune; lifted when SaluteSpeech ASR is enabled for uz
+
+
+def _lang_csv(value: str, default: str = "ru") -> set[str]:
+    return {x.strip().lower().split("-")[0] for x in (value or default).split(",") if x.strip()}
+
+
+def cloudru_asr_langs(s: Settings) -> set[str]:
+    # Direct SaluteSpeech documents ru/kk/uz/ky; Cloud.ru GigaASR currently verifies as Russian-only,
+    # so non-ru values are an explicit opt-in after the multilingual access request is active.
+    return _lang_csv(getattr(s, "cloudru_asr_langs", "ru")) & {"ru", "kk", "uz", "ky"}
+
+
+def cloudru_tts_langs(s: Settings) -> set[str]:
+    # SaluteSpeech documents ru/kk/uz/ky. Cloud.ru Realtime officially lists ru/en today but already synthesises
+    # kk/uz/ky text in smoke probes; the matrix stays explicit because quality/access still need native-speaker validation.
+    return _lang_csv(getattr(s, "cloudru_tts_langs", "ru")) & {"ru", "kk", "uz", "ky"}
 
 
 def cloudru_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
-    """Cloud.ru Foundation Models (servers in Russia): GigaASR for Russian, whisper-large-v3 for the other languages."""
+    """Cloud.ru Foundation Models (servers in Russia): GigaASR where explicitly enabled, whisper-large-v3 otherwise."""
     if not (s.cloudru_api_key and s.cloudru_stt):
         raise SttUnavailable("no cloudru key")
     ext = {"audio/wav": "wav", "audio/mpeg": "mp3", "audio/ogg": "ogg", "audio/mp4": "m4a"}.get((mime or "").split(";")[0], "webm")
     r = httpx.post(f"{s.cloudru_base_url.rstrip('/')}/audio/transcriptions", headers={"Authorization": f"Bearer {s.cloudru_api_key}"},
                    files={"file": (f"a.{ext}", audio, mime or "audio/webm")},
-                   data={"model": CLOUDRU_STT.get(lang, "openai/whisper-large-v3"), "language": lang, "prompt": prompt_for(lang) if lang != "ru" else ""},
+                   data={"model": CLOUDRU_ASR_MODEL if lang in cloudru_asr_langs(s) else "openai/whisper-large-v3", "language": lang, "prompt": prompt_for(lang) if lang != "ru" else ""},
                    timeout=s.speech_timeout_s)
     if r.status_code != 200:
         raise SttUnavailable(f"cloudru {r.status_code}")
@@ -238,7 +253,8 @@ def transcribe(audio: bytes, mime: str, lang: str, s: Settings, local_first: boo
     chain = [] if lang in NO_WHISPER else [("whisper-local", lambda: speech_stt(audio, mime, lang, s))]
     ru_region = {x.strip().upper() for x in s.cloudru_countries.split(",") if x.strip()}
     # uz: Cloud.ru whisper-large-v3 WER 0.96 on audit/asr_uz (navai on the stand 0.17, Deepgram 0.13) -> not used for uz
-    if s.cloudru_api_key and s.cloudru_stt and lang not in CLOUDRU_STT_SKIP and (country or "RU").upper() in ru_region:
+    if (s.cloudru_api_key and s.cloudru_stt and (lang not in CLOUDRU_STT_SKIP or lang in cloudru_asr_langs(s) - {"ru"})
+            and (country or "RU").upper() in ru_region):
         cr = ("cloudru", lambda: cloudru_stt(audio, mime, lang, s))
         chain.insert(0 if (not local_first or (country or "RU").upper() == "RU") else len(chain), cr)
     if lang in NVIDIA_STT_LANGS and not local_first:
@@ -380,10 +396,12 @@ def _cloudru_realtime_chunk(text: str, s: Settings) -> bytes:
 
 
 def cloudru_tts(text: str, lang: str, s: Settings) -> bytes:
-    """Primary Russian server voice: Cloud.ru `GigaChat/SaluteSpeech` over the Realtime websocket."""
-    if lang != "ru" or not s.cloudru_api_key or not getattr(s, "cloudru_tts", True):
+    """Cloud.ru `GigaChat/SaluteSpeech` over the Realtime websocket.
+    Multilingual mode is explicit: ru is verified; kk/uz/ky become available through CLOUDRU_TTS_LANGS after access is confirmed."""
+    if lang not in cloudru_tts_langs(s) or not s.cloudru_api_key or not getattr(s, "cloudru_tts", True):
         raise SttUnavailable("no cloudru tts")
-    chunks = tts_chunks(ru_tts.prepare(text), limit=900)  # realtime accepts conversational text; keep long answers bounded
+    prepared = ru_tts.prepare(text) if lang == "ru" else text
+    chunks = tts_chunks(prepared, limit=900)  # realtime accepts conversational text; keep long answers bounded
     if not chunks:
         raise SttUnavailable("nothing to speak")
     parts = [_cloudru_realtime_chunk(c, s) for c in chunks]
@@ -483,14 +501,19 @@ def nvidia_tts(text: str, lang: str, s: Settings) -> bytes:
     return _wav_join(parts) if len(parts) > 1 else parts[0]
 
 
+# Silero v5_cis_base_nostress (MIT) local/server voices. Speaker prefixes are the ones published by Silero;
+# Tajik is intentionally local-only because SaluteSpeech does not cover it.
+SILERO_TTS_VOICES = {"ru": "ru_zinaida", "kk": "kaz_zhadyra", "uz": "uzb_saida", "ky": "kir_nurgul", "tg": "tgk_onaoy"}
+
+
 def server_tts_langs(s: Settings) -> list[str]:
     out = set()
     if getattr(s, "cloudru_api_key", "") and getattr(s, "cloudru_tts", True):
-        out.add("ru")
+        out.update(cloudru_tts_langs(s))
     if _nvidia_key(s) and getattr(s, "nvidia_tts_enabled", True):
         out.update(NVIDIA_TTS_PROFILES)
     if getattr(s, "speech_url", "") or getattr(s, "silero_enabled", False):
-        out.add("ru")
+        out.update(SILERO_TTS_VOICES)
     return sorted(out)
 
 
@@ -502,7 +525,7 @@ def tts_synthesize(text: str, lang: str, s: Settings) -> bytes:
     """Server voice for the answer language: Cloud.ru for Russian, NVIDIA where supported, Silero/browser as fallback."""
     lang = (lang or "ru").lower().split("-")[0]
     errors = []
-    if lang == "ru" and getattr(s, "cloudru_api_key", "") and getattr(s, "cloudru_tts", True):
+    if lang in cloudru_tts_langs(s) and getattr(s, "cloudru_api_key", "") and getattr(s, "cloudru_tts", True):
         try:
             return cloudru_tts(text, lang, s)
         except SttUnavailable as e:
@@ -512,26 +535,30 @@ def tts_synthesize(text: str, lang: str, s: Settings) -> bytes:
             return nvidia_tts(text, lang, s)
         except SttUnavailable as e:
             errors.append(str(e))
-    if lang == "ru":
+    if lang in SILERO_TTS_VOICES:
         try:
-            return silero_tts(text, s)
+            return silero_tts(text, s, lang)
         except SttUnavailable as e:
             errors.append(str(e))
     raise SttUnavailable("; ".join(errors) or f"no server tts for {lang}")
 
 
-def silero_tts(text: str, s: Settings) -> bytes:
-    """Russian TTS with Silero (speech service or in-process CPU), sentence by sentence (long number-heavy
-    messages made the model fail as a whole). Returns one WAV; raises SttUnavailable when nothing was spoken."""
+def silero_tts(text: str, s: Settings, lang: str = "ru") -> bytes:
+    """Local Silero CIS TTS (speech service or in-process CPU), sentence by sentence.
+    Russian gets digit/unit spelling and stress; the other CIS languages are sent in their own script."""
     global _silero
     chunks = tts_chunks(text)
     if not chunks:
         raise SttUnavailable("nothing to speak")
+    lang = (lang or "ru").lower().split("-")[0]
+    speaker = SILERO_TTS_VOICES.get(lang)
+    if not speaker:
+        raise SttUnavailable(f"no silero voice for {lang}")
     if s.speech_url:
         parts = []
         try:
             for c in chunks:
-                r = httpx.post(f"{s.speech_url.rstrip('/')}/tts", json={"text": c}, timeout=60)
+                r = httpx.post(f"{s.speech_url.rstrip('/')}/tts", json={"text": c, "speaker": speaker}, timeout=60)
                 if r.status_code == 200:
                     parts.append(r.content)
         except httpx.HTTPError:
@@ -549,7 +576,7 @@ def silero_tts(text: str, s: Settings) -> bytes:
     audio = []
     for c in chunks:
         try:
-            audio.append(_silero.apply_tts(text=ru_tts.prepare(c), speaker=ru_tts.DEFAULT_SPEAKER, sample_rate=24000))
+            audio.append(_silero.apply_tts(text=ru_tts.prepare(c) if lang == "ru" else c, speaker=speaker, sample_rate=24000))
         except Exception:
             continue
     if not audio:

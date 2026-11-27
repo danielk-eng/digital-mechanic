@@ -105,8 +105,9 @@ def tts(body: TtsIn):
     if not TTS_ON:
         raise HTTPException(404, "tts disabled")
     with _tl:
-        spk = body.speaker if body.speaker.startswith("ru_") else ru_tts.DEFAULT_SPEAKER  # old clients sent «xenia» (v4_ru)
-        audio = silero().apply_tts(text=ru_tts.prepare(body.text[:900]), speaker=spk, sample_rate=24000)
+        spk = body.speaker if body.speaker.startswith(("ru_", "kaz_", "uzb_", "kir_", "tgk_")) else ru_tts.DEFAULT_SPEAKER  # old clients sent «xenia» (v4_ru)
+        text = ru_tts.prepare(body.text[:900]) if spk.startswith("ru_") else body.text[:900]
+        audio = silero().apply_tts(text=text, speaker=spk, sample_rate=24000)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000)

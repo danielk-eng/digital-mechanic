@@ -4,8 +4,8 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let LAST_CHECK = null, LAST_DRAFT = null;  // {vid, sid} of the check diagnosed in this dialog: sent with chat (Vercel instances do not share it)
 let I18N = {}, ME = null, VID = new URLSearchParams(location.search).get("v") || localStorage.getItem("vid") || "", VEH = null, VLIST = [], BUSY = false, LAST_Q = "", HYP = false;
-const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG", be: "be-BY"};
-const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt", bn: "বাংলা", ky: "Кыргызча", be: "Беларуская"};  // = i18n.LANGS
+const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG"};
+const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt", bn: "বাংলা", ky: "Кыргызча"};  // = i18n.LANGS
 const t = k => (I18N[(ME && ME.lang) || $("#l_lang")?.value || "ru"] || I18N.ru || {})[k] || (I18N.ru || {})[k] || k;
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const TT = (k, dflt) => { const L = (ME && ME.lang) || $("#l_lang")?.value || "ru"; return (I18N[L] || {})[k] || dflt; };  // per-language string or the given (Russian) text
@@ -892,7 +892,7 @@ function stopRec() { if (REC && REC.mr.state !== "inactive") REC.mr.stop(); }
 // Manuals, tickets, chips and history are Russian until people translate the databases. Every Russian text node that
 // appears in the chat, a sheet or the viewer is translated via /api/translate (imported translation -> cache -> LLM);
 // a translation that loses a number keeps the Russian original. Page text has an «original» toggle.
-const OWN = {kk: "әғқңөұүһі", ky: "ңөү", tg: "ғӣқӯҳҷ", be: "ўі", uz: "ўқғҳ"};
+const OWN = {kk: "әғқңөұүһі", ky: "ңөү", tg: "ғӣқӯҳҷ", uz: "ўқғҳ"};
 const needsTr = () => !!(ME && ME.lang && ME.lang !== "ru");
 // model names alone (МАЗ-5337, ЯМЗ-236М2) stay as they are
 function isRu(x) { if (!/[а-яё]{3,}/.test(String(x))) return false; const own = OWN[ME && ME.lang]; return !(own && [...String(x).toLowerCase()].some(ch => own.includes(ch))); }

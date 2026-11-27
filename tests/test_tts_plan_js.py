@@ -1,5 +1,5 @@
 """Play on a translated repair must speak the shown translation with a matching voice.
-A missing browser voice (uz/tg/kk/ky/be/hi/bn/vi on a typical Linux Chrome) must not fall back to the
+A missing browser voice (uz/tg/kk/ky/hi/bn/vi on a typical Linux Chrome) must not fall back to the
 default voice reading Cyrillic or Latin as gibberish: speak the Russian original with ru-RU, or stay silent."""
 import shutil
 import subprocess
@@ -77,13 +77,12 @@ def test_translated_uz_with_uz_voice_speaks_shown_text():
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
-def test_missing_voice_for_ky_kk_tg_be_falls_back_to_russian():
+def test_missing_voice_for_ky_kk_tg_falls_back_to_russian():
     ru = "Замена сцепления выполнена."
     shown = {
         "ky": "Муфта алмаштырылды.",
         "kk": "Ілініс ауыстырылды.",
         "tg": "Муфта иваз карда шуд.",
-        "be": "Зчапленне заменена.",
     }
     for lang, tr in shown.items():
         p = _plan(tr, ru, lang)

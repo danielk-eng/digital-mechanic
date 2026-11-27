@@ -40,6 +40,58 @@ def test_silero_tts_joins_chunks(monkeypatch):
     assert len(sent) == len(voice.tts_chunks(LONG))
 
 
+def test_cloudru_language_matrix_is_explicit_and_capped():
+    s = SimpleNamespace(cloudru_asr_langs="ru,kk,uz,ky,tg,en", cloudru_tts_langs="ru,kk,uz,ky,tg,en")
+    assert voice.cloudru_asr_langs(s) == {"ru", "kk", "uz", "ky"}
+    assert voice.cloudru_tts_langs(s) == {"ru", "kk", "uz", "ky"}  # tg/en are not promised as SaluteSpeech CIS voices
+    s = SimpleNamespace(cloudru_asr_langs="", cloudru_tts_langs="")
+    assert voice.cloudru_asr_langs(s) == {"ru"} and voice.cloudru_tts_langs(s) == {"ru"}  # empty operator override falls back to ru
+
+
+def test_cloudru_stt_model_follows_configured_asr_matrix(monkeypatch):
+    sent = {}
+
+    class R:
+        status_code = 200
+        def json(self): return {"text": "ok"}
+
+    def post(url, headers, files, data, timeout):
+        sent["model"] = data["model"]; sent["language"] = data["language"]
+        return R()
+
+    monkeypatch.setattr(voice.httpx, "post", post)
+    s = SimpleNamespace(cloudru_api_key="key", cloudru_base_url="https://foundation-models.api.cloud.ru/v1",
+                        speech_timeout_s=1, cloudru_stt=True, cloudru_asr_langs="ru,kk")
+    assert voice.cloudru_stt(b"audio", "audio/wav", "kk", s) == "ok"
+    assert sent["model"] == voice.CLOUDRU_ASR_MODEL and sent["language"] == "kk"
+    assert voice.cloudru_stt(b"audio", "audio/wav", "uz", s) == "ok"
+    assert sent["model"] == "openai/whisper-large-v3"  # not enabled -> existing Whisper path
+
+
+def test_silero_cis_voice_matrix_and_speaker_forwarding(monkeypatch):
+    sent = []
+
+    class R:
+        status_code = 200
+        content = _wav()
+
+    def post(url, json, timeout):
+        sent.append(json); return R()
+
+    monkeypatch.setattr(voice.httpx, "post", post)
+    s = SimpleNamespace(speech_url="http://speech:9000", silero_enabled=False)
+    for lang, speaker in voice.SILERO_TTS_VOICES.items():
+        assert voice.silero_tts("Байланыс тексеру." if lang == "kk" else "Проверка связи.", s, lang).startswith(b"RIFF")
+        assert sent[-1]["speaker"] == speaker
+    assert {"ru", "kk", "uz", "ky", "tg"} <= set(voice.server_tts_langs(s))
+
+
+def test_cloudru_tts_langs_expand_server_voice_matrix():
+    s = SimpleNamespace(cloudru_api_key="key", cloudru_tts=True, cloudru_tts_langs="ru,kk,uz,ky",
+                        nvidia_api_key="", nvidia_tts_enabled=True, speech_url="", silero_enabled=False)
+    assert voice.server_tts_langs(s) == ["kk", "ky", "ru", "uz"]
+
+
 def test_client_keeps_server_voice_after_one_failure():
     js = open("src/digital_mechanic/web/static/app.js", encoding="utf-8").read()
     assert "if (r.status === 404) SERVER_TTS = false;" in js
