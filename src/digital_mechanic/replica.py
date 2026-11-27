@@ -139,14 +139,14 @@ class Replica:
             return False
 
     def _head_etag(self) -> str:
-        """Authoritative ETag from the Blob API (the content GET answers with a weak, compressed-variant ETag that x-if-match
-        never matches). Read BEFORE the content: the content is then at least that version, so a stale ETag only makes the CAS
+        """Authoritative ETag from the Blob API (the upload only accepts the strong form). Read BEFORE the content: the content is then at least that version, so a stale ETag only makes the CAS
         refuse and retry, never overwrite."""
         r = self.http.get(API + "/", params={"url": self.url()}, headers=self._hdr())
         if r.status_code == 404:
             return ""
         r.raise_for_status()
-        return str(r.json().get("etag", ""))
+        tag = str(r.json().get("etag", ""))
+        return tag[2:] if tag.startswith("W/") else tag  # both answer W/"<hash>", the upload only accepts "<hash>" (seen on Vercel)
 
     def _get(self) -> tuple[dict, str]:
         tag = self._head_etag() if self.cas else ""

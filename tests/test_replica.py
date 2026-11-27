@@ -21,7 +21,7 @@ def fake_blob():
         if "v" not in box:
             return httpx.Response(404)
         if req.url.host == "vercel.com":  # head(): metadata with the strong ETag
-            return httpx.Response(200, json={"etag": box["etag"]})
+            return httpx.Response(200, json={"etag": "W/" + box["etag"]})  # Vercel answers the weak form here too
         if req.headers.get("if-none-match") in (box["etag"], "W/" + box["etag"]):
             return httpx.Response(304)
         out = httpx.Response(200, content=box["v"], headers={"etag": "W/" + box["etag"]})  # weak, as the real CDN answers
