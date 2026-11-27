@@ -1211,9 +1211,10 @@ def section_json(doc_id: str, page: int, q: str = "", uid: str | None = Cookie(N
     p, extra = _page(doc_id, page)
     sec = AGENT.sections.find(doc_id, page, q)
     meta = AGENT.docs.get(doc_id, {})
-    pdf = not extra and (Path(S.manuals_dir) / meta.get("filename", "_")).exists()
-    pdf_text = not pdf  # backup stand: /manuals/<doc>.pdf?page=N is a printable text page of the section (no PDF published there)
-    imgs = bool((pdf and shutil.which("pdftoppm")) or (extra and p.image and (Path(S.extra_images_dir) / p.image).exists()))
+    has_file = not extra and (Path(S.manuals_dir) / meta.get("filename", "_")).exists()
+    pdf = has_file and S.manual_full_pdf  # whole-PDF link only with MANUAL_FULL_PDF=1 (default off)
+    pdf_text = not pdf  # otherwise /manuals/<doc>.pdf?page=N is the cited page only (image + text), never the whole manual
+    imgs = bool((has_file and shutil.which("pdftoppm")) or (extra and p.image and (Path(S.extra_images_dir) / p.image).exists()))
     d = sec.as_dict() if sec else {"pages": [{"page": page, "text": p.text}], "start_page": page, "end_page": page, "span": str(page), "title": "", "label": ""}
     d["pages"] = [{**x, "text": view_text(x.get("text", ""))} for x in d.get("pages", [])]
     return {"document": p.document, "full_title": meta.get("full_title", p.document), "extra": extra, "pdf": pdf, "pdf_text": pdf_text, "has_image": imgs, **d}
@@ -1292,7 +1293,8 @@ def _print_body(t: str) -> str:
 def manual_pdf(doc_id: str, page: int = 0, uid: str | None = Cookie(None)):
     user_of(uid)
     meta = AGENT.docs.get(doc_id)
-    if meta and (Path(S.manuals_dir) / meta["filename"]).exists():
+    has_file = bool(meta and (Path(S.manuals_dir) / meta["filename"]).exists())
+    if has_file and S.manual_full_pdf:
         # inline: open in the browser's viewer, never as a download (mobile used to offer «Скачать»)
         return FileResponse(Path(S.manuals_dir) / meta["filename"], media_type="application/pdf", filename=f"{doc_id}.pdf",
                             content_disposition_type="inline", headers={"Cache-Control": "private, max-age=3600"})
@@ -1304,15 +1306,16 @@ def manual_pdf(doc_id: str, page: int = 0, uid: str | None = Cookie(None)):
     except HTTPException:
         return HTMLResponse(PRINT_HTML.replace("{{title}}", "Страница не найдена").replace("{{body}}",
                             "<h1>Страница не найдена</h1><p class='note'>Такой страницы нет в руководствах этого стенда.</p><div class='bar'><a href='/'>← В приложение</a></div>"), status_code=404)
-    sec = AGENT.sections.find(doc_id, page, "")
-    pages = (sec.as_dict().get("pages") if sec else None) or [{"page": page, "text": p.text}]
+    # only the cited page (organizers 27.11): its image where the PDF is on the server, and its text; no whole-manual download
+    pages = [{"page": page, "text": p.text}]
     title = (meta or {}).get("full_title", p.document)
     e = html.escape
-    body = (f"<h1>{e(title)}</h1><p class='src'>с. {e(str(pages[0]['page']))}" + (f"–{e(str(pages[-1]['page']))}" if len(pages) > 1 else "") + "</p>"
-            "<div class='bar'><button class='pr' id='pr'>Сохранить в PDF / печать</button><a href='/'>← В приложение</a></div>"
-            "<p class='note'>Оригинальный PDF открывается на основном стенде. Здесь — текст этих страниц из руководства (тот же, что в приложении); "
-            "кнопка выше сохраняет его в PDF.</p>"
-            + "".join(f"<h2 id='p{x['page']}' class='{'on' if x['page'] == page else ''}'>Страница {x['page']}</h2>{_print_body(view_text(x.get('text', '')))}" for x in pages))
+    img = (f"<img src='/page/{e(doc_id)}/{page}.png' alt='Страница {page}' style='max-width:100%;border:1px solid var(--border);border-radius:8px;margin:0 0 12px'>"
+           if has_file and not extra and shutil.which("pdftoppm") else "")
+    body = (f"<h1>{e(title)}</h1><p class='src'>с. {e(str(page))}</p>"
+            "<div class='bar'><button class='pr' id='pr'>Печать страницы</button><a href='/'>← В приложение</a></div>"
+            "<p class='note'>Показана только страница, на которую ссылается ответ. Полный PDF руководства стенд не выдаёт.</p>" + img
+            + "".join(f"<h2 id='p{x['page']}' class='on'>Страница {x['page']}</h2>{_print_body(view_text(x.get('text', '')))}" for x in pages))
     return HTMLResponse(PRINT_HTML.replace("{{title}}", e(f"{title}, с. {page}")).replace("{{body}}", body), headers={"Cache-Control": "private, max-age=600"})
 
 

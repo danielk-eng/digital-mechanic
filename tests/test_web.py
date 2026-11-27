@@ -177,9 +177,26 @@ def test_pdf_link_without_pdfs_is_a_printable_section_not_404(client, monkeypatc
     assert s["pdf"] is False and s["pdf_text"] is True
     r = client.get("/manuals/YAMZ236-RK.pdf?page=41")
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
-    assert "421-461" in r.text and "Сохранить в PDF" in r.text and "Страница 41" in r.text
+    assert "421-461" in r.text and "Печать страницы" in r.text and "Страница 41" in r.text and "Страница 42" not in r.text
     assert client.get("/manuals/YAMZ236-RK.pdf?page=99999").status_code == 404
     assert client.get("/manuals/YAMZ236-RK.pdf").status_code == 200  # old link without ?page=: start of the manual, not 404
+
+
+def test_full_pdf_off_by_default_only_cited_page(client, monkeypatch, tmp_path):
+    """Organizers 27.11 (pending): no whole-manual PDF on the stand unless MANUAL_FULL_PDF=1; the link opens only the cited page."""
+    import digital_mechanic.web.app as m
+    meta = m.AGENT.docs["YAMZ236-RK"]
+    (tmp_path / meta["filename"]).write_bytes(b"%PDF-1.4 fake")
+    monkeypatch.setattr(m.S, "manuals_dir", str(tmp_path))
+    client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True})
+    assert m.S.manual_full_pdf is False
+    s = client.get("/api/section/YAMZ236-RK/41").json()
+    assert s["pdf"] is False and s["pdf_text"] is True
+    r = client.get("/manuals/YAMZ236-RK.pdf?page=41")
+    assert r.headers["content-type"].startswith("text/html") and "Полный PDF руководства стенд не выдаёт" in r.text and "Страница 42" not in r.text
+    monkeypatch.setattr(m.S, "manual_full_pdf", True)
+    assert client.get("/api/section/YAMZ236-RK/41").json()["pdf"] is True
+    assert client.get("/manuals/YAMZ236-RK.pdf?page=41").headers["content-type"] == "application/pdf"
 
 
 def test_expand_prefetch_is_signed_and_stored_only_on_click(client):

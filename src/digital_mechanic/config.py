@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     vehicles_path: str = "data/official/vehicles.json"
     fault_types_path: str = "data/official/fault_types.json"
     manuals_dir: str = "data/manuals"
+    # Organizers 27.11 (answer pending): the stand shows only the page an answer cites. MANUAL_FULL_PDF=1 re-enables opening
+    # the whole manual PDF on the main stand; default off.
+    manual_full_pdf: bool = False
     engine_docs_path: str = "data/engine_docs.yaml"
     index_path: str = "data/index/pages.jsonl.gz"
     extra_index_path: str = "data/index/extra_pages.jsonl.gz"
