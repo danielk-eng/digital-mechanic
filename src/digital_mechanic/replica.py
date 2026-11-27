@@ -138,16 +138,27 @@ class Replica:
             self.stats["error"] = f"pull {type(e).__name__} {getattr(getattr(e, 'response', None), 'status_code', '')}"
             return False
 
+    def _head_etag(self) -> str:
+        """Authoritative ETag from the Blob API (the content GET answers with a weak, compressed-variant ETag that x-if-match
+        never matches). Read BEFORE the content: the content is then at least that version, so a stale ETag only makes the CAS
+        refuse and retry, never overwrite."""
+        r = self.http.get(API + "/", params={"url": self.url()}, headers=self._hdr())
+        if r.status_code == 404:
+            return ""
+        r.raise_for_status()
+        return str(r.json().get("etag", ""))
+
     def _get(self) -> tuple[dict, str]:
+        tag = self._head_etag() if self.cas else ""
         h = self._hdr()
         h.pop("x-api-version"); h.pop("x-vercel-blob-store-id")
         r = self.http.get(self.url(), params={"cache": "0", "t": str(time.time())}, headers=h)
         if r.status_code == 404:
             return {}, ""
         r.raise_for_status()
-        self.stats["get_etag"] = r.headers.get("etag", "")[:60]
+        self.stats["get_etag"] = tag[:60]
         self.stats["get_cache"] = (r.headers.get("x-vercel-cache", "") + " age=" + r.headers.get("age", ""))[:40]
-        return r.json(), r.headers.get("etag", "")
+        return r.json(), tag
 
     def push(self) -> bool:
         """Merge this instance's changes into the shared copy and upload it (if the mirrored tables changed).

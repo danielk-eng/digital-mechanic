@@ -20,9 +20,11 @@ def fake_blob():
             return httpx.Response(200, json={"url": "x"})
         if "v" not in box:
             return httpx.Response(404)
-        if req.headers.get("if-none-match") == box["etag"]:
+        if req.url.host == "vercel.com":  # head(): metadata with the strong ETag
+            return httpx.Response(200, json={"etag": box["etag"]})
+        if req.headers.get("if-none-match") in (box["etag"], "W/" + box["etag"]):
             return httpx.Response(304)
-        out = httpx.Response(200, content=box["v"], headers={"etag": box["etag"]})
+        out = httpx.Response(200, content=box["v"], headers={"etag": "W/" + box["etag"]})  # weak, as the real CDN answers
         hook = box.pop("after_get", None)
         if hook:
             hook()  # another instance writes between this GET and the caller's PUT
