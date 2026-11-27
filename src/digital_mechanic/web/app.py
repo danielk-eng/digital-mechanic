@@ -1100,8 +1100,40 @@ def translate_stats(uid: str | None = Cookie(None)) -> dict:
     return TR.stats()
 
 
+def _voice_intent(u: dict, vehicle_id: str | None, raw: str, engine: str = "") -> dict | None:
+    """Repair-intent extraction for a voice transcript (V t565u) + an entry in the engineer's journal."""
+    if not vehicle_id or vehicle_id not in AGENT.fleet.ids() or not raw.strip():
+        return None
+    from ..agent import voice_intent
+
+    c = AGENT.conv(u["id"], vehicle_id)
+    rep = AGENT.store.repair_open(vehicle_id)
+    step = ""
+    if rep and rep.get("steps"):
+        step = rep["steps"][min(rep["current"], len(rep["steps"]) - 1)].get("text", "")
+    it = voice_intent.extract(AGENT.llm, raw, voice_intent.context_line(c), step)
+    if it.get("llm"):
+        STORE.audit(user_id=u["id"], role=u["role"], vehicle_id=vehicle_id, action="voice_intent", input=pii.mask(raw)[:1000],
+                    output=pii.mask(it.get("utterance") or "")[:500],
+                    tools=[{"tool": "voice_intent", "ok": True, "confidence": it["confidence"], "confirm": it["confirm"], "engine": engine,
+                            "dropped": [pii.mask(x) for x in it.get("dropped", [])], "invented": it.get("invented") or []}], ok=1)
+    return it
+
+
+class IntentIn(BaseModel):
+    vehicle_id: str
+    text: str
+
+
+@app.post("/api/voice/intent")
+def voice_intent_api(body: IntentIn, uid: str | None = Cookie(None)) -> dict:
+    """Browser STT path: the same repair-intent extraction for a transcript recognised on the device."""
+    u = user_of(uid)
+    return {"intent": _voice_intent(u, body.vehicle_id, body.text[:3000], "browser")}
+
+
 @app.post("/api/stt")
-async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), uid: str | None = Cookie(None)) -> dict:
+async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), vehicle_id: str = Form(""), uid: str | None = Cookie(None)) -> dict:
     u = user_of(uid)
     data = await audio.read()
     try:
@@ -1111,7 +1143,10 @@ async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), uid: str | 
     except voice.SttUnavailable as e:
         raise HTTPException(503, f"STT unavailable: {e}")
     STORE.audit(user_id=u["id"], role=u["role"], action="stt", input=f"{len(data)} bytes {lang}", output=pii.mask(text)[:500], tools=[{"tool": engine}], ok=1)
-    return {"text": text, "engine": engine}  # audio itself is not stored
+    from starlette.concurrency import run_in_threadpool
+
+    intent = await run_in_threadpool(_voice_intent, u, vehicle_id or None, text, engine) if vehicle_id else None
+    return {"text": text, "engine": engine, "intent": intent}  # audio itself is not stored
 
 
 class TtsIn(BaseModel):
@@ -1452,6 +1487,7 @@ def eng_trace(aid: int, uid: str | None = Cookie(None)) -> dict:
 
 JOURNAL_RU = {
     "llm_fallback": "Переключение на резервную модель", "llm_answered": "Ответила модель",
+    "voice_intent": "разобрал речь из шумной записи",
     "check_result": "посмотрел результат проверки ML", "search_manual": "искал в руководстве двигателя", "search_extra_docs": "искал в руководстве автомобиля",
     "prepare_ticket": "готовил черновик заявки", "start_repair": "начал пошаговый ремонт", "update_repair": "отметил шаг ремонта",
     "vehicle_history": "открыл историю машины", "policy": "применил правила (код, не модель)", "uncited_guard": "убрал числа без источника",
@@ -1488,6 +1524,9 @@ def agent_journal(tools: list) -> dict:
 
             line += (f": {t.get('reason')}" + (f" → резерв не задан ({t.get('note')})" if t.get("skipped")
                      else f" → {PROV_RU.get(t.get('to'), t.get('to'))}, {t.get('model') or ''}".rstrip(", ")))
+        if name == "voice_intent":
+            line += (f": уверенность {t.get('confidence')}" + (f", отброшено {len(t['dropped'])} фрагм." if t.get("dropped") else "")
+                     + (" → переспросил механика" if t.get("confirm") else "") + (f" → не прозвучали числа {', '.join(t['invented'])}" if t.get("invented") else ""))
         if name == "llm_answered":
             from ..agent.llm import PROV_RU
 

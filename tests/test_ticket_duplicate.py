@@ -40,3 +40,28 @@ def test_new_ticket_phrase_detected():
         assert re.search(pat, yes), yes
     for no in ("Создай заявку на дефектовку", "Создать заявку на дефектовку", "какая заявка в ТОиР?"):
         assert not re.search(pat, no), no
+
+
+def test_duplicate_answer_is_fixed_text_without_llm_retelling(make_agent):
+    import json
+    from conftest import msg, tool_call
+
+    def ticket_call(messages):
+        for m in messages:
+            if m.get("role") == "tool":
+                for f in json.loads(m["content"]).get("fragments", []):
+                    if f["pdf_page"] == 269:
+                        return msg(None, [tool_call("prepare_ticket", {"conclusion": "x", "operations": [
+                            {"text": "Проверить тепловые зазоры", "source": f["label"], "quote": "Проверить и подрегулировать тепловые зазоры клапанного механизма"}]}, 2)])
+        raise AssertionError("page 269 not retrieved")
+
+    a = make_agent([msg(None, [tool_call("search_manual", {"query": "регулировка тепловых зазоров клапанов"}, 1)]), ticket_call,
+                    msg("Дату заявки в руководстве не нашёл [S1]")])
+    c = a.conv("u1", "M333YK47")
+    a.diagnose(c, "S-0005")
+    _draft(a, c)
+    tid = a.confirm(c, None, True)["ticket_id"]
+    turn = a.handle(c, {"lang": "ru"}, "Создай заявку на дефектовку")
+    assert turn.text.startswith(f"По этой проверке (S-0005, F08) заявка {tid} уже в ТОиР") and "дубль" in turn.text
+    assert "руководстве" not in turn.text and len(a.llm.calls) == 2 and not c.draft
+    assert not any(cd.get("kind") == "ticket_draft" for cd in turn.cards)

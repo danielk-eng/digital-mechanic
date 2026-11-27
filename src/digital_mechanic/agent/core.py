@@ -1370,7 +1370,7 @@ class Agent:
                     break
                 messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
                     {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in calls]})
-                drafted = False
+                drafted, dup = False, None
                 for tc in calls:
                     sig = (tc.function.name, tc.function.arguments or "")
                     seen_calls[sig] = seen_calls.get(sig, 0) + 1
@@ -1389,11 +1389,19 @@ class Agent:
                     res = self._run_tool(c, user, tc.function.name, tc.function.arguments, turn)
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(res, ensure_ascii=False)[:12000]})
                     drafted = drafted or (tc.function.name == "prepare_ticket" and bool(res.get("draft_ready")))
+                    if tc.function.name == "prepare_ticket" and res.get("existing_ticket"):
+                        dup = res["existing_ticket"]
                 if drafted and c.draft:
                     # The draft card is the answer: no extra LLM round to retell it (Vercel 26.11: 20–30 s per draft,
                     # a third of it the model paraphrasing the card). The text is built from the verified draft.
                     answer = self._draft_text(c, ty=(re.search(r"(?i)на «(ты|вы)»", messages[0]["content"]) or [None, "вы"])[1] == "ты")
                     turn.tools.append({"tool": "draft_text", "auto": True})
+                    break
+                if dup and not c.draft:
+                    # A ticket for this check is already in TOiR: a fixed answer, no LLM round (Vercel 27.11 10:50: the model's
+                    # retelling added «works» of the old ticket and «дату заявки в руководстве не нашёл»)
+                    answer = self._dup_text(c, dup, ty=(re.search(r"(?i)на «(ты|вы)»", messages[0]["content"]) or [None, "вы"])[1] == "ты")
+                    turn.tools.append({"tool": "draft_text", "auto": True, "duplicate": dup})
                     break
             if not any(t["tool"] == "draft_text" for t in turn.tools):
                 answer = self._verify_answer(c, messages, answer, turn)
@@ -1622,6 +1630,13 @@ class Agent:
             else:
                 out.append({"text": o.get("text"), "norm": None})
         return out
+
+    def _dup_text(self, c: Conv, tid: str, ty: bool = False) -> str:
+        ch = c.check
+        where = f" ({ch.session_id}, {ch.anomaly_type})" if ch else ""
+        return (f"По этой проверке{where} заявка {tid} уже в ТОиР — вторую не создаю, это был бы дубль.\n" +
+                ("Дальше — ремонт по шагам или передай машину главному. Нужна отдельная заявка на другую работу — напиши «новая заявка»." if ty else
+                 "Дальше — ремонт по шагам или передайте машину главному. Нужна отдельная заявка на другую работу — напишите «новая заявка»."))
 
     def _draft_text(self, c: Conv, ty: bool = False) -> str:
         """Short text over the verified draft (the card lists the works): how many, from which pages, priority with its basis, next step."""
