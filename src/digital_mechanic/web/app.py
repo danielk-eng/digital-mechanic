@@ -755,11 +755,12 @@ def photo_file(name: str, uid: str | None = Cookie(None)):
     u = user_of(uid)
     if not re.fullmatch(r"[\w.-]{3,80}", name) or not (Path(S.uploads_dir) / name).is_file():
         raise HTTPException(404)
-    if u["role"] != "engineer":  # own uploads; the chief: uploads about his company's trucks or by his people (other companies: 404)
+    if u["role"] != "engineer":  # own uploads; uploads about the company's trucks (shown in their history); the chief: also by his people (other companies: 404)
         rows = STORE.q("SELECT user_id, vehicle_id FROM media WHERE files LIKE ?", (f'%"{name}"%',))
         mine = any(r["user_id"] == u["id"] for r in rows)
-        if not mine and u["role"] == "manager":
-            fleet, staff = set(AGENT.fleet.ids()), _staff_ids(tenancy.company_of(u))
+        if not mine:  # the truck's history shows every photo of it to the company's people -> the picture must open too
+            fleet = set(AGENT.fleet.ids())
+            staff = _staff_ids(tenancy.company_of(u)) if u["role"] == "manager" else set()
             mine = any(r["vehicle_id"] in fleet or r["user_id"] in staff for r in rows)
         if not mine:
             raise HTTPException(404)

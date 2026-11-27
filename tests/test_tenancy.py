@@ -158,6 +158,9 @@ def test_media_files_scoped_by_company(m, world):
     assert b.get("/api/photo/b_truck.jpg").status_code == 200 and a.get("/api/photo/b_truck.jpg").status_code == 404
     assert a.get("/api/photo/a_truck.jpg").status_code == 200 and b.get("/api/photo/a_truck.jpg").status_code == 404
     assert world["eng"].get("/api/photo/b_truck.jpg").status_code == 200
+    # a mechanic of company A opens a colleague's photo of an A truck (it is in that truck's history), never B's
+    mech_a = login(m, "selftaught", "3002")
+    assert mech_a.get("/api/photo/a_truck.jpg").status_code == 200 and mech_a.get("/api/photo/b_truck.jpg").status_code == 404
 
 
 def test_qr_page_speaks_the_users_language(m, world):
