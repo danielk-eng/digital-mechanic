@@ -179,3 +179,4 @@ def test_pdf_link_without_pdfs_is_a_printable_section_not_404(client, monkeypatc
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
     assert "421-461" in r.text and "Сохранить в PDF" in r.text and "Страница 41" in r.text
     assert client.get("/manuals/YAMZ236-RK.pdf?page=99999").status_code == 404
+    assert client.get("/manuals/YAMZ236-RK.pdf").status_code == 200  # old link without ?page=: start of the manual, not 404

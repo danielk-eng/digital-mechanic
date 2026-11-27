@@ -1215,6 +1215,7 @@ def manual_pdf(doc_id: str, page: int = 0, uid: str | None = Cookie(None)):
                             content_disposition_type="inline", headers={"Cache-Control": "private, max-age=3600"})
     # backup stand (Vercel): the manual PDFs are not published there (no redistribution right), only the indexed page text
     # the app already shows -> a printable page of the cited section («Сохранить в PDF» = the browser's print dialog), never a bare 404
+    page = page if page > 0 else 1  # a bare /manuals/<doc>.pdf (no ?page=, e.g. an old link): the start of the manual
     try:
         p, extra = _page(doc_id, page)
     except HTTPException:
