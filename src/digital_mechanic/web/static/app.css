@@ -105,6 +105,8 @@ main.chat-main{max-width:760px;margin:0 auto;padding:16px 16px calc(var(--compos
 .facts-list .r{display:flex;gap:12px;align-items:flex-start}.facts-list .r .ic{color:var(--text-3);margin-top:2px}
 .diag-row{display:flex;flex-direction:column;gap:8px;margin-top:16px}
 .diag-row .btn.primary{white-space:normal;text-align:center;min-height:56px;font-size:1.02rem}
+@media (max-width:440px){.diag-row .btn.primary{padding:0 12px;gap:8px;font-size:.97rem;letter-spacing:-.01em}}  /* 390 px: «Получить результат диагностики» on one line (wrapped in two) */
+@media (max-width:370px){.diag-row .btn.primary{padding:0 10px;font-size:.92rem}.diag-row .btn.primary svg{display:none}}
 .diag-row .sess{display:flex;align-items:center;gap:12px}.diag-row .sess .label{flex:none}.diag-row select.input{min-height:44px;font-size:.92rem}
 
 /* empty state */
