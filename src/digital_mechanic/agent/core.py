@@ -1125,6 +1125,11 @@ class Agent:
             turn.tools.append({"tool": "search_manual", "args": {"query": q}, "ok": True, "auto": True,
                                "hits": [f"{f['label']}:{f['document']} стр.{f['pdf_page']}" for f in r["fragments"]]})
             pre += [f for f in r["fragments"] if f["label"] not in {x["label"] for x in pre}]
+        if not matched:
+            p5121 = [f for f in pre if "5.12.1" in f["text"]]
+            if p5121:  # name the very fragment of п. 5.12.1 РК, so the work is quoted from it and not from a neighbouring manual
+                pre = p5121 + [f for f in pre if f not in p5121]
+                ask += f" Работы бери из фрагмента [{p5121[0]['label']}] ({p5121[0]['document']}, стр. {p5121[0]['pdf_page']}) — это п. 5.12.1."
         if pre:
             ask += "\n\nФРАГМЕНТЫ РУКОВОДСТВА ЭТОГО ДВИГАТЕЛЯ (уже найдены):\n\n" + "\n\n".join(
                 f"[{f['label']}] {f['document']}, стр. PDF {f['pdf_page']}\n{f['text'][:1300]}" for f in pre[:6])
@@ -1148,7 +1153,8 @@ class Agent:
             out.append({"id": "confirm_ticket", "kind": "send", "label": "Подтвердить заявку", "text": "Подтверждаю заявку"})
         elif c.hold_ticket:
             pass  # marks matched: the check stays open, no ticket button
-        elif not has_ticket and self.marks_applicable(c) and self.marks_state(c) is None:
+        elif self.marks_applicable(c) and self.marks_state(c) is None and not any(
+                (t.get("payload") or {}).get("session_id") == c.check.session_id for t in self.store.tickets(vid)):
             out.append({"id": "marks_mismatch", "kind": "send", "label": "Метки не совпадают", "text": "Метки не совпадают"})
             out.append({"id": "marks_match", "kind": "send", "label": "Метки совпали", "text": "Метки совпали"})
         elif status == "anomaly" and not has_ticket and policy.may_create_ticket(c.check, c.vehicle):
