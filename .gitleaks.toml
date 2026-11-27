@@ -1,0 +1,8 @@
+# gitleaks: default rules + one allowlisted path. .env.example holds empty placeholders only
+# (generic-api-key matched «DEEPGRAM_API_KEY=» + the next line «SILERO_ENABLED=0», a false positive).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "template with empty values"
+paths = ['''^\.env\.example$''']
