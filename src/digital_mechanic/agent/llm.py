@@ -130,6 +130,7 @@ class Llm:
         self._lock = threading.Lock()
         self._client = None  # optional injected TokenRouter client (tests)
         self._last: dict = {}  # (conversation, step) -> (prompt hash, answer): a loop across consecutive calls
+        self._dead: dict = {}  # provider -> until (time.time()): key rejected (401/403), treated as absent for a while
         self._pool = None
         self._opik = None
         if s.comet_api_key:
@@ -157,7 +158,8 @@ class Llm:
 
     def order(self, country: str | None = None) -> list[str]:
         """Providers to try, primary first. Only those with a key."""
-        have = [n for n in ("cloudru", "tokenrouter") if self._provider(n)[1]]
+        now = time.time()
+        have = [n for n in ("cloudru", "tokenrouter") if self._provider(n)[1] and self._dead.get(n, 0) < now]
         prim = (REQUEST_PRIMARY.get() or self.s.llm_primary or "auto").lower()
         prim = "tokenrouter" if prim == "local" else prim  # LLM_PRIMARY=local: the OpenAI-compatible slot points at LOCAL_LLM_URL (docs/LOCAL_GPU.md)
         if prim == "auto":
@@ -360,7 +362,10 @@ class Llm:
         last: Exception | None = None
         conv = REQUEST_CONV.get()
         prompt_key = hash(str(messages[-1].get("content"))[:4000]) if messages else 0
-        reserve_missing = (self.s.llm_fallback and "cloudru" not in order and not self.s.cloudru_api_key and order[0] == "tokenrouter")
+        reserve_dead = self._dead.get("cloudru", 0) > time.time()
+        reserve_missing = (self.s.llm_fallback and "cloudru" not in order and order[0] == "tokenrouter" and (not self.s.cloudru_api_key or reserve_dead))
+        missing_note = ("резерв GigaChat-4 отключён на 10 мин: Cloud.ru не принял ключ" if reserve_dead
+                        else "CLOUDRU_API_KEY не задан — резерв GigaChat-4 пропущен")
         for i, prov in enumerate(order):
             has_next = self.s.llm_fallback and i < len(order) - 1
             nxt = order[i + 1] if i < len(order) - 1 else None
@@ -397,7 +402,7 @@ class Llm:
                         break
                     if bad and reserve_missing:
                         llm_event(tool="llm_fallback", step=step, **{"from": prov}, skipped=True, reason=bad,
-                                  note="CLOUDRU_API_KEY не задан — резерв GigaChat-4 пропущен")
+                                  note=missing_note)
                     if conv and getattr(msg, "content", None):
                         self._last[(conv, step)] = (prompt_key, msg.content)
                         if len(self._last) > 5000:
@@ -409,13 +414,19 @@ class Llm:
                     break
                 except Exception as e:  # network, rate limit, 5xx, stall: never leak the key
                     last = e
+                    code = getattr(e, "status_code", None)
+                    if code in (401, 403) and len(order) > 1:
+                        self._dead[prov] = time.time() + 600  # rejected key: do not cost the primary its second attempt for 10 min
+                        llm_event(tool="llm_fallback", step=step, **{"from": prov}, skipped=True, reason=failure_reason(e),
+                                  note=f"{PROV_RU.get(prov, prov)}: ключ не принят, резерв отключён на 10 мин")
+                        break  # an auth error does not go away on retry
                     if has_next:
                         llm_event(tool="llm_fallback", step=step, **{"from": prov}, to=nxt, model=self._provider(nxt)[2], reason=failure_reason(e))
                         switched = True
                         break
                     if reserve_missing and attempt == 0:
                         llm_event(tool="llm_fallback", step=step, **{"from": prov}, skipped=True, reason=failure_reason(e),
-                                  note="CLOUDRU_API_KEY не задан — резерв GigaChat-4 пропущен")
+                                  note=missing_note)
                     time.sleep(min(1.5 * (attempt + 1), max(0.0, left() - 3)))
             if not switched and last is None:
                 continue

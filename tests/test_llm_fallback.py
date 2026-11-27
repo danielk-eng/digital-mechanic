@@ -136,3 +136,21 @@ def test_journal_shows_which_model_answered():
     j = agent_journal([{"tool": "llm_fallback", "from": "tokenrouter", "to": "cloudru", "model": "GigaChat/GigaChat-4-708B-A41", "reason": "HTTP 429"},
                        {"tool": "llm_answered", "provider": "cloudru", "model": "GigaChat/GigaChat-4-708B-A41", "step": "agent_r0"}])
     assert "HTTP 429" in j["steps"][0] and "GigaChat-4" in j["steps"][0] and "GigaChat" in j["steps"][1]
+
+
+def test_rejected_reserve_key_is_disabled_and_primary_gets_its_retry_back(monkeypatch):
+    """deb 27.11: Cloud.ru answered 403 «api key not found» -> reserve off for 10 min, the primary gets 2 attempts again."""
+    monkeypatch.setattr("time.sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def flaky(**kw):
+        calls["n"] += 1
+        if calls["n"] in (1, 2):
+            raise Http(503)
+        return reply(GOOD)
+    llm, seen = make(flaky, reserve=_raise(Http(403)))
+    with pytest.raises(LlmUnavailable):
+        run(llm)  # primary 503 -> reserve 403
+    m, ev = run(llm, "второй вопрос")  # primary 503 once more, then its second attempt answers; the reserve is not called
+    assert m.content == GOOD and len(seen["reserve"]) == 1
+    assert ev and ev[0]["skipped"] and "Cloud.ru не принял ключ" in ev[0]["note"]
