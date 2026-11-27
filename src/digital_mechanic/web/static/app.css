@@ -270,6 +270,7 @@ mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 2px}
 .voice .said{font-size:1.05rem;color:var(--text-2);text-align:center;min-height:1.5em;max-width:560px}
 .voice .reply{font-size:1.2rem;line-height:1.45;font-weight:500;text-align:center;max-width:600px;max-height:40vh;overflow:auto}
 .voice .reply.long{text-align:start;font-size:1.1rem;font-weight:400;line-height:1.5;padding:4px 2px;align-self:stretch}
+.voice .reply.draft{opacity:.6;font-weight:400}  /* lines streamed while the answer is written (hands-free) */
 .voice .hint{font-size:.85rem;color:var(--text-3);text-align:center}
 /* a phone: a long spoken answer gets the room, the orb steps back (audit 23:17, 390×844: the reply was cut under the hint) */
 @media (max-width:600px){.voice{padding-left:20px;padding-right:20px}.voice .stage{gap:24px}

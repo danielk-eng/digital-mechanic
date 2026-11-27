@@ -638,6 +638,7 @@ async function ask(text, event = null, sources = null) {
     th.dataset.draft = draft; th.classList.add("has-draft");
     let box = th.querySelector(".draft"); if (!box) { box = document.createElement("div"); box.className = "draft"; th.querySelector(".progress").after(box); }
     box.innerHTML = md(draft, []);
+    vDraft(draft);
   };
   const tick = setInterval(async () => {
     const sec = Math.round((Date.now() - t0) / 1000);
@@ -648,7 +649,7 @@ async function ask(text, event = null, sources = null) {
     if (el && streamIt && !steps.length && (!th.dataset.sstep || (stages === ASK_STAGES && sec >= 30))) { const st = stages.filter(x => sec >= x[0]).pop(); el.dataset.step = trStep(st[1]); }  // stage text when nothing arrives
     if (el) { if (steps.length) el.dataset.step = trStep(steps[steps.length - 1]); el.textContent = `${th.dataset.draft ? t("writing") : (el.dataset.step || t("thinking"))} · ${sec} ${t("sec")}`; }
     showDraft(draft);
-    if (VOICE.on && steps.length) $("#vHint").textContent = steps[steps.length - 1];
+    if (VOICE.on && VOICE.state === "thinking" && el) $("#vHint").textContent = el.textContent;  // hands-free: the same stage and seconds as in the chat (was one static «Ищу ответ» for 15–30 s on Vercel)
   }, 1000);
   const payload = {vehicle_id: VID || null, text, event, ...(LAST_CHECK && LAST_CHECK.vid === VID ? {session_id: LAST_CHECK.sid} : {}), ...(LAST_DRAFT && LAST_DRAFT.vid === VID ? {draft_token: LAST_DRAFT.token} : {}), ...(sources ? {sources: sources.map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))} : {})};
   try {
@@ -1188,8 +1189,14 @@ async function vHeard(raw, intent) {
   const text = intent && intent.utterance ? intent.utterance : raw;
   return vSendHeard(text, text !== raw ? raw : null);
 }
+// Hands-free on Vercel waits 15–30 s for the free model: the verified lines streamed so far show dimmed under the phrase,
+// so the mechanic sees the answer being written; the final answer replaces them (and is what gets spoken).
+function vDraft(draft) {
+  if (!VOICE.on || VOICE.state !== "thinking" || !draft) return;
+  const el = $("#vReply"); el.textContent = clipText(plain(draft), 600); el.classList.add("draft"); el.classList.toggle("long", el.textContent.length > 140);
+}
 async function vSendHeard(text, raw) {
-  $("#vSaid").innerHTML = esc(text) + rawDetails(raw); $("#vReply").textContent = ""; $("#vReply").classList.remove("long");
+  $("#vSaid").innerHTML = esc(text) + rawDetails(raw); $("#vReply").textContent = ""; $("#vReply").classList.remove("long", "draft");
   vSet("thinking");
   // Another answer still in flight (an explanation after «Получить результат», a chip): ask() drops a request while BUSY and the
   // dialog said «Ответа нет» 1 s after the phrase (Vercel audit 27.11 10:50). Wait for it (up to 90 s), then ask.
@@ -1198,7 +1205,8 @@ async function vSendHeard(text, raw) {
   const turn = await send(text, {raw});
   if (!VOICE.on) return;
   const reply = turn && (turn.text || (turn.cards || []).map(c => c.light_text || "").join(" "));
-  if (!reply) { vSet("idle", t("v_no_answer")); return; }
+  $("#vReply").classList.remove("draft");
+  if (!reply) { $("#vReply").textContent = ""; vSet("idle", t("v_no_answer")); return; }
   $("#vReply").textContent = clipText(plain(reply), 600);
   $("#vReply").classList.toggle("long", plain(reply).length > 140); $("#vReply").scrollTop = 0;
   if (!A11Y.voiceSpeaks()) return vListen();
