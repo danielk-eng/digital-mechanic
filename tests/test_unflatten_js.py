@@ -31,3 +31,12 @@ def test_flat_detailed_answer_gets_headings_and_list_lines():
 def test_text_without_a_real_list_is_untouched():
     for t in ("Момент 1. затяжки 2. не трогать", "Шаг 1. А [S1]. 2. Б", "1. А\n2. Б\n3. В"):
         assert _unflatten(t) == t
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_manager_idle_days_use_decimal_comma():
+    src = (JS.parent / "manager.js").read_text(encoding="utf-8")
+    line = next(l for l in src.split("\n") if l.startswith("const dec ="))
+    out = subprocess.run(["node", "-e", "global.document={documentElement:{lang:'ru'}};" + line + "; process.stdout.write(dec(15.9))"],
+                         capture_output=True, text=True, check=True).stdout
+    assert out == "15,9" and "${dec(idleMax)}" in src and "${dec(v.idle_days)}" in src

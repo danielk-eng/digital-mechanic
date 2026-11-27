@@ -86,6 +86,21 @@ def human_check(ch: dict | None) -> dict | None:
     return out
 
 
+_ABBR = re.compile(r"(?:\b(?:стр|с|п|пп|рис|табл|см|гл|разд|т\.\s?д|т\.\s?е|т\.\s?п|др|прим|мин|макс|ок|г|гг|ч|шт|кв|млн|тыс))\.$", re.I)
+
+
+def _sentences(line: str) -> list[str]:
+    """Sentences of one line, each with its trailing space. «стр. 53 [S1] и стр. 52» is one sentence: no split after an
+    abbreviation or before a lowercase word or a number (the chief saw «53 [S1] и стр.» / «52 [S4].» on separate lines)."""
+    out: list[str] = []
+    for piece in re.split(r"(?<=[.!?])(?=\s)", line):
+        if out and (_ABBR.search(out[-1].rstrip()) or re.match(r"\s*[a-zа-яё\d(\[«]", piece)):
+            out[-1] += piece
+        else:
+            out.append(piece)
+    return out
+
+
 def summarize(agent, c, lang: str = "русском") -> dict:
     p = package(agent, c)
     hc = human_check(p["check"])
@@ -105,8 +120,9 @@ def summarize(agent, c, lang: str = "русском") -> dict:
     if text:
         bad = unverified_numbers(text, evidence, allowed={p["vehicle"]["vehicle_id"]}, free_max=12)
         if bad:
-            parts = re.split(r"(?<=[.!?])\s+|\n", text)
-            text = "\n".join(x for x in parts if not any(b in x or b.replace(".", ",") in x for b in bad)).strip()
+            text = "\n".join("".join(x for x in _sentences(line) if not any(b in x or b.replace(".", ",") in x for b in bad)).strip()
+                             for line in text.split("\n")).strip()
+            text = re.sub(r"\n{2,}", "\n", text)
     if not text:
         text, llm = _plain(p), False
     return {"text": text, "llm": llm, "package": p, "ts": time.time()}

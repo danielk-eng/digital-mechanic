@@ -10,6 +10,8 @@ async function api(p, o = {}) {
   if (r.status === 401 || r.status === 403) { location.href = "/"; throw new Error("auth"); }
   if (!r.ok) throw new Error(await r.text()); return r.json();
 }
+// days of idle «15,9 дн.» with the decimal mark of the interface language (was «15.9» next to «0,76» elsewhere)
+const dec = n => { try { return new Intl.NumberFormat(document.documentElement.lang || "ru", {maximumFractionDigits: 1}).format(n); } catch (_) { return String(n); } };
 const fmt = ts => new Date(ts * 1000).toLocaleString("ru-RU", {day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"});
 const vSt = v => v.in_repair ? "repair" : v.status;
 const pill = v => `<span class="pill ${vSt(v)}">${esc(v.in_repair ? t("in_repair") : t(v.status))}</span>`;
@@ -97,7 +99,7 @@ async function loadFleet() {
   FLEET = await api("/api/fleet");
   const o = FLEET.ops || {}, c = FLEET.counts;
   const idleMax = Math.max(0, ...FLEET.vehicles.filter(v => v.ops === "idle").map(v => v.idle_days || 0));
-  $("#kpis").innerHTML = [["op_in_repair", o.in_repair, ""], ["op_awaiting", o.awaiting, ""], ["op_on_line", o.on_line, ""], ["op_idle", o.idle, idleMax ? `${t("idle_max")} ${idleMax} ${t("days")}` : ""]]
+  $("#kpis").innerHTML = [["op_in_repair", o.in_repair, ""], ["op_awaiting", o.awaiting, ""], ["op_on_line", o.on_line, ""], ["op_idle", o.idle, idleMax ? `${t("idle_max")} ${dec(idleMax)} ${t("days")}` : ""]]
     .map(([k, n, s]) => `<button class="kpi ${F.ops === k ? "on" : ""}" data-k="${k}"><div class="l">${t(k)}</div><div class="n">${n ?? 0}</div>${s ? `<div class="s">${s}</div>` : `<div class="s">&nbsp;</div>`}</button>`).join("");
   $$(".kpi").forEach(el => el.onclick = () => { F.ops = F.ops === el.dataset.k ? undefined : el.dataset.k; if (CUR !== "fleet") tab("fleet"); applyF(); });
   window.__counts = c;
@@ -112,7 +114,7 @@ function renderFleet() {
     `<div class="panel"><table class="tbl"><thead><tr><th>${t("vehicle")}</th><th class="hide-m">${t("model_engine")}</th><th>${t("status")}</th><th class="hide-m">${t("last_check")}</th><th class="hide-m">${t("trend")}</th><th>${t("priority")}</th></tr></thead><tbody>` +
     (rows.length ? rows.map(v => { const l = v.last || {};
       const lastTxt = l.status === "anomaly" ? `${esc(l.anomaly_type)} ${esc(l.anomaly_title)}` : l.status === "check_failed" ? t("check_failed_short") : t("status_normal");
-      const extra = [v.awaiting ? t("op_awaiting") : "", v.idle_days != null ? `${t("op_idle")} ${v.idle_days} ${t("days")}` : ""].filter(Boolean).join(", ");
+      const extra = [v.awaiting ? t("op_awaiting") : "", v.idle_days != null ? `${t("op_idle")} ${dec(v.idle_days)} ${t("days")}` : ""].filter(Boolean).join(", ");
       return `<tr class="click" data-v="${esc(v.vehicle_id)}"><td><b class="mono">${esc(v.vehicle_id)}</b><div class="sub">${esc(v.garage_no)}</div></td>` +
         `<td class="hide-m">${esc(v.model)}<div class="sub">${esc(v.engine_model)}${(v.mechanics || []).length ? ", " + esc(v.mechanics.join(", ")) : ""}</div></td><td>${pill(v)}${extra ? `<div class="sub" style="margin-top:4px">${extra}</div>` : ""}</td>` +
         `<td class="hide-m">${lastTxt}<div class="sub">${esc((l.checked_at || "").slice(0, 10))}${l.anomaly_score != null ? `, ${l.anomaly_score}` : ""}</div></td><td class="hide-m">${spark(v.scores)}</td>` +
