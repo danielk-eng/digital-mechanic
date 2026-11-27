@@ -28,6 +28,28 @@ def _embedded_mocks(s: Settings):
             ToirClient("http://mock-toir", s.http_timeout_s, TestClient(toir_app, base_url="http://mock-toir")))
 
 
+def _seed_ticket_numbers(agent) -> None:
+    """The embedded TOiR mock numbers tickets from TKT-0001 in every process; on Vercel every instance and every deploy is a
+    new process while the tickets live in the shared store — the chief saw TKT-0001 three times. Before a ticket is created
+    the mock's counter is moved past the largest number already known."""
+    import itertools
+    import re
+    import sys
+
+    mod = sys.modules.get("mock_toir.app")
+    if mod is None or not hasattr(mod, "_counter"):
+        return
+
+    def seed() -> None:
+        nums = [int(m.group(1)) for t in agent.store.tickets() for m in [re.fullmatch(r"TKT-(\d+)", str(t.get("ticket_id") or ""))] if m]
+        nums += [int(m.group(1)) for t in getattr(mod, "TICKETS", []) for m in [re.fullmatch(r"TKT-(\d+)", str(t.get("ticket_id") or ""))] if m]
+        if nums:
+            with mod._lock:
+                mod._counter = itertools.count(max(nums) + 1)
+
+    agent.toir.before_create = seed
+
+
 def build_agent(settings: Settings | None = None) -> Agent:
     s = settings or get_settings()
     if s.embed_mocks:
@@ -39,6 +61,8 @@ def build_agent(settings: Settings | None = None) -> Agent:
     docs = load_engine_docs(s.engine_docs_path)["documents"]
     agent = Agent(Fleet(s.vehicles_path, s.fault_types_path), ml, toir,
                  ManualIndex(pages), extra, Llm(s), Store(s.db_path), docs, s.llm_max_tool_rounds, s.pii_masking)
+    if s.embed_mocks:
+        _seed_ticket_numbers(agent)
     from .history import load_demo
 
     agent.demo = load_demo(s.demo_history_path) if s.demo_history_path else {}

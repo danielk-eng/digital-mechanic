@@ -71,7 +71,14 @@ class ToirClient:
         # http: anything with httpx-like .get/.post (e.g. an in-process TestClient for embedded mocks)
         self.base, self.timeout, self.http = base_url.rstrip("/"), timeout, http or httpx
 
+    before_create = None  # embedded mock: hook that moves its counter past the numbers already in the store
+
     def create_ticket(self, t: TicketRequest) -> TicketAck:
+        if self.before_create:
+            try:
+                self.before_create()
+            except Exception:
+                pass
         try:
             r = self.http.post(f"{self.base}/tickets", json=adapters.ticket_to_official(t), timeout=self.timeout)
         except httpx.HTTPError as e:
