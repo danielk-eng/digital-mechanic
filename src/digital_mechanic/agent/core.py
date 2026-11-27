@@ -179,6 +179,28 @@ def table_row_group(text: str, hint: str) -> tuple[str, list[str], int] | None:
     return head.rstrip("*").strip(), rows, hit
 
 
+def _rows_word(n: int) -> str:
+    return "причина" if n % 10 == 1 and n % 100 != 11 else "причины" if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14 else "причин"
+
+
+def table_headings(text: str) -> list[tuple[str, int]]:
+    """Symptom headings of a fault-table page with their row counts (rows before the first heading: «продолжение»)."""
+    out: list[list] = []
+    for line in (text or "").split("\n"):
+        line = line.strip()
+        if not line or _TABLE_HEAD_RE.match(line) or re.fullmatch(r"\d{1,4}", line) or line.startswith("*"):
+            continue
+        if " — " in line:
+            if not out:
+                out.append(["Продолжение с предыдущей страницы", 0])
+            out[-1][1] += 1
+        elif out and out[-1][1] == 0 and not out[-1][0].startswith("Продолжение"):
+            out[-1][0] += " " + line
+        else:
+            out.append([line, 0])
+    return [(h.rstrip("*").strip(), n) for h, n in out if n]
+
+
 def _drop_absence_claims(text: str) -> str:
     """The extract must not say what the section lacks («код F08 не упоминается»): drop such sentences, keep the rest
     (a bullet list keeps its lines)."""
@@ -259,11 +281,19 @@ class Agent:
                 return out
             body = (head + "\n" if head else "") + "\n".join(rows)
         elif pg is not None and _TABLE_HEAD_RE.search(getattr(pg, "text", "") or ""):
-            body = pg.text  # fault table, no row matched: retell the cited page only (the section's other pages are other symptoms)
+            # fault table, no row matches the cited clause: list what this page covers (the LLM answered the question from the
+            # neighbouring page: «F08 означает подсос воздуха…» on p. 53, which is about knocking and oil pressure)
+            heads = table_headings(pg.text)
+            if lang.startswith("русск") and heads:
+                out = {"text": f"Таблица неисправностей, стр. {page}. На этой странице:\n" + "\n".join(f"- **{h}** — {n} {_rows_word(n)}" for h, n in heads),
+                       "ok": True, "dropped_numbers": [], "table_row": False}
+                self._extracts[key] = out
+                return out
+            body = pg.text
         try:
             msg, _ = self.llm.chat("section_extract", [
                 {"role": "system", "content": "Ты помогаешь механику. Перескажи раздел руководства коротко (2–4 предложения или 3–5 пунктов) "
-                 f"на {lang} языке, только по тексту раздела, ничего не добавляя. Если задан вопрос — выжимка отвечает на него. "
+                 f"на {lang} языке, только по тексту раздела, ничего не добавляя. Если задан вопрос — выжимка отвечает на него только тем, что есть в разделе; если в разделе ответа нет — перескажи, о чём раздел, не отвечай от себя. "
                  "Начни с того, что сказано в строке цитаты и рядом с ней на стр. " + str(page) + ", затем — только то из раздела, что "
                  "относится к этому же вопросу; другие темы раздела не пересказывай. "
                  "Никогда не пиши, что чего-то (например, кода ошибки) в разделе нет или оно не упоминается: перескажи то, что в разделе "
