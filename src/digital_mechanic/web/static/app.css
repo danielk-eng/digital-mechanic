@@ -203,6 +203,16 @@ pre.json{white-space:pre-wrap;font-size:.75rem;background:var(--surface-2);paddi
 .send-btn,.voice-btn{background:var(--accent)!important;color:var(--on-accent)!important}
 .dictate-btn{color:var(--text-2)}
 .dictate-btn.on{background:var(--danger-soft)!important;color:var(--danger)!important}
+.dictrec{display:none;flex:1;min-width:0;align-items:center;gap:6px;min-height:48px;padding:2px}
+.inputbox.recording{border-color:var(--danger)}
+.inputbox.recording .dictrec{display:flex}
+.inputbox.recording textarea,.inputbox.recording #attach,.inputbox.recording #dictate,.inputbox.recording #send,.inputbox.recording #mic{display:none}
+.dictwave{flex:1;min-width:48px;height:36px}
+.dicttime{min-width:38px;text-align:center;color:var(--danger);font-size:.9rem;font-weight:600}
+.dictcancel{color:var(--danger)!important;background:var(--danger-soft)!important}
+.dictdone{background:var(--accent)!important;color:var(--on-accent)!important}
+.dictrec.transcribing .dictwave{opacity:.35}
+.dictrec.transcribing .dictdone{background:var(--surface-3)!important;color:var(--text-2)!important;pointer-events:none}
 .inputbox .icon-btn.hidden{display:none}
 @media (max-width:390px){
   .inputbox{padding:3px;gap:2px}

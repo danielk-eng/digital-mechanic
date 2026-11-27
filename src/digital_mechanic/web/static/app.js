@@ -1362,8 +1362,8 @@ async function drawProfile(sh, prof) {
 }
 async function saveProfile(patch) { try { ME = (await api("/api/me", {json: patch})).user; applyI18n(); } catch (e) { toast(friendlyError(e)); } }
 
-// ---------------------------------------------------------------- dictation into the composer (Web Speech / WebSTT), not hands-free chat
-const DICT = {on: false, seq: 0};
+// ---------------------------------------------------------------- dictation into the composer: messenger-style record / cancel / accept, not hands-free chat
+const DICT = {on: false, seq: 0, mode: "", stream: null, ctx: null, an: null, rec: null, chunks: [], raf: 0, tick: 0, auto: 0, t0: 0, start: "", prefix: "", wave: []};
 function setDictateUi(on) {
   const b = $("#dictate"); if (!b) return;
   b.classList.toggle("on", on);
@@ -1371,26 +1371,161 @@ function setDictateUi(on) {
   b.setAttribute("aria-label", on ? t("stop") : t("dictate"));
   b.title = b.getAttribute("aria-label");
 }
-async function dictateToggle() {
-  if (DICT.on) { DICT.on = false; WebSTT.stop(); setDictateUi(false); return; }
-  DICT.on = true; const my = ++DICT.seq; setDictateUi(true);
+function dictBox() { return $(".inputbox"); }
+function dictTimerText() {
+  const sec = Math.max(0, Math.floor((performance.now() - DICT.t0) / 1000));
+  return `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+}
+function drawDictWave(level) {
+  const cv = $("#dictWave"); if (!cv) return;
+  const box = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (box.width && Math.abs(cv.width - box.width * dpr) > 2) { cv.width = box.width * dpr; cv.height = box.height * dpr; }
+  const g = cv.getContext("2d"), w = cv.width, h = cv.height; if (!w || !h) return;
+  DICT.wave.push(level); while (DICT.wave.length > 48) DICT.wave.shift();
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = (getComputedStyle(document.documentElement).getPropertyValue("--danger") || "#e5484d").trim();
+  const step = w / 48, bw = Math.max(2 * dpr, step * 0.46), mid = h / 2;
+  for (let i = 0; i < 48; i++) {
+    const v = DICT.wave[i] || 0, bh = Math.max(2 * dpr, Math.pow(Math.min(1, v), 0.65) * h * 0.86), x = i * step + (step - bw) / 2;
+    g.globalAlpha = v > 0.025 ? 0.95 : 0.32;
+    g.fillRect(x, mid - bh / 2, bw, bh);
+  }
+  g.globalAlpha = 1;
+}
+function dictRms() {
+  if (!DICT.an) return 0.06 + 0.03 * Math.sin(performance.now() / 180);  // browser-STT fallback owns the mic itself: show activity, not silence
+  const buf = new Uint8Array(DICT.an.fftSize); DICT.an.getByteTimeDomainData(buf);
+  let sum = 0; for (const v of buf) sum += (v - 128) ** 2;
+  return Math.min(1, Math.sqrt(sum / buf.length) / 28);
+}
+function dictMeter() {
+  if (!DICT.on) return;
+  drawDictWave(dictRms());
+  DICT.raf = requestAnimationFrame(dictMeter);
+}
+function dictUiStart() {
+  const box = dictBox(); if (!box) return;
+  DICT.wave = []; DICT.t0 = performance.now();
+  box.classList.add("recording"); $("#dictRec").classList.remove("transcribing");
+  $("#dictDone").innerHTML = icon("check", 18);
+  $("#dictTime").textContent = "0:00";
+  clearInterval(DICT.tick); DICT.tick = setInterval(() => { const el = $("#dictTime"); if (el) el.textContent = dictTimerText(); }, 250);
+  cancelAnimationFrame(DICT.raf); dictMeter();
+}
+function dictUiDone(transcribing = false) {
+  cancelAnimationFrame(DICT.raf); clearInterval(DICT.tick); clearTimeout(DICT.auto);
+  if (transcribing) {
+    $("#dictRec").classList.add("transcribing");
+    $("#dictDone").innerHTML = icon("loader-circle", 18, "spin");
+    return;
+  }
+  const box = dictBox(); if (box) box.classList.remove("recording");
+  const rec = $("#dictRec"); if (rec) rec.classList.remove("transcribing");
+  const done = $("#dictDone"); if (done) done.innerHTML = icon("check", 18);
+}
+function dictReleaseMic() {
+  try { DICT.stream && DICT.stream.getTracks().forEach(tr => tr.stop()); } catch (_) {}
+  try { DICT.ctx && DICT.ctx.close(); } catch (_) {}
+  DICT.stream = DICT.ctx = DICT.an = null;
+}
+function dictInsert(text) {
   const ta = $("#txt");
-  const lang = SPEECH_LANG[(ME && ME.lang) || "ru"] || "ru-RU";
-  const start = ta.value, prefix = start && !/\s$/.test(start) ? start + " " : start;
+  ta.value = (DICT.prefix + text).replace(/\s+/g, " ").replace(/^\s+/, "");
+  autosize(); ta.focus();
+}
+function dictReset() {
+  DICT.on = false; DICT.mode = ""; DICT.rec = null; DICT.chunks = [];
+  setDictateUi(false); dictUiDone(false);
+}
+async function dictateServerStart() {
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}}); }
+  catch (_) { toast(t("mic_denied")); return; }
+  const ta = $("#txt"), my = ++DICT.seq;
+  DICT.on = true; DICT.mode = "server"; DICT.stream = stream; DICT.chunks = [];
+  DICT.start = ta.value; DICT.prefix = DICT.start && !/\s$/.test(DICT.start) ? DICT.start + " " : DICT.start;
   try {
-    const text = await WebSTT.listen(lang, {onInterim: s => {
+    DICT.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    DICT.an = DICT.ctx.createAnalyser(); DICT.an.fftSize = 512;
+    DICT.ctx.createMediaStreamSource(stream).connect(DICT.an);
+  } catch (_) { DICT.ctx = DICT.an = null; }
+  let mr;
+  try {
+    mr = new MediaRecorder(stream); DICT.rec = mr;
+    mr.ondataavailable = e => e.data.size && DICT.chunks.push(e.data);
+    mr.onstop = () => dictationTranscribe(my);
+    mr.start(250);
+  } catch (_) {
+    dictReleaseMic(); dictReset(); toast(t("mic_denied")); return;
+  }
+  setDictateUi(true); dictUiStart();
+  DICT.auto = setTimeout(() => { if (my === DICT.seq) dictFinish(); }, 60000);
+}
+async function dictationTranscribe(my) {
+  if (my !== DICT.seq) return;
+  const mr = DICT.rec, chunks = DICT.chunks.slice();
+  dictUiDone(true); dictReleaseMic();
+  let blob = new Blob(chunks, {type: (mr && mr.mimeType) || "audio/webm"}), name = "dictation.webm";
+  try {
+    if (blob.size < 1200) throw Object.assign(new Error("short"), {code: "short"});
+    try { blob = await toWav(blob, 30); name = "dictation.wav"; } catch (_) {}
+    if (my !== DICT.seq) return;  // cancelled while the browser was converting the recording: do not send the audio
+    const fd = new FormData(); fd.append("audio", blob, name); fd.append("lang", (ME && ME.lang) || "ru"); fd.append("vehicle_id", VID || "");
+    const r = await api("/api/stt", {method: "POST", body: fd});
+    if (my !== DICT.seq) return;
+    const text = (r.text || "").trim();
+    dictReset();
+    if (text) dictInsert(text); else toast(t("v_didnt_hear"));
+  } catch (e) {
+    if (my !== DICT.seq) return;
+    dictReset();
+    if (WebSTT.serverFailed(e)) SERVER_STT = false;
+    if (e.code !== "short") toast(friendlyError(e));
+  }
+}
+async function dictateBrowserStart() {
+  const ta = $("#txt"), my = ++DICT.seq;
+  DICT.on = true; DICT.mode = "browser"; DICT.start = ta.value;
+  DICT.prefix = DICT.start && !/\s$/.test(DICT.start) ? DICT.start + " " : DICT.start;
+  setDictateUi(true); dictUiStart();
+  const lang = SPEECH_LANG[(ME && ME.lang) || "ru"] || "ru-RU";
+  try {
+    const text = await WebSTT.listen(lang, {onInterim: x => {
       if (my !== DICT.seq) return;
-      ta.value = (prefix + s).replace(/\s+/g, " ");
+      ta.value = (DICT.prefix + x).replace(/\s+/g, " ");
       autosize();
     }});
     if (my !== DICT.seq) return;
-    if (text) ta.value = (prefix + text).replace(/\s+/g, " ").replace(/^\s+/, "");
-    autosize(); ta.focus();
+    dictReset();
+    if (text) dictInsert(text);
   } catch (e) {
-    if (my === DICT.seq) toast(WebSTT.message(e, t));
-  } finally {
-    if (my === DICT.seq) { DICT.on = false; setDictateUi(false); }
+    if (my === DICT.seq) { dictReset(); toast(WebSTT.message(e, t)); }
   }
+}
+function dictFinish() {
+  if (!DICT.on) return;
+  if (DICT.mode === "browser") return WebSTT.stop();
+  if (DICT.rec && DICT.rec.state !== "inactive") DICT.rec.stop();
+}
+function dictateCancel() {
+  if (!DICT.on) return;
+  const mode = DICT.mode;
+  DICT.seq++;
+  if (mode === "server") {
+    if (DICT.rec && DICT.rec.state !== "inactive") {
+      DICT.rec.ondataavailable = null; DICT.rec.onstop = null;
+      try { DICT.rec.stop(); } catch (_) {}
+    }
+    dictReleaseMic();
+  } else {
+    WebSTT.abort();
+    $("#txt").value = DICT.start; autosize();
+  }
+  dictReset();
+}
+async function dictateToggle() {
+  if (DICT.on) return dictFinish();
+  return SERVER_STT && window.MediaRecorder ? dictateServerStart() : dictateBrowserStart();
 }
 
 // ---------------------------------------------------------------- wiring
@@ -1398,13 +1533,14 @@ document.addEventListener("click", e => {
   const ch = e.target.closest("[data-doc][data-page]");
   if (ch) { e.preventDefault(); openCitation(ch.dataset.doc, +ch.dataset.page, ch.dataset.q || ""); }
 });
-document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("#viewer").classList.contains("hidden")) closeViewer(); else if ($("#layer").innerHTML) closeSheet(); else if (VOICE.on) voiceClose(); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape") { if (!$("#viewer").classList.contains("hidden")) closeViewer(); else if ($("#layer").innerHTML) closeSheet(); else if (DICT.on) dictateCancel(); else if (VOICE.on) voiceClose(); } });
 $("#mClose").onclick = closeViewer;
 $("#btnSettings").onclick = settingsSheet;
 $("#btnMenu").onclick = vehicleMenu;
 $("#vehBtn").onclick = pickVehicleSheet;
 $("#send").onclick = () => send();
 $("#dictate").onclick = dictateToggle;
+$("#dictCancel").onclick = dictateCancel; $("#dictDone").onclick = dictFinish;
 $("#txt").addEventListener("input", autosize);
 $("#txt").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
 $("#photo").onchange = onMediaFile; $("#video").onchange = onMediaFile; $("#gallery").onchange = onMediaFile;

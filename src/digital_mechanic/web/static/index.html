@@ -44,6 +44,12 @@
       <button class="icon-btn" id="attach" data-t-aria="attach" data-icon="plus"></button>
       <input id="photo" type="file" accept="image/*" capture="environment" hidden><input id="video" type="file" accept="video/*" capture="environment" hidden><input id="gallery" type="file" accept="image/*,video/*" hidden>
       <textarea id="txt" rows="1" data-tp="ask_placeholder" enterkeyhint="send"></textarea>
+      <div class="dictrec" id="dictRec" aria-live="polite">
+        <button class="icon-btn dictcancel" id="dictCancel" data-t-aria="cancel" data-icon="x"></button>
+        <canvas class="dictwave" id="dictWave" width="240" height="40" aria-hidden="true"></canvas>
+        <span class="dicttime mono" id="dictTime">0:00</span>
+        <button class="icon-btn dictdone" id="dictDone" data-t-aria="stop" data-icon="check"></button>
+      </div>
       <button class="icon-btn dictate-btn" id="dictate" data-t-aria="dictate" data-icon="mic"></button>
       <button class="icon-btn send-btn hidden" id="send" data-t-aria="send" data-icon="arrow-up"></button>
       <button class="icon-btn voice-btn" id="mic" data-t-aria="voice_chat" data-icon="audio-lines"></button>

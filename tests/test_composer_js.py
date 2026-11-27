@@ -37,10 +37,24 @@ def test_handlers_reuse_existing_stt_and_voice_mode():
     assert '$("#dictate").onclick = dictateToggle' in JS
     assert '$("#mic").onclick = voiceOpen' in JS
     assert '$("#send").onclick = () => send()' in JS
-    assert "WebSTT.listen" in JS[JS.index("async function dictateToggle"):JS.index("// ---------------------------------------------------------------- wiring")]
+    block = JS[JS.index("// ---------------------------------------------------------------- dictation into the composer"):JS.index("// ---------------------------------------------------------------- wiring")]
+    assert "MediaRecorder" in block and "toWav" in block and '"/api/stt"' in block  # server dictation records real audio first
+    assert "WebSTT.listen" in block and "dictateBrowserStart" in block                # browser fallback remains
+    assert "dictateCancel" in block and "dictFinish" in block
+    assert "cancelled while the browser was converting" in block  # cancel before upload: audio is never sent
     assert "Enter" in JS and "send()" in JS
     # old single teal mic-as-voice-mode-or-send swap is gone: mic no longer is the only right button
     assert "dictate-btn" in CSS and "voice-btn" in CSS and "send-btn" in CSS
+
+
+def test_dictation_has_messenger_style_recording_controls():
+    assert HTML.index('id="dictCancel"') < HTML.index('id="dictWave"') < HTML.index('id="dictTime"') < HTML.index('id="dictDone"')
+    assert 'data-icon="x"' in HTML and 'data-icon="check"' in HTML
+    assert '$("#dictCancel").onclick = dictateCancel' in JS and '$("#dictDone").onclick = dictFinish' in JS
+    assert ".inputbox.recording .dictrec{display:flex}" in CSS
+    assert ".inputbox.recording textarea" in CSS and "#dictate" in CSS and "#mic" in CSS
+    cancel = JS[JS.index("function dictateCancel()"):JS.index("async function dictateToggle()")]
+    assert "DICT.seq++" in cancel and "dictReleaseMic" in cancel and "WebSTT.abort" in cancel
 
 
 def test_aria_labels_russian():
