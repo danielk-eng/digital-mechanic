@@ -5,7 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 WORKDIR /srv
-COPY server.py ru_tts.py .
+COPY server.py ru_tts.py ./
 ENV PYTHONUNBUFFERED=1
 EXPOSE 9000
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "9000"]

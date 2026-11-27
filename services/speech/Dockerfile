@@ -3,7 +3,7 @@ RUN pip install --no-cache-dir fastapi==0.165.0 uvicorn==0.54.0 python-multipart
  && pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch \
  && pip install --no-cache-dir numpy omegaconf requests silero-stress==1.5
 WORKDIR /srv
-COPY server.py ru_tts.py .
+COPY server.py ru_tts.py ./
 ENV PYTHONUNBUFFERED=1 HF_HOME=/models/hf
 EXPOSE 9000
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "9000"]
