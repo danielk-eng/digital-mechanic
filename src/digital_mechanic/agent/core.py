@@ -1261,9 +1261,10 @@ class Agent:
         works = "работа" if n % 10 == 1 and n % 100 != 11 else "работы" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "работ"
         basis = d.get("urgency_basis") or []
         basis = "; ".join(basis) if isinstance(basis, list) else str(basis)
-        out = [f"Черновик заявки на дефектовку готов: {n} {works}" + (f", запчастей: {len(parts)}" if parts else "") + " с цитатами из руководства "
-               + " ".join(f"[{l}]" for l in labs) + ".",
-               f"Приоритет — {URG_RU.get(u, u)}" + (f" ({basis.rstrip('.')})." if basis else ".")]
+        m = len(parts)
+        pw = "запчасть" if m % 10 == 1 and m % 100 != 11 else "запчасти" if m % 10 in (2, 3, 4) and m % 100 not in (12, 13, 14) else "запчастей"
+        out = [f"Черновик заявки на дефектовку готов: {n} {works}" + (f" и {m} {pw}" if parts else "") + " по руководству " + " ".join(f"[{l}]" for l in labs) + ".",
+               f"Приоритет — {URG_RU.get(u, u)}." + (f" Основание: {basis.rstrip('.')}." if basis else "")]
         if d.get("requires_inspection"):
             out.append("Результат проверки под сомнением — перед отправкой " + ("подтверди" if ty else "подтвердите") + " неисправность осмотром.")
         out.append("Проверь карточку и подтверди отправку в ТОиР — без подтверждения ничего не уходит." if ty else

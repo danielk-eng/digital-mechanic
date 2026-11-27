@@ -234,7 +234,8 @@ function renderTurn(turn, expanded = false) {
     const uu = (turn.understood || []).filter(([a, b]) => !(b.length <= a.length && pre(a.toLowerCase(), b.toLowerCase()) >= 3));
     const und = uu.length ? `<div class="understood">${t("understood")}: ${uu.map(([a, b]) => `${esc(a)} → <b>${esc(b)}</b>`).join(", ")}</div>` : "";
     const actions = [];
-    if (hasSrc && !expanded && (ME.detail || "brief") === "brief") actions.push({label: t("expand"), onclick: (ev, b) => { b.remove(); eventTurn("expand", turn.text, null, true, turn.sources); }});
+    const isDraft = (turn.cards || []).some(c => c.kind === "ticket_draft" || c.kind === "ticket_created");  // the card is the detail: no «Подробнее» under it
+    if (hasSrc && !expanded && !isDraft && (ME.detail || "brief") === "brief") actions.push({label: t("expand"), onclick: (ev, b) => { b.remove(); eventTurn("expand", turn.text, null, true, turn.sources); }});
     if (hasSrc && VID) actions.push({icon: "ellipsis", aria: t("more_actions"), onclick: () => turnMenu(turn)});
     const d = addMsg("bot", und + factsHtml(turn.facts) + md(turn.text, turn.sources) + answerActionsHtml(turn.actions), {speak: turn.text, actions});
     bindAnswerActions(d, turn.actions);
