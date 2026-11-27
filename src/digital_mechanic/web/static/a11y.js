@@ -22,7 +22,7 @@
     // spoken answers only in voice mode or on an explicit play tap
     voiceSpeaks: () => localStorage.getItem("vtts") !== "0",
     setVoiceSpeaks(on) { localStorage.setItem("vtts", on ? "1" : "0"); },
-    captions: () => localStorage.getItem("cc") !== "0",
+    captions: () => localStorage.getItem("cc") === "1",
     setCaptions(on) { localStorage.setItem("cc", on ? "1" : "0"); },
     // soft click on taps (WebAudio, no files); on by default, switched off in the profile / header
     sounds: () => localStorage.getItem("snd") !== "0",
