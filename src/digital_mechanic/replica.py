@@ -75,6 +75,7 @@ class Replica:
         self.base: dict = {}  # the mirrored tables as last pulled/pushed (merge base)
         self.http = httpx.Client(timeout=4.0) if self.on else None
         self.stats = {"pulls": 0, "pushes": 0, "error": ""}
+        self.cas = os.environ.get("REPLICA_CAS", "1") == "1"
 
     # ------------------------------------------------------------------ local tables
     def dump(self) -> dict:
@@ -144,6 +145,8 @@ class Replica:
         if r.status_code == 404:
             return {}, ""
         r.raise_for_status()
+        self.stats["get_etag"] = r.headers.get("etag", "")[:60]
+        self.stats["get_cache"] = (r.headers.get("x-vercel-cache", "") + " age=" + r.headers.get("age", ""))[:40]
         return r.json(), r.headers.get("etag", "")
 
     def push(self) -> bool:
@@ -156,21 +159,30 @@ class Replica:
         if self.hash(local) == self.digest:
             return False
         try:
+            prev, cas = None, self.cas
             for attempt in range(6):
                 remote, etag = self._get()
                 merged = merge(remote, local, self.base)
-                # after 4 refusals in a row (ETag format not accepted, or a very busy minute) fall back to the plain merged upload
-                extra = {"x-if-match": etag} if etag and attempt < 4 else {}
-                if etag and attempt == 4:
+                # the read gave the same ETag that was just refused (stale read / format not accepted) or 4 refusals in a row:
+                # plain merged upload (still keeps every instance's rows it can see)
+                if cas and (etag == prev or attempt >= 4):
+                    cas = False
                     self.stats["cas_fallback"] = self.stats.get("cas_fallback", 0) + 1
+                extra = {"x-if-match": etag} if etag and cas else {}
+                prev = etag
                 r = self.http.put(API + "/", params={"pathname": PATH}, content=json.dumps(merged, ensure_ascii=False, default=str).encode(),
                                   headers=self._hdr(**{"x-vercel-blob-access": "private", "x-add-random-suffix": "0", "x-allow-overwrite": "1",
                                                         "x-content-type": "application/json", "x-cache-control-max-age": "60", **extra}))
-                if r.status_code in (409, 412) or (r.status_code == 400 and "precondition" in r.text.lower()):
+                if extra and (r.status_code in (409, 412) or (r.status_code == 400 and "precondition" in r.text.lower())):
                     self.stats["conflicts"] = self.stats.get("conflicts", 0) + 1
+                    self.stats["conflict_body"] = r.text[:160]
                     time.sleep(random.uniform(0.05, 0.25) * (attempt + 1))
                     continue
                 r.raise_for_status()
+                try:
+                    self.stats["put_etag"] = str(r.json().get("etag", ""))[:60]
+                except Exception:
+                    pass
                 break
             else:
                 raise RuntimeError("blob kept changing")
