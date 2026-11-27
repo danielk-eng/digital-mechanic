@@ -121,6 +121,15 @@ function inline(h, src) {
   }).replace(/[ \t]*\u0000/g, "");
   return collapseCites(h);
 }
+// «Подробнее» from one manual page: «с. 52» after each of 10 paragraphs (Vercel 27.11 08:30, 1200 px). When every chip of the
+// answer is the same page, keep the first (seen at once) and the last (where reading ends); answers with several pages untouched.
+function onePageCites(h) {
+  const re = /[ \t]*<button class="cite[^"]*" data-doc="([^"]*)" data-page="(\d+)"[^>]*>[^<]*<\/button>/g;
+  const ms = [...h.matchAll(re)]; if (ms.length < 3 || new Set(ms.map(m => m[1] + "#" + m[2])).size > 1) return h;
+  let out = "", pos = 0;
+  ms.forEach((m, i) => { if (i > 0 && i < ms.length - 1) { out += h.slice(pos, m.index); pos = m.index + m[0].length; } });
+  return out + h.slice(pos);
+}
 function collapseCites(h, block = false) {
   // «работа [с. 52], работа [с. 52], работа [с. 52]» -> one chip after the last item: the same page cited clause after
   // clause in one paragraph cluttered the answer; a chip for another page in between breaks the run.
@@ -178,7 +187,7 @@ function md(text, sources) {
     flushL(); para.push(l);
   }
   flushP(); flushL();
-  return out;
+  return onePageCites(out);
 }
 const ACT_ICON = {create_ticket: "file-text", confirm_ticket: "check", next_step: "check", start_repair: "wrench", show_section: "book-open", handoff: "forward"};
 function answerActionsHtml(actions) {
