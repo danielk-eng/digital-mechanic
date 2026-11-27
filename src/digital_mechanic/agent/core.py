@@ -140,6 +140,7 @@ class Conv:
     contra: list = field(default_factory=list)  # known manual contradictions matched by the current question
     no_instruction: Optional[str] = None  # defect-check recommendation when the manual has no applicable repair
     hold_ticket: bool = False  # this turn: marks matched -> no ticket, the check stays open
+    ticket_again: bool = False  # this turn: the mechanic asked for a NEW / second ticket on a check that already has one
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -817,6 +818,11 @@ class Agent:
         if c.hold_ticket:
             return {"error": "Заявку сейчас не оформляем: метки угла опережения совпали, ранний впрыск не подтверждён. Проверка остаётся открытой — "
                              "назови механику следующие причины и проверки по руководству."}
+        dup = self.open_ticket_for_check(c)
+        if dup and not c.ticket_again:  # audit 27.11: «заявка TKT-0010 уже в ТОиР» in the answer, then a typed request made TKT-0011 for the same check
+            return {"error": f"Заявку не создаю: по этой проверке ({ch.session_id}, {ch.anomaly_type}) заявка {dup} уже в ТОиР — вторая была бы дублем. "
+                             f"Назови механику номер {dup}; следующий шаг — ремонт по шагам или передать главному. "
+                             "Отдельную заявку на другую работу оформляют, только если механик прямо попросит «новую заявку».", "existing_ticket": dup}
         marks = self.marks_state(c)
         ops, e1 = self._verify_items(c, args.get("operations") or [], "работа")
         parts, e2 = self._verify_items(c, args.get("spare_parts") or [], "запчасть")
@@ -846,6 +852,16 @@ class Agent:
                    "prohibition": ban, "urgency_options": policy.URGENCY_MEANING_FULL}
         return {"draft_ready": True, "urgency": u.value, "urgency_ru": URG_RU.get(u.value, u.value), "operations": len(ops), "spare_parts": len(parts), "rejected": e1 + e2,
                 "requires_inspection": c.draft["requires_inspection"], "note": "Черновик показан механику, он подтвердит отправку кнопкой."}
+
+    def open_ticket_for_check(self, c: Conv) -> str | None:
+        """Ticket id already sent to TOiR for this vehicle's current check and fault (one the chief returned does not count)."""
+        ch = c.check
+        if not ch or not c.vehicle:
+            return None
+        for t in self.store.tickets(c.vehicle.vehicle_id):
+            if t.get("session_id") == ch.session_id and t.get("anomaly_type") == ch.anomaly_type and t.get("status") != "returned":
+                return t.get("ticket_id")
+        return None
 
     def tool_start_repair(self, c: Conv, args: dict) -> dict:
         steps, errs = self._verify_items(c, args.get("steps") or [], "шаг")
@@ -1183,6 +1199,7 @@ class Agent:
                 return t
         marks_turn = False
         c.hold_ticket = False
+        c.ticket_again = bool(re.search(r"(?i)\b(нов|ещ[её]\s+одн|повторн|втор|отдельн)\w*\s+заявк", raw))
         masked = raw  # depersonalized reversibly in Llm.chat right before it leaves the server (pii.Masker): the answer keeps the names
         if event == "expand":
             return self._expand(c, user, raw, turn)
