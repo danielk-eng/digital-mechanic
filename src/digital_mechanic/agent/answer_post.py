@@ -150,3 +150,36 @@ def ticket_claims(text: str, why: str) -> tuple[str, bool]:
     out = re.sub(r"[ \t]{2,}", " ", out)
     out = re.sub(r"\n{3,}", "\n\n", out).strip()
     return (out + "\n\n" + why).strip(), True
+
+
+# A question about another engine («момент затяжки … ЗМЗ-409» on a ЯМЗ-536 truck): the free model sometimes answers with this
+# truck's numbers and never says they are for a different engine (Vercel 27.11 12:30: «100±10 Н·м … стр. 271» with no word
+# about ЗМЗ-409). The mechanic must not take ЯМЗ-536 values for ЗМЗ-409: a fixed first line says so.
+_ENGINE_RX = re.compile(r"(?<![\w-])(ЗМЗ|ЯМЗ|КАМАЗ|ММЗ|ZMZ|YAMZ|KAMAZ)[\s-]*(\d{3})[\d.]*(?:М\d)?", re.I)
+_BRAND = {"ZMZ": "ЗМЗ", "YAMZ": "ЯМЗ", "KAMAZ": "КАМАЗ"}
+
+
+def _engine_key(m: re.Match) -> tuple[str, str]:
+    b = m.group(1).upper()
+    return _BRAND.get(b, b), m.group(2)
+
+
+def foreign_engine_note(question: str, engine_model: str | None, text: str) -> str:
+    """Prefix the answer with «ЗМЗ-409 — не двигатель этой машины (у неё ЯМЗ-536)…» when the question names another engine
+    and the answer itself never mentions it. Same family (ЗМЗ-409 vs ЗМЗ-40905.10, ЯМЗ-236 vs ЯМЗ-236М2) is not foreign."""
+    if not question or not engine_model or not text:
+        return text
+    own = _ENGINE_RX.search(engine_model)
+    if not own:
+        return text
+    own_key = _engine_key(own)
+    for m in _ENGINE_RX.finditer(question):
+        key = _engine_key(m)
+        if key == own_key:
+            continue
+        if re.search(rf"{re.escape(key[0])}[\s-]*{key[1]}|{key[1]}", text[:400]):
+            return text  # the answer already speaks about it
+        name = f"{key[0]}-{key[1]}"
+        return (f"{name} — не двигатель этой машины (у неё {engine_model}): данных по {name} в руководствах этой машины нет. "
+                f"Ниже — по {engine_model}, для {name} эти цифры не годятся.\n\n" + text)
+    return text

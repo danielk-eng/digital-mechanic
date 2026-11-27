@@ -998,6 +998,8 @@ class Agent:
             if turn.text:
                 turn.text, intents = answer_post.clean(turn.text)
                 turn.text = answer_post.no_specialist(turn.text)
+                if c.vehicle and event is None and answer_lang(user) == "ru" and not turn.text.startswith(FALLBACK_HEAD):
+                    turn.text = answer_post.foreign_engine_note(text, c.vehicle.engine_model, turn.text)
                 if not turn.text.startswith(FALLBACK_HEAD):
                     turn.text, removed = answer_post.guard_uncited(turn.text)
                     if removed:
