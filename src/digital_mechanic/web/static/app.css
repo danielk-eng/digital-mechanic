@@ -200,9 +200,15 @@ pre.json{white-space:pre-wrap;font-size:.75rem;background:var(--surface-2);paddi
 .inputbox:focus-within{border-color:var(--border-2)}
 .inputbox textarea{flex:1;min-width:0;border:0;background:transparent;resize:none;outline:none;padding:12px 4px;max-height:160px;line-height:1.4;min-height:48px}
 .inputbox .icon-btn{border-radius:50%;width:44px;height:44px;margin:2px}
-.send-btn{background:var(--accent)!important;color:var(--on-accent)!important}
-.mic-btn{background:var(--accent)!important;color:var(--on-accent)!important}
+.send-btn,.voice-btn{background:var(--accent)!important;color:var(--on-accent)!important}
+.dictate-btn{color:var(--text-2)}
+.dictate-btn.on{background:var(--danger-soft)!important;color:var(--danger)!important}
 .inputbox .icon-btn.hidden{display:none}
+@media (max-width:390px){
+  .inputbox{padding:3px;gap:2px}
+  .inputbox .icon-btn{width:42px;height:42px;margin:1px}
+  .inputbox textarea{padding:10px 2px;min-height:44px}
+}
 
 /* sheets */
 .scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:30;animation:fade .15s ease-out}

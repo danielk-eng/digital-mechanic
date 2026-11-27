@@ -739,7 +739,9 @@ async function send(text, {raw = null} = {}) {
 }
 function autosize() {
   const ta = $("#txt"); ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
-  const has = !!ta.value.trim(); $("#send").classList.toggle("hidden", !has); $("#mic").classList.toggle("hidden", has);
+  const has = !!ta.value.trim();
+  $("#send").classList.toggle("hidden", !has);
+  $("#mic").classList.toggle("hidden", has);  // voice chat <-> send, like ChatGPT; dictation stays
   layout();
 }
 function layout() { const c = $("#composer"); if (c) document.documentElement.style.setProperty("--composer-h", (c.classList.contains("hidden") ? 0 : c.offsetHeight) + "px"); }
@@ -1321,6 +1323,37 @@ async function drawProfile(sh, prof) {
 }
 async function saveProfile(patch) { try { ME = (await api("/api/me", {json: patch})).user; applyI18n(); } catch (e) { toast(friendlyError(e)); } }
 
+// ---------------------------------------------------------------- dictation into the composer (Web Speech / WebSTT), not hands-free chat
+const DICT = {on: false, seq: 0};
+function setDictateUi(on) {
+  const b = $("#dictate"); if (!b) return;
+  b.classList.toggle("on", on);
+  b.innerHTML = icon(on ? "square" : "mic", 18);
+  b.setAttribute("aria-label", on ? t("stop") : t("dictate"));
+  b.title = b.getAttribute("aria-label");
+}
+async function dictateToggle() {
+  if (DICT.on) { DICT.on = false; WebSTT.stop(); setDictateUi(false); return; }
+  DICT.on = true; const my = ++DICT.seq; setDictateUi(true);
+  const ta = $("#txt");
+  const lang = SPEECH_LANG[(ME && ME.lang) || "ru"] || "ru-RU";
+  const start = ta.value, prefix = start && !/\s$/.test(start) ? start + " " : start;
+  try {
+    const text = await WebSTT.listen(lang, {onInterim: s => {
+      if (my !== DICT.seq) return;
+      ta.value = (prefix + s).replace(/\s+/g, " ");
+      autosize();
+    }});
+    if (my !== DICT.seq) return;
+    if (text) ta.value = (prefix + text).replace(/\s+/g, " ").replace(/^\s+/, "");
+    autosize(); ta.focus();
+  } catch (e) {
+    if (my === DICT.seq) toast(WebSTT.message(e, t));
+  } finally {
+    if (my === DICT.seq) { DICT.on = false; setDictateUi(false); }
+  }
+}
+
 // ---------------------------------------------------------------- wiring
 document.addEventListener("click", e => {
   const ch = e.target.closest("[data-doc][data-page]");
@@ -1332,6 +1365,7 @@ $("#btnSettings").onclick = settingsSheet;
 $("#btnMenu").onclick = vehicleMenu;
 $("#vehBtn").onclick = pickVehicleSheet;
 $("#send").onclick = () => send();
+$("#dictate").onclick = dictateToggle;
 $("#txt").addEventListener("input", autosize);
 $("#txt").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
 $("#photo").onchange = onMediaFile; $("#video").onchange = onMediaFile; $("#gallery").onchange = onMediaFile;

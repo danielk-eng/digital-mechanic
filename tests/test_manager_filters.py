@@ -82,8 +82,8 @@ def test_every_agent_input_has_a_mic():
         box = re.search(r'<[^>]*class="inputbox"[^>]*>.*?</div>|<footer class="composer.*?</footer>', html, re.S)
         found = [m for m in re.finditer(r'<textarea id="(\w+)"', html)]
         assert any(m.group(1) == ta for m in found), page
-        seg = html[html.index(f'id="{ta}"'):html.index(f'id="{ta}"') + 600]
-        assert "mic-btn" in seg, page
+        seg = html[html.index(f'id="{ta}"'):html.index(f'id="{ta}"') + 800]
+        assert "mic-btn" in seg or ("dictate-btn" in seg and 'data-icon="mic"' in seg), page
     assert "QRLink.mount" in (st / "app.js").read_text(encoding="utf-8")
     assert "QRLink.mount" in (st / "manager.js").read_text(encoding="utf-8")
     assert "companies()" in (st / "engineer.js").read_text(encoding="utf-8")
