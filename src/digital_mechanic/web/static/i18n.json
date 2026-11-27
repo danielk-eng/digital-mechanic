@@ -371,7 +371,8 @@
     "title_engineer": "Инженер",
     "title_veteran": "Механик-моторист, 40 лет с грузовиками",
     "title_selftaught": "Механик-самоучка, 15 лет практики",
-    "title_student": "Выпускник колледжа, первый месяц в парке"
+    "title_student": "Выпускник колледжа, первый месяц в парке",
+    "qr_login": "QR-вход"
   },
   "uz": {
     "app_title": "Raqamli mexanik",
@@ -745,7 +746,8 @@
     "title_engineer": "Muhandis",
     "title_veteran": "Motorist mexanik, 40 yil yuk mashinalari bilan",
     "title_selftaught": "O‘zi o‘rgangan mexanik, 15 yillik tajriba",
-    "title_student": "Kollej bitiruvchisi, parkda birinchi oy"
+    "title_student": "Kollej bitiruvchisi, parkda birinchi oy",
+    "qr_login": "QR orqali kirish"
   },
   "tg": {
     "app_title": "Механики рақамӣ",
@@ -1119,7 +1121,8 @@
     "title_engineer": "Муҳандис",
     "title_veteran": "Механики моторчӣ, 40 сол бо мошинҳои боркаш",
     "title_selftaught": "Механики худомӯз, 15 сол таҷриба",
-    "title_student": "Хатмкардаи коллеҷ, моҳи аввал дар парк"
+    "title_student": "Хатмкардаи коллеҷ, моҳи аввал дар парк",
+    "qr_login": "Вуруд бо QR"
   },
   "kk": {
     "app_title": "Цифрлық механик",
@@ -1493,7 +1496,8 @@
     "title_engineer": "Инженер",
     "title_veteran": "Моторшы механик, жүк көліктерімен 40 жыл",
     "title_selftaught": "Өздігінен үйренген механик, 15 жыл тәжірибе",
-    "title_student": "Колледж түлегі, паркте бірінші ай"
+    "title_student": "Колледж түлегі, паркте бірінші ай",
+    "qr_login": "QR арқылы кіру"
   },
   "hi": {
     "app_title": "डिजिटल मैकेनिक",
@@ -1867,7 +1871,8 @@
     "title_engineer": "इंजीनियर",
     "title_veteran": "इंजन मैकेनिक, ट्रकों के साथ 40 साल",
     "title_selftaught": "स्व-शिक्षित मैकेनिक, 15 साल का अनुभव",
-    "title_student": "कॉलेज स्नातक, डिपो में पहला महीना"
+    "title_student": "कॉलेज स्नातक, डिपो में पहला महीना",
+    "qr_login": "QR लॉगिन"
   },
   "vi": {
     "app_title": "Thợ máy số",
@@ -2241,7 +2246,8 @@
     "title_engineer": "Kỹ sư",
     "title_veteran": "Thợ máy động cơ, 40 năm với xe tải",
     "title_selftaught": "Thợ máy tự học, 15 năm kinh nghiệm",
-    "title_student": "Mới tốt nghiệp cao đẳng, tháng đầu ở xưởng"
+    "title_student": "Mới tốt nghiệp cao đẳng, tháng đầu ở xưởng",
+    "qr_login": "Đăng nhập QR"
   },
   "bn": {
     "app_title": "ডিজিটাল মেকানিক",
@@ -2615,7 +2621,8 @@
     "title_engineer": "ইঞ্জিনিয়ার",
     "title_veteran": "ইঞ্জিন মেকানিক, ট্রাকের সাথে ৪০ বছর",
     "title_selftaught": "স্বশিক্ষিত মেকানিক, ১৫ বছরের অভিজ্ঞতা",
-    "title_student": "কলেজ স্নাতক, ডিপোতে প্রথম মাস"
+    "title_student": "কলেজ স্নাতক, ডিপোতে প্রথম মাস",
+    "qr_login": "QR লগইন"
   },
   "ky": {
     "app_title": "Санарип механик",
@@ -2989,7 +2996,8 @@
     "title_engineer": "Инженер",
     "title_veteran": "Моторчу механик, жүк ташуучу унаалар менен 40 жыл",
     "title_selftaught": "Өз алдынча үйрөнгөн механик, 15 жыл тажрыйба",
-    "title_student": "Колледждин бүтүрүүчүсү, парктагы биринчи ай"
+    "title_student": "Колледждин бүтүрүүчүсү, парктагы биринчи ай",
+    "qr_login": "QR менен кирүү"
   },
   "be": {
     "app_title": "Лічбавы механік",
@@ -3363,6 +3371,7 @@
     "title_engineer": "Інжынер",
     "title_veteran": "Механік-матарыст, 40 гадоў з грузавікамі",
     "title_selftaught": "Механік-самавук, 15 гадоў практыкі",
-    "title_student": "Выпускнік каледжа, першы месяц у парку"
+    "title_student": "Выпускнік каледжа, першы месяц у парку",
+    "qr_login": "Уваход па QR"
   }
 }

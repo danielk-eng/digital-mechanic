@@ -396,6 +396,7 @@ document.addEventListener("click", e => {
   ME = (await api("/api/session")).user;
   if (!ME || ME.role !== "manager") { location.href = ME && ME.role === "engineer" ? "/engineer" : "/"; return; }
   $$("[data-t]").forEach(el => el.textContent = t(el.dataset.t));
+  $$("[data-t-aria]").forEach(el => { el.setAttribute("aria-label", t(el.dataset.tAria)); el.title = t(el.dataset.tAria); });
   $("#whoami").textContent = `${ME.name}, ${t("role_chief")}`; $("#logout").title = $("#whoami").textContent;
   if (!ME.chief) { const ub = $('#tabs button[data-tab="users"]'); if (ub) ub.remove(); }  // staff: only the chief signed in by code + PIN
   readF();
