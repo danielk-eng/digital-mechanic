@@ -148,7 +148,10 @@ def table_row_group(text: str, hint: str) -> tuple[str, list[str], int] | None:
     The extract used to retell the neighbouring row of another symptom (p. 53: «пониженное давление масла» for the valve-clearance row)."""
     if not text or not _TABLE_HEAD_RE.search(text):
         return None
-    hs = _stems(hint)
+    # the hint is the answer text before the citation chip («…прогреть насос [S1]; отрегулировать тепловые зазоры клапанов [S2]»):
+    # the clause right before the chip is what this page was cited for
+    segs = [x for x in re.split(r"[;\n]|\(с\. ?\d+\)|\[[^\]]*\]", hint or "") if len(_stems(x)) >= 2]
+    hs = _stems(segs[-1]) if segs else _stems(hint)
     if len(hs) < 2:
         return None
     groups: list[tuple[str, list[str]]] = [("", [])]
@@ -255,6 +258,8 @@ class Agent:
                 self._extracts[key] = out
                 return out
             body = (head + "\n" if head else "") + "\n".join(rows)
+        elif pg is not None and _TABLE_HEAD_RE.search(getattr(pg, "text", "") or ""):
+            body = pg.text  # fault table, no row matched: retell the cited page only (the section's other pages are other symptoms)
         try:
             msg, _ = self.llm.chat("section_extract", [
                 {"role": "system", "content": "Ты помогаешь механику. Перескажи раздел руководства коротко (2–4 предложения или 3–5 пунктов) "
@@ -263,7 +268,8 @@ class Agent:
                  "относится к этому же вопросу; другие темы раздела не пересказывай. "
                  "Никогда не пиши, что чего-то (например, кода ошибки) в разделе нет или оно не упоминается: перескажи то, что в разделе "
                  "относится к теме вопроса и цитате (причины, проверки, способы устранения). "
-                 "Числа, моменты, зазоры, давления переписывай ТОЛЬКО если они есть в тексте, без изменений. Без вступлений."},
+                 "Числа, моменты, зазоры, давления переписывай ТОЛЬКО если они есть в тексте, без изменений. Без вступлений: не начинай "
+                 "со слов «На стр. N…» или «В таблице указано», сразу по делу."},
                 {"role": "user", "content": f"Вопрос механика: {question or '-'}\nЦитата: {hint[:300]}\nРаздел «{sec.label}» (стр. {sec.span}):\n{body}"}],
                 max_tokens=500)
             text = (msg.content or "").strip()

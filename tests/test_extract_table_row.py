@@ -22,3 +22,9 @@ def test_heading_hint_and_non_table():
     head, rows, i = table_row_group(PAGE, "пониженное давление масла в системе смазки")
     assert head == "Пониженное давление масла в системе смазки" and i == -1 and len(rows) == 2
     assert table_row_group("Обычный текст страницы про зазоры клапанов", "зазоры клапанов") is None
+
+
+def test_long_answer_hint_uses_the_clause_before_the_chip():
+    hint = "Работы: прокачать топливную и убрать подсос (с. 52); промыть форсунки (с. 52); отрегулировать тепловые зазоры клапанов"
+    head, rows, i = table_row_group(PAGE, hint)
+    assert head == "Двигатель стучит" and "клапанного" in rows[i]
