@@ -268,7 +268,7 @@ mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 2px}
 /* a phone: a long spoken answer gets the room, the orb steps back (audit 23:17, 390×844: the reply was cut under the hint) */
 @media (max-width:600px){.voice{padding-left:20px;padding-right:20px}.voice .stage{gap:24px}
   .voice .stage:has(.reply.long){justify-content:flex-start;gap:16px;padding-top:4px}
-  .voice .stage:has(.reply.long) .orb{width:104px;height:104px}
+  .voice .stage:has(.reply.long) .orb{width:104px;height:104px;margin:14px 0}  /* the speaking halo (up to 28 px) no longer touches the phrase above (audit 01:20) */
   .voice .stage:has(.reply.long) .said{font-size:.95rem}
   .voice .reply.long{max-height:none;flex:1;min-height:0}}
 .voice .vbottom{display:flex;gap:12px;width:100%;max-width:420px}

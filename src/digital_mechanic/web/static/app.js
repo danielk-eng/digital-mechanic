@@ -1008,6 +1008,13 @@ async function vOnRecorded() {
   if (!text) { vSet("listening", t("v_didnt_hear")); return vListen(); }
   vHeard(text);
 }
+// Voice screen text: whole sentences up to n chars (was a cut mid-word «двигатель переби…», audit 01:20, 390 px)
+function clipText(s, n) {
+  if (s.length <= n) return s;
+  const head = s.slice(0, n); let end = -1;  // a sentence end, not «стр. 53» / «с. 52» / «т. д.»
+  for (const m of head.matchAll(/(^|[\s(])(?:стр|с|рис|табл|т|д|п|ч|им|см|прим)\.(?=\s)|[.!?](?=\s)|\n/g)) if (m[0].length === 1) end = m.index;  // abbreviations match longer and are skipped
+  return end > n * 0.4 ? head.slice(0, end + 1).trim() + " …" : head.slice(0, head.lastIndexOf(" ")).trim() + "…";
+}
 async function vHeard(text) {
   $("#vSaid").textContent = text; $("#vReply").textContent = ""; $("#vReply").classList.remove("long");
   vSet("thinking");
@@ -1015,7 +1022,7 @@ async function vHeard(text) {
   if (!VOICE.on) return;
   const reply = turn && (turn.text || (turn.cards || []).map(c => c.light_text || "").join(" "));
   if (!reply) { vSet("idle", t("v_no_answer")); return; }
-  $("#vReply").textContent = plain(reply).slice(0, 400) + (plain(reply).length > 400 ? "…" : "");
+  $("#vReply").textContent = clipText(plain(reply), 600);
   $("#vReply").classList.toggle("long", plain(reply).length > 140); $("#vReply").scrollTop = 0;
   if (!A11Y.voiceSpeaks()) return vListen();
   vSet("speaking"); VOICE.speechMs = 0;
