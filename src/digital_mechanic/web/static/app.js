@@ -147,7 +147,18 @@ function unflatten(text) {
       l = l.replace(/([.;:!?\]])\s+(\d{1,2})[.)]\s+(?=\S)/g, (m, p, d) => (+d === n ? (n++, `${p}\n${d}. `) : m));
       return n > 3 ? l.replace(/(\S)\s+1[.)]\s+(?=\S)/, "$1\n1. ") : l.replace(/\n(\d{1,2})\. /g, " $1. ");
     }).join("\n");
-  }).join("\n");
+  }).map(chunkWall).join("\n");
+}
+// A brief answer the model wrote as one 400–600 char paragraph (Vercel 00:30, 390 px: «что значит F08?» — 14 lines of
+// one block): sentences grouped into short paragraphs of ≤ ~220 chars. Lists, headings and short lines are left alone.
+function chunkWall(line) {
+  if (line.length < 300 || line.includes("\n") || /^\s*(\d{1,2}[.)]|[-*•#>])\s/.test(line)) return line;
+  const ss = line.split(/(?<=[.!?…][»"]?|\][.!?])\s+(?=[«"]?[А-ЯЁA-Z])/);
+  if (ss.length < 3) return line;
+  const out = []; let cur = "";
+  for (const x of ss) { if (cur && cur.length + x.length > 220) { out.push(cur); cur = x; } else cur = cur ? cur + " " + x : x; }
+  if (cur) out.push(cur);
+  return out.join("\n\n");
 }
 function md(text, sources) {
   const src = Object.fromEntries((sources || []).map(s => [s.label, s]));

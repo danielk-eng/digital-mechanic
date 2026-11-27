@@ -69,3 +69,16 @@ def test_same_page_chip_once_per_paragraph_and_list():
     assert h.count('data-page="52"') == 1 and h.index('data-page="52"') > h.index("Рейка")
     h = _md("Первая [S1].\n\nВторая [S1].", S)  # separate paragraphs keep their own chip
     assert h.count('data-page="52"') == 2
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_one_block_brief_answer_is_split_into_short_paragraphs():
+    t = ("F08 — это код неисправности топливной системы. По книге на стр. 52 первое, что смотрят: воздух в топливной системе — "
+         "прокачать систему и устранить негерметичность. Там же: не работает топливоподкачивающий насос — разобрать, устранить "
+         "неисправность, при необходимости заменить. Ещё на стр. 52 — заедание рейки ТНВД: отремонтировать насос или заменить [S1]. "
+         "И на стр. 51: засорены топливопроводы — промыть и продуть [S2].")
+    paras = _unflatten(t).split("\n\n")
+    assert len(paras) >= 3 and all(len(p) <= 260 for p in paras) and " ".join(paras) == t
+    assert not any(p.startswith(("52", "51")) for p in paras)  # «стр. 52» is not a sentence end
+    short = "Проверь зазоры [S1]. Потом форсунки. Потом ТНВД."
+    assert _unflatten(short) == short
