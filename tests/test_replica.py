@@ -114,3 +114,26 @@ def test_write_between_read_and_upload_is_not_lost(tmp_path):
     assert rb.stats.get("conflicts") == 1
     rc.pull(True)
     assert sorted(h["note"] for h in c.handoffs()) == ["A", "B"]
+
+
+def test_same_instance_concurrent_requests_keep_unuploaded_rows(tmp_path):
+    """One Vercel instance serves requests concurrently: a handoff written while another request uploads, or before a pull,
+    must neither be wiped locally nor be skipped by the next push (Vercel: 4 simultaneous handoffs -> 3 seen)."""
+    cli = fake_blob()
+    a, b, c = Store(tmp_path / "a.db"), Store(tmp_path / "b.db"), Store(tmp_path / "c.db")
+    ra, rb, rc = (Replica(s, token="vercel_blob_rw_STORE1_x") for s in (a, b, c))
+    ra.http = rb.http = rc.http = cli
+    a.x("INSERT INTO companies(id,name,created) VALUES('c1','Автопарк',0)"); assert ra.push()
+    rb.pull(True); ra.pull(True)
+    a.add_handoff("u1", "M333YK47", "chief", "h1", "", {})
+    cli.box["after_get"] = lambda: a.add_handoff("u2", "M333YK47", "chief", "h2", "", {})  # concurrent request on instance A
+    assert ra.push()
+    assert sorted(h["note"] for h in a.handoffs()) == ["h1", "h2"]  # not wiped by adopting the uploaded copy
+    a.add_handoff("u3", "M333YK47", "chief", "h3", "", {})
+    b.add_handoff("u4", "M333YK47", "chief", "h4", "", {}); assert rb.push()
+    assert ra.pull(True)
+    assert sorted(h["note"] for h in a.handoffs()) == ["h1", "h2", "h3", "h4"]  # the pull kept h2/h3 (not uploaded yet)
+    assert ra.push()
+    rc.pull(True)
+    assert sorted(h["note"] for h in c.handoffs()) == ["h1", "h2", "h3", "h4"]
+    assert len({h["id"] for h in c.handoffs()}) == 4

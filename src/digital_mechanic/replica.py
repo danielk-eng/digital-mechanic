@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import random
+import threading
 import time
 
 import httpx
@@ -71,19 +72,23 @@ class Replica:
         self.on = bool(self.token and self.store_id)
         self.etag = ""
         self.last_pull = 0.0
-        self.digest = ""  # hash of the mirrored tables as last pulled/pushed
-        self.base: dict = {}  # the mirrored tables as last pulled/pushed (merge base)
+        self.digest = ""  # hash of the shared copy as last pulled/pushed
+        self.base: dict = {}  # the shared copy as last pulled/pushed (merge base: what differs locally is this instance's own change)
+        self.pulled = False
+        self.lock = threading.RLock()  # one instance serves concurrent requests: pull/push one at a time
         self.http = httpx.Client(timeout=4.0) if self.on else None
         self.stats = {"pulls": 0, "pushes": 0, "error": ""}
         self.cas = os.environ.get("REPLICA_CAS", "1") == "1"
 
     # ------------------------------------------------------------------ local tables
     def dump(self) -> dict:
-        return {t: self.store.q(f"SELECT * FROM {t}") for t in TABLES}
+        d = {t: self.store.q(f"SELECT * FROM {t}") for t in TABLES}
+        return json.loads(json.dumps(d, ensure_ascii=False, default=str))  # same shape as the shared JSON
 
     @staticmethod
     def hash(d: dict) -> str:
-        return hashlib.sha256(json.dumps(d, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
+        rows = {t: sorted(json.dumps(r, sort_keys=True, ensure_ascii=False, default=str) for r in (d.get(t) or [])) for t in TABLES}
+        return hashlib.sha256(json.dumps(rows, ensure_ascii=False).encode()).hexdigest()
 
     def load(self, d: dict) -> None:
         with self.store._lock:
@@ -100,6 +105,16 @@ class Replica:
                         con.execute(f"INSERT OR REPLACE INTO {t}({','.join(ks)}) VALUES({','.join('?' * len(ks))})", [r[k] for k in ks])
             con.commit()
 
+    def _adopt(self, shared: dict, since: dict | None = None) -> None:
+        """Make the shared copy the local state, keeping local changes made since `since` (default: the merge base) —
+        a handoff written by a concurrent request of this instance and not yet uploaded must not be wiped by a pull."""
+        with self.store._lock:
+            now = self.dump()
+            final = merge(shared, now, self.base if since is None else since) if self.pulled or since is not None else shared
+            if self.hash(final) != self.hash(now):
+                self.load(final)
+        self.base, self.digest, self.pulled = shared, self.hash(shared), True
+
     # ------------------------------------------------------------------ blob
     def _hdr(self, **kw) -> dict:
         return {"authorization": f"Bearer {self.token}", "x-api-version": "13", "x-vercel-blob-store-id": self.store_id, **kw}
@@ -108,45 +123,43 @@ class Replica:
         return f"https://{self.store_id}.private.blob.vercel-storage.com/{PATH}"
 
     def pull(self, force: bool = False) -> bool:
-        """Bring the mirrored tables up to the shared copy. True if something was loaded."""
+        """Bring the mirrored tables up to the shared copy (keeping not yet uploaded local changes). True if something was loaded."""
         if not self.on or (not force and time.time() - self.last_pull < PULL_TTL):
             return False
-        self.last_pull = time.time()
-        try:
-            h = self._hdr()
-            h.pop("x-api-version"); h.pop("x-vercel-blob-store-id")
-            if self.etag:
-                h["if-none-match"] = self.etag
-            r = self.http.get(self.url(), params={"cache": "0"}, headers=h)
-            if r.status_code in (304, 404):
-                if r.status_code == 404 and not self.digest:
-                    self.digest = "-"  # nothing shared yet: the first write creates it
+        with self.lock:
+            self.last_pull = time.time()
+            try:
+                h = self._hdr()
+                h.pop("x-api-version"); h.pop("x-vercel-blob-store-id")
+                if self.etag:
+                    h["if-none-match"] = self.etag
+                r = self.http.get(self.url(), params={"cache": "0", "t": str(time.time())}, headers=h)
+                if r.status_code in (304, 404):
+                    if r.status_code == 404 and not self.digest:
+                        self.digest = "-"  # nothing shared yet: the first write creates it
+                    return False
+                r.raise_for_status()
+                d = r.json()
+                self.etag = r.headers.get("etag", "")
+                if self.hash(d) == self.digest:
+                    return False
+                self._adopt(d)
+                self.stats["pulls"] += 1
+                return True
+            except Exception as e:  # the stand keeps working on its local copy
+                log.warning("replica pull failed: %s", type(e).__name__)
+                self.stats["error"] = f"pull {type(e).__name__} {getattr(getattr(e, 'response', None), 'status_code', '')}"
                 return False
-            r.raise_for_status()
-            d = r.json()
-            self.etag = r.headers.get("etag", "")
-            new = self.hash(d)
-            if new == self.digest:
-                return False
-            self.load(d)
-            self.stats["pulls"] += 1
-            self.base = self.dump()
-            self.digest = self.hash(self.base)
-            return True
-        except Exception as e:  # the stand keeps working on its local copy
-            log.warning("replica pull failed: %s", type(e).__name__)
-            self.stats["error"] = f"pull {type(e).__name__} {getattr(getattr(e, 'response', None), 'status_code', '')}"
-            return False
 
     def _head_etag(self) -> str:
-        """Authoritative ETag from the Blob API (the upload only accepts the strong form). Read BEFORE the content: the content is then at least that version, so a stale ETag only makes the CAS
-        refuse and retry, never overwrite."""
+        """Authoritative ETag from the Blob API metadata. Read BEFORE the content: the content is then at least that version,
+        so a stale ETag only makes the CAS refuse and retry, never overwrite."""
         r = self.http.get(API + "/", params={"url": self.url()}, headers=self._hdr())
         if r.status_code == 404:
             return ""
         r.raise_for_status()
         tag = str(r.json().get("etag", ""))
-        return tag[2:] if tag.startswith("W/") else tag  # both answer W/"<hash>", the upload only accepts "<hash>" (seen on Vercel)
+        return tag[2:] if tag.startswith("W/") else tag  # answered as W/"<hash>", the upload only accepts "<hash>" (seen on Vercel)
 
     def _get(self) -> tuple[dict, str]:
         tag = self._head_etag() if self.cas else ""
@@ -156,8 +169,6 @@ class Replica:
         if r.status_code == 404:
             return {}, ""
         r.raise_for_status()
-        self.stats["get_etag"] = tag[:60]
-        self.stats["get_cache"] = (r.headers.get("x-vercel-cache", "") + " age=" + r.headers.get("age", ""))[:40]
         return r.json(), tag
 
     def push(self) -> bool:
@@ -166,46 +177,38 @@ class Replica:
         in between, the Blob API refuses it and we re-read, re-merge and try again."""
         if not self.on:
             return False
-        local = self.dump()
-        if self.hash(local) == self.digest:
-            return False
-        try:
-            prev, cas = None, self.cas
-            for attempt in range(6):
-                remote, etag = self._get()
-                merged = merge(remote, local, self.base)
-                # the read gave the same ETag that was just refused (stale read / format not accepted) or 4 refusals in a row:
-                # plain merged upload (still keeps every instance's rows it can see)
-                if cas and (etag == prev or attempt >= 4):
-                    cas = False
-                    self.stats["cas_fallback"] = self.stats.get("cas_fallback", 0) + 1
-                extra = {"x-if-match": etag} if etag and cas else {}
-                prev = etag
-                r = self.http.put(API + "/", params={"pathname": PATH}, content=json.dumps(merged, ensure_ascii=False, default=str).encode(),
-                                  headers=self._hdr(**{"x-vercel-blob-access": "private", "x-add-random-suffix": "0", "x-allow-overwrite": "1",
-                                                        "x-content-type": "application/json", "x-cache-control-max-age": "60", **extra}))
-                if extra and (r.status_code in (409, 412) or (r.status_code == 400 and "precondition" in r.text.lower())):
-                    self.stats["conflicts"] = self.stats.get("conflicts", 0) + 1
-                    self.stats["conflict_body"] = r.text[:160]
-                    time.sleep(random.uniform(0.05, 0.25) * (attempt + 1))
-                    continue
-                r.raise_for_status()
-                try:
-                    self.stats["put_etag"] = str(r.json().get("etag", ""))[:60]
-                except Exception:
-                    pass
-                break
-            else:
-                raise RuntimeError("blob kept changing")
-            if self.hash(merged) != self.hash(local):
-                self.load(merged)
-            self.base = self.dump()
-            self.digest = self.hash(self.base)
-            self.stats["pushes"] += 1
-            self.etag = ""
-            self.last_pull = time.time()
-            return True
-        except Exception as e:
-            log.warning("replica push failed: %s", type(e).__name__)
-            self.stats["error"] = f"push {type(e).__name__} {getattr(getattr(e, 'response', None), 'status_code', '')}"
-            return False
+        with self.lock:
+            local = self.dump()
+            if self.hash(local) == self.digest:
+                return False
+            try:
+                prev, cas = None, self.cas
+                for attempt in range(6):
+                    remote, etag = self._get()
+                    merged = merge(remote, local, self.base)
+                    # the read gave the ETag that was just refused, or 4 refusals in a row: plain merged upload
+                    if cas and etag and (etag == prev or attempt >= 4):
+                        cas = False
+                        self.stats["cas_fallback"] = self.stats.get("cas_fallback", 0) + 1
+                    extra = {"x-if-match": etag} if etag and cas else {}
+                    prev = etag
+                    r = self.http.put(API + "/", params={"pathname": PATH}, content=json.dumps(merged, ensure_ascii=False, default=str).encode(),
+                                      headers=self._hdr(**{"x-vercel-blob-access": "private", "x-add-random-suffix": "0", "x-allow-overwrite": "1",
+                                                            "x-content-type": "application/json", "x-cache-control-max-age": "60", **extra}))
+                    if extra and (r.status_code in (409, 412) or (r.status_code == 400 and "precondition" in r.text.lower())):
+                        self.stats["conflicts"] = self.stats.get("conflicts", 0) + 1
+                        time.sleep(random.uniform(0.05, 0.25) * (attempt + 1))
+                        continue
+                    r.raise_for_status()
+                    break
+                else:
+                    raise RuntimeError("blob kept changing")
+                self._adopt(merged, since=local)  # rows written locally while we uploaded stay (and go up with the next push)
+                self.stats["pushes"] += 1
+                self.etag = ""
+                self.last_pull = time.time()
+                return True
+            except Exception as e:
+                log.warning("replica push failed: %s", type(e).__name__)
+                self.stats["error"] = f"push {type(e).__name__} {getattr(getattr(e, 'response', None), 'status_code', '')}"
+                return False
