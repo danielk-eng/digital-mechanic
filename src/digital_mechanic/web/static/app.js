@@ -1167,6 +1167,10 @@ async function vHeard(raw, intent) {
 async function vSendHeard(text, raw) {
   $("#vSaid").innerHTML = esc(text) + rawDetails(raw); $("#vReply").textContent = ""; $("#vReply").classList.remove("long");
   vSet("thinking");
+  // Another answer still in flight (an explanation after «Получить результат», a chip): ask() drops a request while BUSY and the
+  // dialog said «Ответа нет» 1 s after the phrase (Vercel audit 27.11 10:50). Wait for it (up to 90 s), then ask.
+  for (const tw = Date.now(); BUSY && VOICE.on && Date.now() - tw < 90000;) await new Promise(r => setTimeout(r, 300));
+  if (!VOICE.on) return;
   const turn = await send(text, {raw});
   if (!VOICE.on) return;
   const reply = turn && (turn.text || (turn.cards || []).map(c => c.light_text || "").join(" "));
