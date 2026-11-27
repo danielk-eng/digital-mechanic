@@ -448,3 +448,13 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .urg-label{display:flex;flex-direction:column;gap:6px;margin:10px 0 4px}
 .urg-pick{min-height:44px;border-radius:10px;padding:8px 10px;font:inherit;background:var(--surface-2);color:var(--text);border:1px solid var(--border-2);max-width:100%}
 .rec-text{white-space:pre-wrap;border-left:3px solid var(--border-2);padding-left:10px}
+/* 27.11: chief bar on a phone — one row of actions under the title (logout wrapped alone onto a third row at 390 px, more so with
+   longer labels in kk/ky/uz); text buttons shrink with an ellipsis instead of wrapping, icons stay 44 px touch targets */
+@media (max-width:560px){
+  .mgr-bar{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,max-content) 1fr 44px 44px 44px;column-gap:6px;align-items:center}
+  .mgr-bar h1{grid-column:1/-1}
+  .mgr-bar #whoami{display:none}
+  .mgr-bar .btn{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;line-height:var(--tap-sm,36px)}
+  .mgr-bar #theme{grid-column:4}.mgr-bar #snd{grid-column:5}.mgr-bar #logout{grid-column:6}
+  .mgr-bar .icon-btn{width:44px;height:44px}
+}
