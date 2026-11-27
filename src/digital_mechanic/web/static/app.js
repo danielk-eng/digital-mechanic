@@ -5,13 +5,6 @@ const $$ = s => [...document.querySelectorAll(s)];
 let LAST_CHECK = null, LAST_DRAFT = null;  // {vid, sid} of the check diagnosed in this dialog: sent with chat (Vercel instances do not share it)
 let I18N = {}, ME = null, VID = new URLSearchParams(location.search).get("v") || localStorage.getItem("vid") || "", VEH = null, VLIST = [], BUSY = false, LAST_Q = "", HYP = false;
 const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG", be: "be-BY"};
-// Browser TTS: a phone often has no voice for ky/be/tg; read with the closest one that knows the script.
-const TTS_FALLBACK = {ky: ["ky", "kk", "ru"], be: ["be", "ru"], tg: ["tg", "ru"], kk: ["kk", "ru"], uz: ["uz", "tr"], bn: ["bn"], hi: ["hi"], vi: ["vi"], ru: ["ru"]};
-function ttsVoice(lang) {
-  const vs = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
-  for (const p of TTS_FALLBACK[lang] || [lang]) { const v = vs.find(x => (x.lang || "").toLowerCase().startsWith(p)); if (v) return v; }
-  return null;
-}
 const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt", bn: "বাংলা", ky: "Кыргызча", be: "Беларуская"};  // = i18n.LANGS
 const t = k => (I18N[(ME && ME.lang) || $("#l_lang")?.value || "ru"] || I18N.ru || {})[k] || (I18N.ru || {})[k] || k;
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
@@ -71,13 +64,18 @@ const Player = {
     caption("");
   },
   playing() { return !!this.btn || !!this.audio || (window.speechSynthesis && speechSynthesis.speaking); },
-  async play(text, btn = null, {onend = null, onlevel = null} = {}) {
+  async play(text, btn = null, {onend = null, onlevel = null, original = null, lang = null} = {}) {
     this.stop();
-    const p = plain(text); if (!p) return onend && onend();
+    const raw = plain(text); if (!raw) return onend && onend();
     const seq = this.seq;
     if (btn) { this.btn = btn; btn.innerHTML = icon("square", 16); btn.classList.add("on"); btn.setAttribute("aria-label", t("stop")); }
     const done = () => { if (seq !== this.seq) return; if (this.btn) { this.btn.innerHTML = icon("play", 18); this.btn.classList.remove("on"); this.btn = null; } this.audio = null; caption(""); onend && onend(); };
-    if (ALANG() === "ru" && SERVER_TTS) {
+    const voices = await ttsVoices();
+    if (seq !== this.seq) return;
+    const plan = ttsPlan(raw, original != null ? plain(original) : raw, lang || speakLang(), voices);
+    if (plan.noticeKey) toast((t(plan.noticeKey) || plan.noticeKey).replace("{lang}", plan.noticeLang || ""));
+    const p = plan.text || raw;
+    if (plan.useServer && SERVER_TTS) {
       try {
         const r = await fetch("/api/tts", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: p})});
         if (seq !== this.seq) return;
@@ -89,14 +87,38 @@ const Player = {
         if (r.status === 404) SERVER_TTS = false;  // no server voice on this stand; 502 = only this text failed
       } catch (_) { SERVER_TTS = false; }
     }
-    if (!window.speechSynthesis) return done();
-    const u = new SpeechSynthesisUtterance(p); u.lang = SPEECH_LANG[ALANG()] || "ru-RU";
-    const vv = ttsVoice(ALANG()); if (vv) { u.voice = vv; u.lang = vv.lang; }
+    if (!plan.speak || !window.speechSynthesis) return done();
+    const u = new SpeechSynthesisUtterance(p); u.lang = plan.lang || "ru-RU";
+    if (plan.voice) { u.voice = plan.voice; u.lang = plan.voice.lang || u.lang; }
     u.onboundary = e => captionFollow(p, (e.charIndex || 0) / p.length); u.onend = done; u.onerror = done;
     speechSynthesis.speak(u);
   },
 };
 let SERVER_TTS = true, SERVER_STT = true;
+function speakLang() { return (typeof needsTr === "function" && needsTr() && ME && ME.lang) ? ME.lang : (ALANG() || "ru"); }
+function speakVisible(root, fallback) {
+  if (!root) return fallback;
+  const skip = "[data-notr],button,script,style,code,.mono,.cite,.src,.msg-actions,.card-actions,.sources";
+  const parts = [];
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {acceptNode: n => {
+    const pe = n.parentElement; if (!pe || pe.closest(skip)) return 3;
+    return n.nodeValue && n.nodeValue.trim() ? 1 : 3;
+  }});
+  for (let n; (n = w.nextNode());) parts.push(n.nodeValue);
+  const s = parts.join(" ").replace(/\s+/g, " ").trim();
+  return s || fallback;
+}
+function ttsVoices() {
+  return new Promise(resolve => {
+    if (!window.speechSynthesis) return resolve([]);
+    const grab = () => speechSynthesis.getVoices() || [];
+    const cur = grab(); if (cur.length) return resolve(cur);
+    let done = false;
+    const finish = () => { if (done) return; done = true; try { speechSynthesis.removeEventListener("voiceschanged", finish); } catch (_) {} resolve(grab()); };
+    try { speechSynthesis.addEventListener("voiceschanged", finish); } catch (_) { return resolve(cur); }
+    setTimeout(finish, 800);
+  });
+}
 function plain(text) { return String(text || "").replace(/\[[^\]]*\b(S|X)\d+\b[^\]]*\]/g, "").replace(/<[^>]+>/g, " ").replace(/[*#•_]/g, "").replace(/\s+/g, " ").replace(/ ([.,;:!?)])/g, "$1").trim().slice(0, 1200); }
 function caption(text, ms = 0) {
   const el = $("#caption"); if (!el) return;
@@ -219,7 +241,7 @@ function addMsg(role, html, {cls = "", speak = null, actions = []} = {}) {
   const d = document.createElement("div"); d.className = `msg ${role}`;
   d.innerHTML = `<div class="b ${cls}">${html}</div>`;
   const acts = [...actions];
-  if (speak) acts.unshift({icon: "play", aria: t("play"), cls: "play", onclick: (ev, b) => (Player.btn === b ? Player.stop() : Player.play(speak, b))});
+  if (speak) acts.unshift({icon: "play", aria: t("play"), cls: "play", onclick: (ev, b) => (Player.btn === b ? Player.stop() : Player.play(speakVisible(d.querySelector(".b"), speak), b, {original: speak, lang: speakLang()}))});
   if (acts.length) {
     const row = document.createElement("div"); row.className = "msg-actions";
     acts.forEach(a => {
@@ -1159,7 +1181,7 @@ async function vHeard(raw, intent) {
     $("#vSaid").innerHTML = esc(q) + rawDetails(raw); $("#vReply").textContent = "";
     if (!A11Y.voiceSpeaks()) { vSet("listening"); return vListen(); }
     vSet("speaking"); VOICE.speechMs = 0;
-    return Player.play(q, null, {onend: () => { if (VOICE.on && VOICE.state === "speaking") vListen(); }});
+    return Player.play(q, null, {lang: speakLang(), original: q, onend: () => { if (VOICE.on && VOICE.state === "speaking") vListen(); }});
   }
   const text = intent && intent.utterance ? intent.utterance : raw;
   return vSendHeard(text, text !== raw ? raw : null);
@@ -1179,7 +1201,7 @@ async function vSendHeard(text, raw) {
   $("#vReply").classList.toggle("long", plain(reply).length > 140); $("#vReply").scrollTop = 0;
   if (!A11Y.voiceSpeaks()) return vListen();
   vSet("speaking"); VOICE.speechMs = 0;
-  Player.play(reply, null, {onend: () => { if (VOICE.on && VOICE.state === "speaking") vListen(); }});
+  Player.play(reply, null, {lang: speakLang(), original: reply, onend: () => { if (VOICE.on && VOICE.state === "speaking") vListen(); }});
 }
 function voiceClose() {
   VOICE.on = false; VOICE.pending = null; VOICE.srSeq++; WebSTT.abort(); cancelAnimationFrame(VOICE.raf); stopRecorder(); Player.stop();
