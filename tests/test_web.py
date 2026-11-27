@@ -217,3 +217,18 @@ def test_expand_prefetch_is_signed_and_stored_only_on_click(client):
     assert len(m.STORE.q("SELECT id FROM messages WHERE user_id=?", (uid,))) == n0 + 1
     other = client.post("/api/chat", json={"vehicle_id": "A777AA77", "text": "x", "event": "expand", "ready": {"text": txt, "sources": src, "sig": sig}})
     assert other.status_code in (403, 404)  # bound to user and vehicle
+
+
+def test_voice_intent_api_and_journal(client, monkeypatch):
+    """V t565u: /api/voice/intent reconstructs the repair phrase from a mixed transcript and writes the journal."""
+    import digital_mechanic.web.app as m
+    from test_voice_intent import MIXED, FakeLlm
+    monkeypatch.setattr(m.AGENT, "llm", FakeLlm({"repair_utterance": "Какой момент затяжки крышек коренных подшипников?",
+                                                 "dropped": ["мне к пяти надо"], "confidence": 0.8}))
+    client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True})
+    r = client.post("/api/voice/intent", json={"vehicle_id": "M333YK47", "text": MIXED}).json()["intent"]
+    assert r["utterance"].startswith("Какой момент") and r["dropped"] == ["мне к пяти надо"]
+    row = m.STORE.one("SELECT * FROM audit WHERE action='voice_intent' ORDER BY id DESC LIMIT 1")
+    assert row and "voice_intent" in row["tools"]
+    j = m.agent_journal([{"tool": "voice_intent", "confidence": 0.8, "dropped": ["x"], "confirm": False}])
+    assert "уверенность 0.8" in j["steps"][0] and "отброшено 1" in j["steps"][0]

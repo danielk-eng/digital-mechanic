@@ -374,7 +374,11 @@
     "title_veteran": "Механик-моторист, 40 лет с грузовиками",
     "title_selftaught": "Механик-самоучка, 15 лет практики",
     "title_student": "Выпускник колледжа, первый месяц в парке",
-    "qr_login": "QR-вход"
+    "qr_login": "QR-вход",
+    "v_raw": "Распознано целиком",
+    "v_understood": "Я понял так: «{x}». Верно?",
+    "v_offtopic": "Не расслышал вопрос по ремонту — повторите, пожалуйста",
+    "v_repeat": "Повторите вопрос"
   },
   "uz": {
     "app_title": "Raqamli mexanik",
@@ -751,7 +755,11 @@
     "title_veteran": "Motorist mexanik, 40 yil yuk mashinalari bilan",
     "title_selftaught": "O‘zi o‘rgangan mexanik, 15 yillik tajriba",
     "title_student": "Kollej bitiruvchisi, parkda birinchi oy",
-    "qr_login": "QR orqali kirish"
+    "qr_login": "QR orqali kirish",
+    "v_raw": "To'liq tanilgan matn",
+    "v_understood": "Shunday tushundim: «{x}». To'g'rimi?",
+    "v_offtopic": "Ta'mir bo'yicha savolni eshitmadim — qaytaring",
+    "v_repeat": "Savolni qaytaring"
   },
   "tg": {
     "app_title": "Механики рақамӣ",
@@ -1128,7 +1136,11 @@
     "title_veteran": "Механики моторчӣ, 40 сол бо мошинҳои боркаш",
     "title_selftaught": "Механики худомӯз, 15 сол таҷриба",
     "title_student": "Хатмкардаи коллеҷ, моҳи аввал дар парк",
-    "qr_login": "Вуруд бо QR"
+    "qr_login": "Вуруд бо QR",
+    "v_raw": "Пурра шинохташуда",
+    "v_understood": "Ман чунин фаҳмидам: «{x}». Дуруст?",
+    "v_offtopic": "Саволи таъмирро нашунидам — такрор кунед",
+    "v_repeat": "Саволро такрор кунед"
   },
   "kk": {
     "app_title": "Цифрлық механик",
@@ -1505,7 +1517,11 @@
     "title_veteran": "Моторшы механик, жүк көліктерімен 40 жыл",
     "title_selftaught": "Өздігінен үйренген механик, 15 жыл тәжірибе",
     "title_student": "Колледж түлегі, паркте бірінші ай",
-    "qr_login": "QR арқылы кіру"
+    "qr_login": "QR арқылы кіру",
+    "v_raw": "Толық танылған мәтін",
+    "v_understood": "Мен былай түсіндім: «{x}». Дұрыс па?",
+    "v_offtopic": "Жөндеу туралы сұрақты естімедім — қайталаңыз",
+    "v_repeat": "Сұрақты қайталаңыз"
   },
   "hi": {
     "app_title": "डिजिटल मैकेनिक",
@@ -1882,7 +1898,11 @@
     "title_veteran": "इंजन मैकेनिक, ट्रकों के साथ 40 साल",
     "title_selftaught": "स्व-शिक्षित मैकेनिक, 15 साल का अनुभव",
     "title_student": "कॉलेज स्नातक, डिपो में पहला महीना",
-    "qr_login": "QR लॉगिन"
+    "qr_login": "QR लॉगिन",
+    "v_raw": "पूरा पहचाना गया पाठ",
+    "v_understood": "मैंने ऐसा समझा: «{x}»। सही है?",
+    "v_offtopic": "मरम्मत का सवाल सुनाई नहीं दिया — कृपया दोहराएँ",
+    "v_repeat": "सवाल दोहराएँ"
   },
   "vi": {
     "app_title": "Thợ máy số",
@@ -2259,7 +2279,11 @@
     "title_veteran": "Thợ máy động cơ, 40 năm với xe tải",
     "title_selftaught": "Thợ máy tự học, 15 năm kinh nghiệm",
     "title_student": "Mới tốt nghiệp cao đẳng, tháng đầu ở xưởng",
-    "qr_login": "Đăng nhập QR"
+    "qr_login": "Đăng nhập QR",
+    "v_raw": "Toàn bộ văn bản nhận dạng",
+    "v_understood": "Tôi hiểu là: «{x}». Đúng không?",
+    "v_offtopic": "Không nghe rõ câu hỏi về sửa chữa — vui lòng nói lại",
+    "v_repeat": "Hãy nói lại câu hỏi"
   },
   "bn": {
     "app_title": "ডিজিটাল মেকানিক",
@@ -2636,7 +2660,11 @@
     "title_veteran": "ইঞ্জিন মেকানিক, ট্রাকের সাথে ৪০ বছর",
     "title_selftaught": "স্বশিক্ষিত মেকানিক, ১৫ বছরের অভিজ্ঞতা",
     "title_student": "কলেজ স্নাতক, ডিপোতে প্রথম মাস",
-    "qr_login": "QR লগইন"
+    "qr_login": "QR লগইন",
+    "v_raw": "সম্পূর্ণ শনাক্ত লেখা",
+    "v_understood": "আমি এভাবে বুঝেছি: «{x}»। ঠিক তো?",
+    "v_offtopic": "মেরামতের প্রশ্ন শুনতে পাইনি — আবার বলুন",
+    "v_repeat": "প্রশ্নটি আবার বলুন"
   },
   "ky": {
     "app_title": "Санарип механик",
@@ -3013,7 +3041,11 @@
     "title_veteran": "Моторчу механик, жүк ташуучу унаалар менен 40 жыл",
     "title_selftaught": "Өз алдынча үйрөнгөн механик, 15 жыл тажрыйба",
     "title_student": "Колледждин бүтүрүүчүсү, парктагы биринчи ай",
-    "qr_login": "QR менен кирүү"
+    "qr_login": "QR менен кирүү",
+    "v_raw": "Толук таанылган текст",
+    "v_understood": "Мен мындай түшүндүм: «{x}». Туурабы?",
+    "v_offtopic": "Оңдоо боюнча суроону уккан жокмун — кайталаңыз",
+    "v_repeat": "Суроону кайталаңыз"
   },
   "be": {
     "app_title": "Лічбавы механік",
@@ -3390,6 +3422,10 @@
     "title_veteran": "Механік-матарыст, 40 гадоў з грузавікамі",
     "title_selftaught": "Механік-самавук, 15 гадоў практыкі",
     "title_student": "Выпускнік каледжа, першы месяц у парку",
-    "qr_login": "Уваход па QR"
+    "qr_login": "Уваход па QR",
+    "v_raw": "Распазнана цалкам",
+    "v_understood": "Я зразумеў так: «{x}». Правільна?",
+    "v_offtopic": "Не пачуў пытанне па рамонце — паўтарыце, калі ласка",
+    "v_repeat": "Паўтарыце пытанне"
   }
 }

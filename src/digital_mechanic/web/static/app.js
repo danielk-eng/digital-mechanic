@@ -701,7 +701,8 @@ async function eventTurn(event, text, shown, expanded = false, sources = null) {
   if (shown) addMsg("user", esc(shown));
   return ask(text, event, sources);
 }
-async function send(text) {
+const rawDetails = raw => raw ? `<details class="seen"><summary>${icon("chevron-right", 16)}<span>${t("v_raw")}</span></summary><p class="small muted">${esc(raw)}</p></details>` : "";
+async function send(text, {raw = null} = {}) {
   Player.stop();
   text = (text ?? $("#txt").value).trim();
   if (!text) return null;
@@ -711,7 +712,7 @@ async function send(text) {
   }
   LAST_Q = text; askedAdd(text); $("#txt").value = ""; autosize();
   if (HYP) { HYP = false; $("#txt").placeholder = t("ask_placeholder"); return eventTurn("hypothesis", text, text); }
-  addMsg("user", esc(text));
+  addMsg("user", esc(text) + rawDetails(raw));  // voice: what was actually recognised, collapsed
   return ask(text);
 }
 function autosize() {
@@ -1114,9 +1115,9 @@ async function vOnRecorded() {
   const blob = new Blob(VOICE.chunks, {type: (VOICE.rec && VOICE.rec.mimeType) || "audio/webm"}); VOICE.rec = null;
   if (!VOICE.on) return;
   if (blob.size < 1500) return vListen();
-  const fd = new FormData(); fd.append("audio", blob, "voice.webm"); fd.append("lang", ME.lang || "ru");
-  let text = "";
-  try { text = ((await api("/api/stt", {method: "POST", body: fd})).text || "").trim(); }
+  const fd = new FormData(); fd.append("audio", blob, "voice.webm"); fd.append("lang", ME.lang || "ru"); fd.append("vehicle_id", VID || "");
+  let text = "", intent;
+  try { const r = await api("/api/stt", {method: "POST", body: fd}); text = (r.text || "").trim(); intent = r.intent; }
   catch (e) {
     if (!VOICE.on) return;
     if (WebSTT.serverFailed(e)) {  // 503 «STT unavailable» or no network to the server: switch to the browser for the rest of the session
@@ -1127,7 +1128,7 @@ async function vOnRecorded() {
   }
   if (!VOICE.on) return;
   if (!text) { vSet("listening", t("v_didnt_hear")); return vListen(); }
-  vHeard(text);
+  vHeard(text, intent);
 }
 // Voice screen text: whole sentences up to n chars (was a cut mid-word «двигатель переби…», audit 01:20, 390 px)
 function clipText(s, n) {
@@ -1136,10 +1137,37 @@ function clipText(s, n) {
   for (const m of head.matchAll(/(^|[\s(])(?:стр|с|рис|табл|т|д|п|ч|им|см|прим)\.(?=\s)|[.!?](?=\s)|\n/g)) if (m[0].length === 1) end = m.index;  // abbreviations match longer and are skipped
   return end > n * 0.4 ? head.slice(0, end + 1).trim() + " …" : head.slice(0, head.lastIndexOf(" ")).trim() + "…";
 }
-async function vHeard(text) {
-  $("#vSaid").textContent = text; $("#vReply").textContent = ""; $("#vReply").classList.remove("long");
+// Noisy workshop (V t565u): the server reconstructs the mechanic's repair phrase from a mixed transcript; low confidence ->
+// «Я понял так: … Верно?» and the next phrase answers it (да / нет); off-topic only -> ask again. Numbers are never added.
+const V_YES = /^\s*(да|верно|ага|так|правильно|точно|подтверждаю|yes|ha|иә|ҳа|ооба|हाँ|có|হ্যাঁ)\b/i, V_NO = /^\s*(нет|не так|неверно|не то|no|yo['ʻ]q|жоқ|жок|नहीं|không|না)\b/i;
+async function vIntent(raw) {
+  if (!VID) return null;
+  try { return (await api("/api/voice/intent", {json: {vehicle_id: VID, text: raw}})).intent; } catch (_) { return null; }
+}
+async function vHeard(raw, intent) {
+  if (VOICE.pending) {
+    const p = VOICE.pending; VOICE.pending = null;
+    if (V_YES.test(raw)) return vSendHeard(p.utterance, p.raw);
+    if (V_NO.test(raw)) { $("#vSaid").textContent = ""; vSet("listening", t("v_repeat")); return vListen(); }
+  }
+  if (intent === undefined) intent = await vIntent(raw);
+  if (!VOICE.on) return;
+  if (intent && intent.offtopic) { $("#vSaid").innerHTML = esc(raw); vSet("listening", t("v_offtopic")); return vListen(); }
+  if (intent && intent.confirm && intent.utterance) {
+    VOICE.pending = {utterance: intent.utterance, raw};
+    const q = t("v_understood").replace("{x}", intent.utterance);
+    $("#vSaid").innerHTML = esc(q) + rawDetails(raw); $("#vReply").textContent = "";
+    if (!A11Y.voiceSpeaks()) { vSet("listening"); return vListen(); }
+    vSet("speaking"); VOICE.speechMs = 0;
+    return Player.play(q, null, {onend: () => { if (VOICE.on && VOICE.state === "speaking") vListen(); }});
+  }
+  const text = intent && intent.utterance ? intent.utterance : raw;
+  return vSendHeard(text, text !== raw ? raw : null);
+}
+async function vSendHeard(text, raw) {
+  $("#vSaid").innerHTML = esc(text) + rawDetails(raw); $("#vReply").textContent = ""; $("#vReply").classList.remove("long");
   vSet("thinking");
-  const turn = await send(text);
+  const turn = await send(text, {raw});
   if (!VOICE.on) return;
   const reply = turn && (turn.text || (turn.cards || []).map(c => c.light_text || "").join(" "));
   if (!reply) { vSet("idle", t("v_no_answer")); return; }
@@ -1150,7 +1178,7 @@ async function vHeard(text) {
   Player.play(reply, null, {onend: () => { if (VOICE.on && VOICE.state === "speaking") vListen(); }});
 }
 function voiceClose() {
-  VOICE.on = false; VOICE.srSeq++; WebSTT.abort(); cancelAnimationFrame(VOICE.raf); stopRecorder(); Player.stop();
+  VOICE.on = false; VOICE.pending = null; VOICE.srSeq++; WebSTT.abort(); cancelAnimationFrame(VOICE.raf); stopRecorder(); Player.stop();
   try { VOICE.stream && VOICE.stream.getTracks().forEach(tr => tr.stop()); } catch (_) {}
   try { VOICE.ctx && VOICE.ctx.close(); } catch (_) {}
   VOICE.stream = VOICE.ctx = VOICE.an = null; VOICE.last = 0;
