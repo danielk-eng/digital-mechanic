@@ -551,6 +551,47 @@ def _pick(plain: str, reflowed: str | None) -> str:
     return reflowed if letters(reflowed) >= 0.97 * letters(plain) else plain
 
 
+def _is_table_head(line: str) -> bool:
+    return " — " in line and bool(TABLE_LEFT_RE.match(line)) and bool(TABLE_RIGHT_RE.search(line))
+
+
+def _last_heading(tab: str) -> str | None:
+    """The last symptom heading of a cause/remedy table page (consecutive lines without « — » after the header)."""
+    lines = [l.strip() for l in tab.split("\n")]
+    start = next((i + 1 for i, l in enumerate(lines) if _is_table_head(l)), 0)
+    head, cur, prev_heading = None, [], False
+    for l in lines[start:]:
+        if not l or re.fullmatch(r"\d{1,4}", l) or l.startswith("*"):
+            continue
+        if " — " in l:
+            if cur:
+                head = " ".join(cur)
+            cur, prev_heading = [], False
+        else:
+            cur = (cur if prev_heading else []) + [l]
+            prev_heading = True
+    if cur:
+        head = " ".join(cur)
+    head = re.sub(r"(\s*\(продолжение\))+$", "", head or "")
+    # a symptom, not a wrapped cell fragment: starts with a capital or a number, no «…)» closing an earlier line
+    if not head or len(head) > 140 or not re.match(r"[А-ЯЁA-Z0-9]", head) or re.match(r"[^(]*\)", head) and not re.match(r"\d+\)", head):
+        return None
+    return head
+
+
+def _continue_heading(tab: str, prev_head: str | None) -> str:
+    """Rows at the top of a table page belong to the last symptom of the previous page: name it there
+    («Износ поршневых колец» on ЯМЗ-236 РЭ p. 53 read as a cause of «Двигатель стучит»)."""
+    if not prev_head:
+        return tab
+    lines = tab.split("\n")
+    i = next((k for k, l in enumerate(lines) if _is_table_head(l.strip())), -1)
+    nxt = next((l for l in lines[i + 1:] if l.strip() and not re.fullmatch(r"\s*\d{1,4}\s*", l)), "")
+    if " — " not in nxt or _is_table_head(nxt):
+        return tab
+    return "\n".join(lines[:i + 1] + [f"{prev_head} (продолжение)"] + lines[i + 1:])
+
+
 def extract_pdf(pdf: Path) -> list[str]:
     if shutil.which("pdftotext"):
         pages = _extract_pdftotext(pdf)
@@ -559,11 +600,15 @@ def extract_pdf(pdf: Path) -> list[str]:
         except (subprocess.CalledProcessError, OSError):
             boxes = []
         if len(boxes) == len(pages):
-            out, g = [], None
+            out, g, head = [], None, None
             for t, b in zip(pages, boxes):
+                was_table = g is not None
                 tab, g = reflow_table(b, g)
+                if tab and was_table:
+                    tab = _continue_heading(tab, head)
                 dm = None if tab else (reflow_defect_map(b) or reflow_defect_map_pos(b) or reflow_numbered_index(b))
                 out.append(_pick(t, tab) if tab else _pick(t, dm) if dm else _pick(t, reflow_side_captions(b)))
+                head = _last_heading(tab) if tab and out[-1] == tab else None
             pages = out
         return pages
     return _extract_pypdf(pdf)

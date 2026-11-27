@@ -80,11 +80,22 @@ class FactPipeline:
         self.a = agent
         agent.store.x("CREATE TABLE IF NOT EXISTS facts_cache(k TEXT PRIMARY KEY, vehicle_id TEXT, question TEXT, facts TEXT, ts REAL)")
 
+    _ver: str | None = None
+
+    def _index_ver(self) -> str:
+        """Fingerprint of the page texts: facts cached before a re-index (a page's rows got their symptom) are not reused."""
+        if self._ver is None:
+            h = hashlib.sha1()
+            for p in getattr(self.a.index, "pages", []) or []:
+                h.update(f"{p.doc_id}|{p.page}|{p.text}".encode())
+            self._ver = h.hexdigest()[:10]
+        return self._ver
+
     # ---------------------------------------------------------------- pass 1
     def facts(self, c, question: str, detail: str, turn) -> list[dict] | None:
         """[{"doc_id","page","text"}] or None when the manual has no answer (the caller falls back to the agent loop)."""
         vid = c.vehicle.vehicle_id
-        k = _key(vid, question, detail)
+        k = _key(vid, question, detail + "|" + self._index_ver())
         row = self.a.store.one("SELECT facts FROM facts_cache WHERE k=?", (k,))
         if row:
             facts = json.loads(row["facts"])

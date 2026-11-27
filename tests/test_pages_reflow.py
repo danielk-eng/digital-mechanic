@@ -232,3 +232,20 @@ def test_numbered_centred_heading_is_not_split_into_cause_and_remedy():
     lines = text.split("\n")
     assert "1. Двигатель не пускается" in lines and "1.1. Нарушение подачи бензина" in lines
     assert "а) не работает — проверить предохранитель" in lines
+
+
+def test_rows_at_the_top_of_a_table_page_get_the_previous_symptom():
+    """ЯМЗ-236 РЭ p. 53: «Износ поршневых колец» (continuing «Двигатель не развивает мощности, дымит» from p. 52) read as a
+    cause of «Двигатель стучит» — the answer said «стук на холостом — износ поршневых колец»."""
+    from digital_mechanic.ingest.pages import _continue_heading, _last_heading
+    p52 = "Причина — Способ устранения\nДвигатель стучит\nРанний впрыск — Отрегулировать угол\nДвигатель не развивает мощности, дымит\nВоздух в системе — Прокачать\n52"
+    p53 = "Причина — Способ устранения\nИзнос поршневых колец — Заменить кольца\nДвигатель стучит\nРанний впрыск — Отрегулировать угол\n53"
+    h = _last_heading(p52)
+    assert h == "Двигатель не развивает мощности, дымит"
+    out = _continue_heading(p53, h).split("\n")
+    assert out[1] == "Двигатель не развивает мощности, дымит (продолжение)" and out[2].startswith("Износ поршневых колец")
+    # a page that starts with a heading is left as it is; a chain does not stack «(продолжение) (продолжение)»
+    assert _continue_heading(p52, "X") == p52
+    assert _last_heading("Причина — Способ\nX (продолжение)\nа — б") == "X"
+    # wrapped cell fragments are not headings
+    assert _last_heading("Причина — Способ\nа — б\n- топлива при 70ºС;\nв — г") is None
