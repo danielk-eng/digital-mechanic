@@ -14,12 +14,10 @@ import json
 from pathlib import Path
 
 USD_RUB = 82.3130  # CBR, 26.11.2026
-SCX_URL = "https://scx.ai/models/deepseek-v4-1-flash-1017"  # paid price of the same model (V, 27.11)
 PRICES = {  # per 1M tokens, RUB without VAT
     "primary_free": {"name": "deepseek-v4.1-flash (free, TokenRouter) — основная на стенде", "in": 0.0, "out": 0.0},
-    "primary_paid": {"name": "DeepSeek-V4.1-flash-1017 (SCX.ai): $0,30 вход / $0,03 вход из кэша / $1,20 выход за 1 млн",
-                     "in": 0.30 * USD_RUB, "in_cached": 0.03 * USD_RUB, "out": 1.20 * USD_RUB,
-                     "usd": (0.30, 1.20), "usd_cached": 0.03, "source": SCX_URL},
+    "primary_paid": {"name": "DeepSeek V4.1 Flash по прайсу DeepSeek API ($0,30 / $1,20 за 1 млн, пик)", "in": 0.30 * USD_RUB, "out": 1.20 * USD_RUB,
+                     "usd": (0.30, 1.20)},
     "fallback_free": {"name": "GigaChat-4-708B-A41 (Cloud.ru, без тарифа) — резерв и РФ-регион", "in": 0.0, "out": 0.0},
     "fallback_paid": {"name": "GigaChat Ultra на Cloud.ru (78,87 / 236,56 ₽ за 1 млн без НДС) — платный аналог резерва", "in": 78.87, "out": 236.56},
 }
@@ -51,17 +49,6 @@ def load(path: str | Path | None = None) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def cached_share(line: dict) -> float:
-    """Share of a step's input tokens billed at the cached price: the provider-reported cached tokens when the provider
-    reports caching, else the longest-common-prefix estimate (scripts/cost_measure.py)."""
-    return float(line.get("cached_share_provider") or line.get("cached_share_prefix") or 0.0)
-
-
-def in_price(p: dict, share: float) -> float:
-    """Effective input price per 1M tokens: blended cached / uncached for prices that have a cached rate."""
-    return share * p["in_cached"] + (1 - share) * p["in"] if "in_cached" in p else p["in"]
-
-
 def scenario(measured: dict, questions: float = 2.5, ticket: bool = True) -> list[dict]:
     """Per-step lines of one scenario: calls, tokens in/out per call, cost under every price set."""
     L = measured["lines"]
@@ -81,10 +68,9 @@ def scenario(measured: dict, questions: float = 2.5, ticket: bool = True) -> lis
     for k in ORDER:
         d = L.get(k, ans if k == "answer" else {})
         tin, tout = int(d.get("in_per_call", 0)), int(d.get("out_per_call", 0))
-        share = cached_share(d)
-        row = {"step": k, "name": STEP_RU[k], "calls": calls[k], "in": tin, "out": tout, "cached_share": share}
+        row = {"step": k, "name": STEP_RU[k], "calls": calls[k], "in": tin, "out": tout}
         for pk, p in PRICES.items():
-            row[pk] = calls[k] * (tin * in_price(p, share) + tout * p["out"]) / 1e6
+            row[pk] = calls[k] * (tin * p["in"] + tout * p["out"]) / 1e6
         rows.append(row)
     return rows
 
@@ -123,7 +109,6 @@ def indexing() -> dict:
 def report(measured: dict | None = None) -> dict:
     m = measured or load()
     rows = scenario(m)
-    return {"measured": {**{k: m[k] for k in ("measured_at", "model", "runs", "scenario", "tokens_per_scenario_median")},
-                         "cache": m.get("cache", {})},
+    return {"measured": {k: m[k] for k in ("measured_at", "model", "runs", "scenario", "tokens_per_scenario_median")},
             "prices": PRICES, "usd_rub": USD_RUB, "rows": rows, "total": totals(rows), "assumptions": ASSUMPTIONS,
             "fleets": [fleet(m, n) for n in FLEETS], "complex_repair": complex_repair(m), "indexing": indexing()}
