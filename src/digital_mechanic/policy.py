@@ -39,7 +39,7 @@ def doubt_flags(c: CheckResult) -> list[str]:
     if c.signal_quality == SignalQuality.warning:
         out.append("запись с помехами — уверенность модели снижена")
     if c.confidence is not None and c.confidence < LOW_CONFIDENCE:
-        out.append(f"низкая уверенность модели ({c.confidence:.2f})")
+        out.append(f"низкая уверенность модели ({_ru(c.confidence)})")
     return out
 
 
@@ -57,6 +57,10 @@ def may_create_ticket(c: CheckResult | None) -> bool:
     return bool(c and c.status == CheckStatus.anomaly and c.signal_quality != SignalQuality.bad and c.anomaly_type)
 
 
+def _ru(x: float) -> str:
+    return f"{x:.2f}".replace(".", ",")
+
+
 def urgency(c: CheckResult) -> tuple[Urgency, list[str]]:
     why: list[str] = []
     score = c.anomaly_score or 0.0
@@ -65,13 +69,13 @@ def urgency(c: CheckResult) -> tuple[Urgency, list[str]]:
     why.append(text)
     pts = {"engine_critical": 2, "engine": 1, "operation": 1, "aux": 0}[cls]
     if score >= 0.8:
-        pts += 2; why.append(f"высокая оценка отклонения {score:.2f} (≥ 0,80)")
+        pts += 2; why.append(f"высокая оценка отклонения {_ru(score)} (≥ 0,80)")
     elif score >= 0.65:
-        pts += 1; why.append(f"заметная оценка отклонения {score:.2f} (≥ 0,65)")
+        pts += 1; why.append(f"заметная оценка отклонения {_ru(score)} (≥ 0,65)")
     else:
-        why.append(f"умеренная оценка отклонения {score:.2f}")
+        why.append(f"умеренная оценка отклонения {_ru(score)}")
     if conf < LOW_CONFIDENCE:
-        pts -= 1; why.append(f"уверенность модели низкая ({conf:.2f}): сначала проверить узел")
+        pts -= 1; why.append(f"уверенность модели низкая ({_ru(conf)}): сначала проверить узел")
     if c.signal_quality == SignalQuality.warning:
         pts -= 1; why.append("запись с помехами")
     u = Urgency.high if pts >= 3 else Urgency.medium if pts >= 1 else Urgency.low

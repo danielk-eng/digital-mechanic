@@ -173,10 +173,18 @@ async function pageViewer(doc, page) {
   };
   await show(+page);
 }
-function mdl(s) { return esc(s || "").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>"); }
+// summary / dialog text: «[S4]», «[X10]» source labels become page chips (pages of the package) or disappear — the chief saw raw labels
+function mdl(s, pages) {
+  const by = Object.fromEntries((pages || []).filter(p => p.label).map(p => [p.label, p]));
+  return esc(s || "").replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/[ \t]*\[([^\]]{1,80})\]/g, (m, grp) => {
+    const labs = grp.match(/\b[SX]\d+\b/g); if (!labs) return m;
+    const seen = new Set();
+    return labs.map(l => by[l]).filter(p => p && !seen.has(p.doc_id + p.page) && seen.add(p.doc_id + p.page)).map(p => " " + pageLink(p)).join("");
+  }).replace(/\n/g, "<br>");
+}
 function attHtml(a) {
   if (!a) return `<p class="muted small">${t("no_attachments")}</p>`;
-  return `<div>${mdl(a.summary)}</div>` + (a.answer ? `<details class="more"><summary>${icon("chevron-right", 16)}${t("agent_answer")}</summary><div class="small">${mdl(a.answer)}</div></details>` : "") +
+  return `<div>${mdl(a.summary, a.pages)}</div>` + (a.answer ? `<details class="more"><summary>${icon("chevron-right", 16)}${t("agent_answer")}</summary><div class="small">${mdl(a.answer, a.pages)}</div></details>` : "") +
     (a.pages && a.pages.length ? `<div style="margin-top:8px">${a.pages.map(pageLink).join(" ")}</div>` : "") +
     (a.inspection && a.inspection.length ? `<p class="small">${t("inspection")}: ${a.inspection.map(it => `${esc(it.component)}: ${esc(it.finding)}`).join("; ")}</p>` : "") +
     (a.photos && a.photos.length ? `<div style="display:flex;gap:8px;margin-top:8px">${a.photos.map(n => `<a target="_blank" href="/api/photo/${encodeURIComponent(n)}"><img src="/api/photo/${encodeURIComponent(n)}" alt="" style="height:72px;border-radius:8px"></a>`).join("")}</div>` : "");
@@ -208,10 +216,10 @@ async function loadHandoffs() {
   r.handoffs.forEach(h => { h.payload = Object.assign({pages: [], photos: [], dialog: [], items: []}, h.payload); });
   $("#tab-handoffs").innerHTML = r.handoffs.length ? r.handoffs.map(h => `<div class="panel"><div class="pad">` +
     `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><b class="mono">${esc(h.vehicle_id)}</b><span class="small muted">${h.kind === "inspection" ? t("inspection") + ", " : ""}${new Date(h.ts * 1000).toLocaleString("ru-RU")}, ${esc(h.user_name)}</span><span class="pill ${stc[h.status]}" style="margin-left:auto">${t(st[h.status] || h.status)}</span></div>` +
-    (h.note ? `<p><b>${esc(h.note)}</b></p>` : "") + `<div class="small" style="margin-top:8px">${mdl(h.summary)}</div>` +
+    (h.note ? `<p><b>${esc(h.note)}</b></p>` : "") + `<div class="small" style="margin-top:8px">${mdl(h.summary, h.payload.pages)}</div>` +
     (h.payload.items.length ? `<ul class="small">${h.payload.items.map(it => `<li><b>${esc(it.component)}</b>: ${esc(it.finding)} <span class="muted">(${esc(it.severity)})</span>${it.page ? " " + pageLink(it) : ""}</li>`).join("")}</ul>` : "") +
     (h.payload.pages.length ? `<div style="margin-top:8px">${h.payload.pages.map(pageLink).join(" ")}</div>` : "") +
-    (h.payload.dialog.length ? `<details class="more"><summary>${icon("chevron-right", 16)}${t("dialog")} (${h.payload.dialog.length})</summary>${h.payload.dialog.map(d => `<div class="msg ${d.role === "user" ? "user" : "bot"}" style="margin:8px 0"><div class="b small">${mdl(d.text)}</div></div>`).join("")}</details>` : "") +
+    (h.payload.dialog.length ? `<details class="more"><summary>${icon("chevron-right", 16)}${t("dialog")} (${h.payload.dialog.length})</summary>${h.payload.dialog.map(d => `<div class="msg ${d.role === "user" ? "user" : "bot"}" style="margin:8px 0"><div class="b small">${mdl(d.text, h.payload.pages)}</div></div>`).join("")}</details>` : "") +
     `<div class="card-actions" style="justify-content:flex-start">${h.status === "open" ? `<button class="btn primary sm" data-h="${h.id}" data-s="taken">${t("take")}</button>` : ""}${h.status !== "closed" ? `<button class="btn ghost sm" data-h="${h.id}" data-s="closed">${t("close_case")}</button>` : ""}<button class="btn ghost sm" data-veh="${esc(h.vehicle_id)}">${t("vehicle_card")}</button></div></div></div>`).join("")
     : `<div class="panel"><div class="pad muted">${nActive() ? t("f_nothing") : t("no_handoffs")}</div></div>`;
   $$("#tab-handoffs button[data-h]").forEach(b => b.onclick = async () => {
@@ -248,8 +256,7 @@ function tab(name) {
 $$("#tabs button").forEach(b => b.onclick = () => tab(b.dataset.tab));
 // Agent tab: text or voice. The briefing answer opens the vehicle card, cites pages and is read aloud.
 function mdc(text, sources) {
-  const by = Object.fromEntries((sources || []).map(s => [s.label, s]));
-  return mdl(text).replace(/\[(S\d+)\]/g, (m, l) => by[l] ? pageLink(by[l]) : "");
+  return mdl(text, sources);
 }
 function speak(text) {
   if (!window.speechSynthesis || !text) return;

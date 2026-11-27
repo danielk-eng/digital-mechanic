@@ -19,7 +19,7 @@ URG_RU = {"high": "высокий", "medium": "средний", "low": "низк
 SUMMARY_PROMPT = """Составь резюме сессии ремонта для следующей смены и главного механика, 5–8 коротких строк, на {lang} языке, с жирными заголовками:
 **Машина**, **Проверка**, **Что сделано**, **Что нашли по руководству** (с метками [S#] из диалога), **Что осталось**, **Заявка / ремонт**.
 Только факты из данных ниже, ничего не добавляй и не советуй сверх сказанного. Числа — только как в данных.
-Пиши человеческим языком: без служебных слов и значений из данных (anomaly, normal, medium, null, score, confidence, repair, session) — «отклонение», «норма», «приоритет средний», «оценка», «уверенность»; если ремонта нет — «ремонт не начат"."""
+Пиши человеческим языком: без служебных слов и значений из данных (anomaly, normal, medium, null, score, confidence, repair, session) — «отклонение», «норма», «приоритет средний», «оценка», «уверенность»; даты, оценку и уверенность пиши как в данных проверки («29 окт 2026», «0,76», «73%»), не «2026-10-29» и не «0.73»; если ремонта нет — «ремонт не начат"."""
 
 
 def package(agent, c, limit_msgs: int = 40) -> dict:
@@ -68,9 +68,28 @@ def _plain(p: dict) -> str:
     return "\n".join(lines)
 
 
+_MON = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
+
+
+def human_check(ch: dict | None) -> dict | None:
+    """The check as a person reads it: «29 окт 2026», «0,76», «73%» (the summary copied «2026-10-29», «0.76», «0.73»)."""
+    if not ch:
+        return ch
+    out = {k: v for k, v in ch.items() if k not in ("anomaly_score", "confidence", "checked_at")}
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(ch.get("checked_at") or ""))
+    if m:
+        out["дата"] = f"{int(m.group(3))} {_MON[int(m.group(2)) - 1]} {m.group(1)}"
+    if isinstance(ch.get("anomaly_score"), (int, float)):
+        out["оценка"] = f"{ch['anomaly_score']:.2f}".replace(".", ",")
+    if isinstance(ch.get("confidence"), (int, float)):
+        out["уверенность"] = f"{round(ch['confidence'] * 100)}%"
+    return out
+
+
 def summarize(agent, c, lang: str = "русском") -> dict:
     p = package(agent, c)
-    evidence = [json.dumps(p["check"] or {}, ensure_ascii=False), json.dumps(p["vehicle"], ensure_ascii=False)]
+    hc = human_check(p["check"])
+    evidence = [json.dumps(p["check"] or {}, ensure_ascii=False), json.dumps(hc or {}, ensure_ascii=False), json.dumps(p["vehicle"], ensure_ascii=False)]
     evidence += [d["text"] for d in p["dialog"]] + [c.frags[x["label"]]["text"] for x in p["pages"]]
     text, llm = "", False
     avail = getattr(agent.llm, "available", True)
@@ -78,7 +97,7 @@ def summarize(agent, c, lang: str = "русском") -> dict:
         try:
             msg, _ = agent.llm.chat("session_summary", [
                 {"role": "system", "content": SUMMARY_PROMPT.format(lang=lang)},
-                {"role": "user", "content": json.dumps({k: p[k] for k in ("vehicle", "check", "dialog", "pages", "ticket", "draft", "repair")}, ensure_ascii=False)[:14000]}],
+                {"role": "user", "content": json.dumps({**{k: p[k] for k in ("vehicle", "dialog", "pages", "ticket", "draft", "repair")}, "check": hc}, ensure_ascii=False)[:14000]}],
                 max_tokens=700)
             text, llm = (msg.content or "").strip(), True
         except Exception:

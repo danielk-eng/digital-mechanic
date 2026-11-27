@@ -1,3 +1,4 @@
+const _dec = x => typeof x === "number" ? x.toFixed(2).replace(".", ",") : String(x);  // «0,76», not «0.76»
 // Vehicle diagnostic timeline and the "before arrival" summary, shared by the mechanic and manager pages.
 const _esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const _ic = (n, s = 16) => (typeof icon === "function" ? icon(n, s) : "");
@@ -30,13 +31,13 @@ function renderTimeline(tl) {
   for (const e of tl.entries) {
     const cls = e.status === "anomaly" ? "err" : e.status === "normal" ? "ok-text" : "";
     const top = `<span class="${cls}">${ic(e.status)}</span><span class="tl-date">${_esc(fmtDate(e.date))}</span><span class="muted">${_esc(e.status_ru)}${e.component ? ", " + _esc(e.component) : ""}</span>`;
-    const sub = [e.anomaly_score != null ? `оценка ${e.anomaly_score}` : "", e.mileage_km ? `${e.mileage_km.toLocaleString("ru-RU")} км` : "",
+    const sub = [e.anomaly_score != null ? `оценка ${_dec(e.anomaly_score)}` : "", e.mileage_km ? `${e.mileage_km.toLocaleString("ru-RU")} км` : "",
       e.ticket ? `заявка ${_esc(e.ticket.ticket_id)}` : "", e.recurring ? "повтор" : "", e.demo ? "демо-история" : ""].filter(Boolean).join(", ");
-    let body = `<div class="small muted" style="margin-top:8px">${_esc(e.session_id)}${e.confidence != null ? `, уверенность ${e.confidence}` : ""}, запись: ${_esc(({good: "хорошая", medium: "средняя", bad: "плохая"})[e.signal_quality] || e.signal_quality)}${e.mechanic ? `, механик ${_esc(e.mechanic)}` : ""}</div>`;
+    let body = `<div class="small muted" style="margin-top:8px">${_esc(e.session_id)}${e.confidence != null ? `, уверенность ${Math.round(e.confidence * 100)}%` : ""}, запись: ${_esc(({good: "хорошая", medium: "средняя", bad: "плохая"})[e.signal_quality] || e.signal_quality)}${e.mechanic ? `, механик ${_esc(e.mechanic)}` : ""}</div>`;
     if (e.description) body += `<div class="small" style="margin-top:4px">${_esc(e.description)}</div>`;
     if (e.repair) body += `<div class="small" style="margin-top:8px">Ремонт ${e.repair.done}/${e.repair.total}${e.repair.status === "done" ? ", завершён" : ""}<ol>${e.repair.steps_done.map(s => `<li>${_esc(s)}</li>`).join("")}</ol></div>`;
     if (e.parts && e.parts.length) body += `<div class="small">Запчасти: ${e.parts.map(p => _esc(p.name || p.text || p)).join(", ")}</div>`;
-    if (e.recheck) body += `<div class="small">Повторная проверка ${_esc(e.recheck.date)}: <b>${_esc(e.recheck.status_ru)}</b>${e.recheck.anomaly_score != null ? ` (${e.recheck.anomaly_score})` : ""}</div>`;
+    if (e.recheck) body += `<div class="small">Повторная проверка ${_esc(e.recheck.date)}: <b>${_esc(e.recheck.status_ru)}</b>${e.recheck.anomaly_score != null ? ` (${_dec(e.recheck.anomaly_score)})` : ""}</div>`;
     if (e.answer) body += `<div class="tl-ans">${_esc(e.answer).replace(/\n/g, "<br>")}</div>`;
     if (e.sources && e.sources.length) body += `<div style="margin-top:8px">${e.sources.map(s => `<button class="cite" data-doc="${_esc(s.doc_id)}" data-page="${s.page}">с. ${s.page}</button>`).join("")}</div>`;
     h += `<details class="tl-e"><summary><span class="tl-top">${top}</span>${sub ? `<span class="tl-sub">${sub}</span>` : ""}</summary>${body}</details>`;

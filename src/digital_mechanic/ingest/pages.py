@@ -210,7 +210,9 @@ def _split(ws: list[tuple], g: float) -> tuple[list[tuple], list[tuple], bool]:
     right = [w for w in ws if (w[0] + w[2]) / 2 >= g]
     crossing = any(w[0] < g - 1 < g + 1 < w[2] for w in ws)
     # a centred sub-heading reads on across the gutter («Двигатель не развивает | мощности, дымит»), a row does not
-    joined = bool(left and right and right[0][0] - left[-1][2] < 7 and left[0][4][:1].isupper() and right[0][4][:1].islower())
+    # a numbered centred heading too: «1. Двигатель | не пускается», «6.1 Недостаточная | подача топлива» (ЗМЗ-409 РК table 5)
+    cap = bool(left) and (left[0][4][:1].isupper() or bool(re.fullmatch(r"\d+(\.\d+)*\.?", left[0][4])) and len(left) > 1 and left[1][4][:1].isupper())
+    joined = bool(left and right and right[0][0] - left[-1][2] < 7 and cap and right[0][4][:1].islower())
     lone_number = not right and len(left) == 1 and left[0][4].isdigit() or not left and len(right) == 1 and right[0][4].isdigit()
     return left, right, crossing or joined or lone_number
 

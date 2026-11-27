@@ -112,12 +112,28 @@ function captionFollow(p, frac) {
 function inline(h, src) {
   h = h.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
   // a label without a source (e.g. in the handoff summary) disappears together with the space before it («ТНВД ;» -> «ТНВД;»)
-  return h.replace(/\[([^\]]{1,80})\]/g, (m, grp, off, whole) => {
+  h = h.replace(/\[([^\]]{1,80})\]/g, (m, grp, off, whole) => {
     const labs = grp.match(/\b(?:S|X)\d+\b/g); if (!labs) return m;
     if (!labs.some(l => src[l])) return "\u0000";
     const ctx = whole.slice(Math.max(0, off - 240), off).replace(/<[^>]+>/g, "").split(/\n|[.!?]\s|•/).filter(x => x.trim().length > 6).pop() || "";
     return labs.map(l => src[l] ? `<button class="cite ${src[l].extra ? "x" : ""}" data-doc="${esc(src[l].doc_id)}" data-page="${src[l].page}" data-q="${esc(ctx.trim().slice(0, 200))}" title="${esc(src[l].document)}">${t("page_short")} ${src[l].page}</button>` : "").join("");
   }).replace(/[ \t]*\u0000/g, "");
+  return collapseCites(h);
+}
+function collapseCites(h) {
+  // «работа [с. 52], работа [с. 52], работа [с. 52]» -> one chip after the last item: the same page cited clause after
+  // clause in one paragraph cluttered the answer; a chip for another page in between breaks the run
+  const re = /[ \t]*<button class="cite[^"]*" data-doc="([^"]*)" data-page="(\d+)"[^>]*>[^<]*<\/button>/g;
+  const ms = [...h.matchAll(re)]; if (ms.length < 2) return h;
+  const drop = new Set();
+  for (let i = 0; i + 1 < ms.length; i++) {
+    const a = ms[i], b = ms[i + 1], gap = h.slice(a.index + a[0].length, b.index);
+    if (a[1] === b[1] && a[2] === b[2] && gap.length < 240 && !/<(b|br)>/.test(gap) && !/[.!?]\s/.test(gap)) drop.add(i);
+  }
+  if (!drop.size) return h;
+  let out = "", pos = 0;
+  ms.forEach((m, i) => { if (drop.has(i)) { out += h.slice(pos, m.index); pos = m.index + m[0].length; } });
+  return out + h.slice(pos);
 }
 function md(text, sources) {
   const src = Object.fromEntries((sources || []).map(s => [s.label, s]));
@@ -238,7 +254,7 @@ function renderCard(c) {
     let h = `<div class="vh"><div class="vi">${icon(LIGHT_ICON[c.light] || "activity", 22)}</div><div><div class="vt">${head}</div>` +
       (c.light_text && c.status === "anomaly" ? `<div class="vs">${esc(c.light_text)}</div>` : "") + `</div></div>`;
     h += `<div class="kv"><span>${t("session")}</span><span class="mono">${esc(ch.session_id)}, ${esc(typeof fmtDate === "function" ? fmtDate(ch.checked_at, true) : (ch.checked_at || "").slice(0, 16).replace("T", " "))}</span>`;
-    if (ch.anomaly_score != null) h += `<span>${t("score")}</span><span class="mono">${ch.anomaly_score.toFixed(2)}</span>`;
+    if (ch.anomaly_score != null) h += `<span>${t("score")}</span><span class="mono">${ch.anomaly_score.toFixed(2).replace(".", ALANG() === "hi" ? "." : ",")}</span>`;
     if (ch.confidence != null) h += `<span>${t("confidence")}</span><span class="mono">${Math.round(ch.confidence * 100)}%</span>`;
     h += `<span>${t("quality")}</span><span>${esc(t(QUALITY[ch.signal_quality] || ch.signal_quality))}</span>`;
     if (ch.description) h += `<span>${t("ml_says")}</span><span>${esc(ch.description)}</span>`;
@@ -307,6 +323,11 @@ async function repairAction(a) {
 
 // ---------------------------------------------------------------- chips
 let CHIP_SEQ = 0;
+// questions already asked about this vehicle in this tab: their chip is not offered again (a tapped chip stayed in the row)
+const askedKey = () => "asked:" + (VID || "");
+const chipNorm = s => (s || "").toLowerCase().replace(/[^a-zа-яё0-9]+/gi, " ").trim();
+function askedGet() { try { return JSON.parse(sessionStorage.getItem(askedKey()) || "[]"); } catch (_) { return []; } }
+function askedAdd(text) { if (!VID) return; try { const a = askedGet(); a.push(chipNorm(text)); sessionStorage.setItem(askedKey(), JSON.stringify(a.slice(-40))); } catch (_) {} }
 async function loadChips() {
   const q = $("#quick"); if (!q) return;
   if (!ME || !VID) { q.innerHTML = ""; return; }
@@ -315,7 +336,9 @@ async function loadChips() {
     const r = await api(`/api/suggest?vehicle_id=${encodeURIComponent(VID)}`);
     if (seq !== CHIP_SEQ) return;
     q.innerHTML = "";
-    (r.chips || []).slice(0, 6).forEach(ch => {
+    const asked = new Set(askedGet());
+    const fresh = (r.chips || []).filter(ch => ch.kind === "code" || !asked.has(chipNorm(ch.text)));
+    fresh.slice(0, 6).forEach(ch => {
       const b = document.createElement("button"); b.textContent = ch.text;
       if (ch.page) b.title = `${ch.doc}, ${t("page_short")} ${ch.page}`;
       b.onclick = ch.kind === "triage" ? () => eventTurn("triage", "", ch.text) : ch.kind === "code" ? () => { $("#txt").value = "F0"; autosize(); $("#txt").focus(); } : () => send(ch.text);
@@ -551,7 +574,7 @@ async function send(text) {
     const v = plateInText(text); if (!v) { toast(t("choose_vehicle")); return null; }
     await selectVehicle(v.vehicle_id);
   }
-  LAST_Q = text; $("#txt").value = ""; autosize();
+  LAST_Q = text; askedAdd(text); $("#txt").value = ""; autosize();
   if (HYP) { HYP = false; $("#txt").placeholder = t("ask_placeholder"); return eventTurn("hypothesis", text, text); }
   addMsg("user", esc(text));
   return ask(text);
