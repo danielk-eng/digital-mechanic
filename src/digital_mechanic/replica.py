@@ -4,8 +4,9 @@ same everywhere (companies, which truck belongs to whom, people, QR login links,
 Pull before each request (at most every PULL_TTL s; always before a write request, so a write starts from the latest state),
 push after a write request when the mirrored tables changed. A push is a three-way merge, not "last writer wins": the instance
 re-reads the shared copy, applies only its own changes since its last pull (inserts, updates, deletes by row identity), re-numbers
-its new rows if another instance took the same autoincrement id, uploads, then reads back and retries if a concurrent push
-overwrote it (two handoffs sent at the same moment from two instances both survive).
+its new rows if another instance took the same autoincrement id, and uploads with the copy's ETag (x-if-match): if another
+instance wrote in between, the upload is refused and the merge is redone (handoffs sent at the same moment from several
+instances all survive).
 Off unless BLOB_READ_WRITE_TOKEN is set (the deb stand and the tests keep plain SQLite).
 """
 from __future__ import annotations
@@ -14,6 +15,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import time
 
 import httpx
@@ -135,38 +137,43 @@ class Replica:
             self.stats["error"] = f"pull {type(e).__name__} {getattr(getattr(e, 'response', None), 'status_code', '')}"
             return False
 
-    def _get(self) -> dict:
+    def _get(self) -> tuple[dict, str]:
         h = self._hdr()
         h.pop("x-api-version"); h.pop("x-vercel-blob-store-id")
         r = self.http.get(self.url(), params={"cache": "0", "t": str(time.time())}, headers=h)
         if r.status_code == 404:
-            return {}
+            return {}, ""
         r.raise_for_status()
-        return r.json()
+        return r.json(), r.headers.get("etag", "")
 
     def push(self) -> bool:
-        """Merge this instance's changes into the shared copy and upload it (if the mirrored tables changed)."""
+        """Merge this instance's changes into the shared copy and upload it (if the mirrored tables changed).
+        Compare-and-swap: the upload carries the ETag of the copy it was merged into (x-if-match); if another instance wrote
+        in between, the Blob API refuses it and we re-read, re-merge and try again."""
         if not self.on:
             return False
         local = self.dump()
         if self.hash(local) == self.digest:
             return False
         try:
-            for attempt in range(4):
-                merged = merge(self._get(), local, self.base)
+            for attempt in range(6):
+                remote, etag = self._get()
+                merged = merge(remote, local, self.base)
+                # after 4 refusals in a row (ETag format not accepted, or a very busy minute) fall back to the plain merged upload
+                extra = {"x-if-match": etag} if etag and attempt < 4 else {}
+                if etag and attempt == 4:
+                    self.stats["cas_fallback"] = self.stats.get("cas_fallback", 0) + 1
                 r = self.http.put(API + "/", params={"pathname": PATH}, content=json.dumps(merged, ensure_ascii=False, default=str).encode(),
                                   headers=self._hdr(**{"x-vercel-blob-access": "private", "x-add-random-suffix": "0", "x-allow-overwrite": "1",
-                                                        "x-content-type": "application/json", "x-cache-control-max-age": "60"}))
+                                                        "x-content-type": "application/json", "x-cache-control-max-age": "60", **extra}))
+                if r.status_code in (409, 412) or (r.status_code == 400 and "precondition" in r.text.lower()):
+                    self.stats["conflicts"] = self.stats.get("conflicts", 0) + 1
+                    time.sleep(random.uniform(0.05, 0.25) * (attempt + 1))
+                    continue
                 r.raise_for_status()
-                time.sleep(0.15 * attempt)
-                back = self._get()  # a concurrent push may have replaced ours: our changes must be in what is stored now
-                mine = [(t, _key(t, x)) for t in TABLES for x in merged.get(t, [])]
-                have = {(t, _key(t, x)) for t in TABLES for x in back.get(t, [])}
-                if all(m in have for m in mine):
-                    merged = back
-                    break
-                local = merge(back, local, self.base)  # fold the other writer in, keep ours, try again
-                self.base = back
+                break
+            else:
+                raise RuntimeError("blob kept changing")
             if self.hash(merged) != self.hash(local):
                 self.load(merged)
             self.base = self.dump()

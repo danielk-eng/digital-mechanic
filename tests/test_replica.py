@@ -14,14 +14,21 @@ def fake_blob():
         assert req.headers["authorization"].startswith("Bearer ")
         if req.method == "PUT":
             assert req.headers["x-vercel-blob-access"] == "private" and req.headers["x-allow-overwrite"] == "1"
+            if "x-if-match" in req.headers and req.headers["x-if-match"] != box.get("etag"):
+                return httpx.Response(412, json={"error": {"code": "precondition_failed"}})
             box["v"] = req.content; box["etag"] = f'"{len(box.get("etag", "")) + 1}"' + str(hash(req.content))
             return httpx.Response(200, json={"url": "x"})
         if "v" not in box:
             return httpx.Response(404)
         if req.headers.get("if-none-match") == box["etag"]:
             return httpx.Response(304)
-        return httpx.Response(200, content=box["v"], headers={"etag": box["etag"]})
-    return httpx.Client(transport=httpx.MockTransport(h))
+        out = httpx.Response(200, content=box["v"], headers={"etag": box["etag"]})
+        hook = box.pop("after_get", None)
+        if hook:
+            hook()  # another instance writes between this GET and the caller's PUT
+        return out
+    cl = httpx.Client(transport=httpx.MockTransport(h)); cl.box = box
+    return cl
 
 
 def test_two_instances_share_companies_users_and_qr(tmp_path):
@@ -88,3 +95,20 @@ def test_concurrent_handoffs_from_two_instances_both_survive(tmp_path):
     rb.pull(True); b.x("DELETE FROM login_tokens WHERE hash='h9'"); assert rb.push()
     a.x("UPDATE companies SET note='x'"); assert ra.push()
     rc.pull(True); assert not c.one("SELECT hash FROM login_tokens WHERE hash='h9'")
+
+
+def test_write_between_read_and_upload_is_not_lost(tmp_path):
+    """True race: B reads the shared copy, A uploads its handoff, then B uploads -> B's upload is refused (ETag) and redone."""
+    cli = fake_blob()
+    a, b, c = Store(tmp_path / "a.db"), Store(tmp_path / "b.db"), Store(tmp_path / "c.db")
+    ra, rb, rc = (Replica(s, token="vercel_blob_rw_STORE1_x") for s in (a, b, c))
+    ra.http = rb.http = rc.http = cli
+    a.x("INSERT INTO companies(id,name,created) VALUES('c1','Автопарк',0)"); assert ra.push()
+    ra.pull(True); rb.pull(True)
+    a.add_handoff("u1", "M333YK47", "chief", "A", "", {})
+    b.add_handoff("u2", "M333YK47", "chief", "B", "", {})
+    cli.box["after_get"] = lambda: ra.push()
+    assert rb.push()
+    assert rb.stats.get("conflicts") == 1
+    rc.pull(True)
+    assert sorted(h["note"] for h in c.handoffs()) == ["A", "B"]
