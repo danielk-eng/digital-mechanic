@@ -54,6 +54,14 @@ PREFETCH_SKIP = re.compile(r"заявк|дефектовк|начать ремо
                            r"сколько машин|подтвержда|отмен|^\s*(да|нет|ок|спасибо)[\s.!]*$", re.I)
 TICKET_RE = re.compile(r"заявк|дефектовк|начать ремонт|начни ремонт|ремонт по шагам", re.I)
 CONFIRM_RE = re.compile(r"^\s*(да[,.!\s]*)?(подтвержда\w*|отправля\w*|отправь\w*|tasdiqla\w*|тасдиқ\w*|растаймын|xác nhận|पुष्टि)", re.I)
+# Organizers 27.11 (C1, MAZ M333YK47 / S-0005, F08 early injection): the mechanic checks the injection timing marks.
+# «метки не совпадают» is enough for an adjustment ticket (п. 5.12.1 РК) after its own confirmation, no measured angle;
+# «метки совпали» is saved, but the check is NOT closed as serviceable: F08 is the fuel delivery as a whole, early injection
+# is only one cause of the knock -> next causes / checks from the manual, no ticket yet.
+MARKS_NO_RE = re.compile(r"^\s*(механик:\s*)?метки\s+(не\s+совпа\w*|расходятся|не\s+сходятся)", re.I)
+MARKS_YES_RE = re.compile(r"^\s*(механик:\s*)?метки\s+(совпа\w*|сошлись|сходятся)", re.I)
+MARKS_CODES = {"F08"}
+CLOSE_OK_RE = re.compile(r"(?i)(?<![нН]е\s)(?<![нН]е)\bисправ(ен|на|но|ны)\b|проверк\w*\s+(можно\s+)?(закры|заверш)\w*|можно\s+(выпуска\w*|эксплуатир\w*)|вернуть\s+на\s+линию")
 CANCEL_RE = re.compile(r"^\s*(отмен\w*|не надо|не отправля\w*|отбой|bekor|бекор|болдырма\w*|hủy|रद्द)", re.I)
 NEXT_RE = re.compile(r"^\s*(готово|сделал\w*|сделано|дальше|следующ\w*|далее|tayyor|keyingi\w*|тайёр|дайын|келесі|xong|tiếp|हो गया|अगला)[\s.!]*$", re.I)
 REPEAT_RE = re.compile(r"^\s*(повтори\w*|ещё раз|еще раз|takrorla\w*|такрор\w*|қайтала\w*|lặp lại|दोहरा\w*)[\s.!]*$", re.I)
@@ -131,6 +139,7 @@ class Conv:
     preface: str = ""
     contra: list = field(default_factory=list)  # known manual contradictions matched by the current question
     no_instruction: Optional[str] = None  # defect-check recommendation when the manual has no applicable repair
+    hold_ticket: bool = False  # this turn: marks matched -> no ticket, the check stays open
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -805,6 +814,10 @@ class Agent:
         why_not = policy.ticket_refusal(ch, c.vehicle)
         if why_not:
             return {"error": f"Заявку создать нельзя: {why_not}."}
+        if c.hold_ticket:
+            return {"error": "Заявку сейчас не оформляем: метки угла опережения совпали, ранний впрыск не подтверждён. Проверка остаётся открытой — "
+                             "назови механику следующие причины и проверки по руководству."}
+        marks = self.marks_state(c)
         ops, e1 = self._verify_items(c, args.get("operations") or [], "работа")
         parts, e2 = self._verify_items(c, args.get("spare_parts") or [], "запчасть")
         ops, e3 = applicability.repair_ops(ops, ch.anomaly_type, c.frags)
@@ -828,7 +841,8 @@ class Agent:
         req = TicketRequest(vehicle_id=ch.vehicle_id, session_id=ch.session_id, anomaly_type=ch.anomaly_type, conclusion=pii.mask(conclusion),
                             urgency=u, operations=[o["text"] for o in ops], spare_parts=[p["text"] for p in parts], references=refs)
         c.draft = {"id": uuid.uuid4().hex[:8], "request": req.model_dump(mode="json"), "operations": ops, "spare_parts": parts, "urgency_basis": why,
-                   "requires_inspection": bool(policy.doubt_flags(ch)), "rejected": e1 + e2 + e3,
+                   "requires_inspection": bool(policy.doubt_flags(ch)) and marks != "mismatch", "rejected": e1 + e2 + e3,
+                   "inspection": "осмотр: метки угла опережения впрыскивания не совпадают (отметка механика)" if marks == "mismatch" else None,
                    "prohibition": ban, "urgency_options": policy.URGENCY_MEANING_FULL}
         return {"draft_ready": True, "urgency": u.value, "urgency_ru": URG_RU.get(u.value, u.value), "operations": len(ops), "spare_parts": len(parts), "rejected": e1 + e2,
                 "requires_inspection": c.draft["requires_inspection"], "note": "Черновик показан механику, он подтвердит отправку кнопкой."}
@@ -948,6 +962,13 @@ class Agent:
             for k in c.contra:
                 if not any(cd.get("kind") == "contradiction" for cd in turn.cards):
                     turn.cards.append(contradictions.card(k))
+            if c.hold_ticket and turn.text:  # marks matched: never «исправно» / «проверку можно закрыть» (organizers 27.11)
+                kept = [ln for ln in turn.text.split("\n") if not CLOSE_OK_RE.search(ln)]
+                if len(kept) != len(turn.text.split("\n")):
+                    turn.tools.append({"tool": "marks_guard", "removed": True})
+                turn.text = "\n".join(kept).strip()
+                turn.cards = [cd for cd in turn.cards if cd.get("kind") != "ticket_draft"]
+                c.draft = None
             if c.preface:  # deterministic part (e.g. triage order by the TZ urgency rules), not subject to LLM grounding
                 turn.text = c.preface + ("\n\n" + turn.text if turn.text else "")
                 c.preface = ""
@@ -1052,6 +1073,63 @@ class Agent:
             return None
         return {"kind": kind, "text": "\n".join(lines), "repair_id": r["id"] if r else None, "step": (r["current"] if r else None)}
 
+    def marks_applicable(self, c: Conv) -> bool:
+        ch = c.check
+        return bool(c.vehicle and ch and ch.status == CheckStatus.anomaly and ch.anomaly_type in MARKS_CODES)
+
+    def marks_state(self, c: Conv) -> str | None:
+        """Latest timing-marks result saved for this vehicle and check: 'match' | 'mismatch' | None (kept in the store: survives instances)."""
+        if not self.marks_applicable(c):
+            return None
+        for h in self.store.handoffs(vehicle_id=c.vehicle.vehicle_id, limit=50):
+            pl = h.get("payload") or {}
+            if h.get("kind") == "inspection" and pl.get("marks") and pl.get("session_id") == c.check.session_id:
+                return pl["marks"]
+        return None
+
+    def record_marks(self, c: Conv, user: dict, matched: bool, note: str = "") -> int:
+        """Save the mechanic's timing-marks result as an inspection record (no measured angle needed)."""
+        finding = "метки совпали" if matched else "метки не совпадают"
+        item = {"component": "Метки угла опережения впрыскивания топлива", "finding": finding,
+                "severity": "внимание" if matched else "дефект", "source": "заметка", "confirmed": True}
+        payload = {"items": [item], "marks": "match" if matched else "mismatch", "session_id": c.check.session_id,
+                   "anomaly_type": c.check.anomaly_type, "check_open": True}
+        summary = f"Сверка меток угла опережения: {finding} ({c.vehicle.vehicle_id}, {c.check.session_id})"
+        hid = self.store.add_handoff(user.get("id") or c.uid, c.vehicle.vehicle_id, "inspection", pii.mask(note)[:500], summary, payload)
+        self.store.audit(user_id=user.get("id") or c.uid, role=user.get("role") or "mechanic", vehicle_id=c.vehicle.vehicle_id,
+                         action="inspection_marks", output=finding, ok=1)
+        return hid
+
+    def _marks_turn(self, c: Conv, user: dict, matched: bool, turn: Turn) -> str:
+        """Record the result and build the LLM instruction for the next step (with prefetched pages)."""
+        hid = self.record_marks(c, user, matched)
+        turn.tools.append({"tool": "inspection_marks", "ok": True, "id": hid, "marks": "match" if matched else "mismatch"})
+        if matched:
+            c.hold_ticket = True
+            c.draft = None
+            c.preface = ("**Результат записан: метки угла опережения совпали.** Проверка не закрыта: диагностика показала отклонение "
+                         "топливоподачи в целом, а ранний впрыск — только одна из причин стука. Заявку пока не оформляем.")
+            qs = [f"{c.check.anomaly_title} стук жёсткая работа причины способы устранения", "неисправности топливной аппаратуры причины форсунки ТНВД"]
+            ask = ("Механик сверил метки угла опережения впрыскивания: метки СОВПАЛИ (результат уже записан). Ранний впрыск этой проверкой не подтверждён, "
+                   "но диагностика показала отклонение по топливоподаче в целом, а ранний впрыск — лишь одна из причин стука по руководству. "
+                   "НЕ пиши, что двигатель исправен или что проверку можно закрыть; заявку не предлагай и prepare_ticket не вызывай. "
+                   "Назови до 3 других причин по руководству этого двигателя и следующие проверки по порядку, каждую с меткой [S#].")
+        else:
+            qs = ["установка угла опережения впрыскивания топлива регулировка 5.12.1"]
+            ask = ("Механик сверил метки угла опережения впрыскивания: метки НЕ СОВПАДАЮТ (результат осмотра записан; измеренное значение угла не нужно и не спрашивай его). "
+                   "Это подтверждает ранний впрыск. Подготовь черновик заявки на регулировку угла опережения впрыскивания по п. 5.12.1 руководства: "
+                   "вызови prepare_ticket, работа — с меткой S# и дословной цитатой из фрагмента. Механик отдельно подтвердит отправку кнопкой.")
+        pre: list[dict] = []
+        for q in qs:
+            r = self.tool_search_manual(c, q, k=4)
+            turn.tools.append({"tool": "search_manual", "args": {"query": q}, "ok": True, "auto": True,
+                               "hits": [f"{f['label']}:{f['document']} стр.{f['pdf_page']}" for f in r["fragments"]]})
+            pre += [f for f in r["fragments"] if f["label"] not in {x["label"] for x in pre}]
+        if pre:
+            ask += "\n\nФРАГМЕНТЫ РУКОВОДСТВА ЭТОГО ДВИГАТЕЛЯ (уже найдены):\n\n" + "\n\n".join(
+                f"[{f['label']}] {f['document']}, стр. PDF {f['pdf_page']}\n{f['text'][:1300]}" for f in pre[:6])
+        return ask
+
     def answer_actions(self, c: Conv, turn: Turn, intents: set[str]) -> list[dict]:
         """Buttons under an answer, from the conversation state (+ what the LLM tried to offer in words).
         kind=send: post `text` as the mechanic's message; open: page viewer; handoff: handoff sheet."""
@@ -1068,6 +1146,11 @@ class Agent:
             out.append({"id": "next_step", "kind": "send", "label": "Следующий шаг", "text": "Готово, следующий шаг"})
         elif c.draft:
             out.append({"id": "confirm_ticket", "kind": "send", "label": "Подтвердить заявку", "text": "Подтверждаю заявку"})
+        elif c.hold_ticket:
+            pass  # marks matched: the check stays open, no ticket button
+        elif not has_ticket and self.marks_applicable(c) and self.marks_state(c) is None:
+            out.append({"id": "marks_mismatch", "kind": "send", "label": "Метки не совпадают", "text": "Метки не совпадают"})
+            out.append({"id": "marks_match", "kind": "send", "label": "Метки совпали", "text": "Метки совпали"})
         elif status == "anomaly" and not has_ticket and policy.may_create_ticket(c.check, c.vehicle):
             out.append({"id": "create_ticket", "kind": "send", "label": "Создать заявку", "text": "Создать заявку на дефектовку"})
         elif has_ticket and ("repair" in intents or status == "anomaly"):
@@ -1092,6 +1175,8 @@ class Agent:
             t = self.briefing.route(c, user, raw, turn)  # deterministic: last scanned truck, insights, ticket + assignment
             if t is not None:
                 return t
+        marks_turn = False
+        c.hold_ticket = False
         masked = raw  # depersonalized reversibly in Llm.chat right before it leaves the server (pii.Masker): the answer keeps the names
         if event == "expand":
             return self._expand(c, user, raw, turn)
@@ -1127,6 +1212,9 @@ class Agent:
                 c.draft = None
                 turn.text = "Заявка отменена, в ТОиР ничего не отправлено."
                 return turn
+            if self.marks_applicable(c) and (MARKS_NO_RE.match(raw) or MARKS_YES_RE.match(raw)):
+                masked = self._marks_turn(c, user, bool(MARKS_YES_RE.match(raw)), turn)
+                marks_turn = True
             if self.store.repair_open(c.vehicle.vehicle_id) and (NEXT_RE.match(raw) or REPEAT_RE.match(raw)):
                 res = self.repair_action(c, "done") if NEXT_RE.match(raw) else self.repair_action(c, "note", "")
                 card = self.repair_card(c.vehicle.vehicle_id)
@@ -1169,7 +1257,7 @@ class Agent:
                       "если в них нет нужного — сделай не более одного дополнительного поиска.\n\n" + frag_txt)
         if image_note:
             masked = (masked + "\n" if masked else "") + ("[Материал от механика (не ML-диагноз), описание: " + image_note + "]")
-        ticket_ask = bool(c.vehicle and c.check and c.check.status == CheckStatus.anomaly and TICKET_RE.search(raw or "") and not c.draft)
+        ticket_ask = bool(c.vehicle and c.check and c.check.status == CheckStatus.anomaly and TICKET_RE.search(raw or "") and not c.draft and not marks_turn)
         if ticket_ask:
             c.no_instruction = None
             refusal = policy.ticket_refusal(c.check, c.vehicle)
@@ -1182,12 +1270,12 @@ class Agent:
                                            "отправка в ТОиР — только после его подтверждения.)")
         if not self.llm.available:
             return self._fallback(c, masked, turn)
-        if (self.facts_pass and c.vehicle and not manager and not orig_event and raw and not ticket_ask and not image_note
+        if (self.facts_pass and c.vehicle and not manager and not orig_event and raw and not ticket_ask and not image_note and not marks_turn
                 and not c.draft and not PREFETCH_SKIP.search(raw)):
             t = self._two_pass(c, user, raw, turn)
             if t is not None:
                 return t
-        if c.vehicle and not event and raw and (ticket_ask or not PREFETCH_SKIP.search(raw)):
+        if c.vehicle and not event and raw and not marks_turn and (ticket_ask or not PREFETCH_SKIP.search(raw)):
             # Retrieval before the first LLM call: the model usually answers in ONE round instead of
             # "decide to search" + "answer" (≈ half the latency). It may still search again if fragments do not fit.
             # For a ticket request the procedures for the current fault are prefetched, so prepare_ticket gets quotes at once.

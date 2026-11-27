@@ -189,7 +189,7 @@ function md(text, sources) {
   flushP(); flushL();
   return onePageCites(out);
 }
-const ACT_ICON = {create_ticket: "file-text", confirm_ticket: "check", next_step: "check", start_repair: "wrench", show_section: "book-open", handoff: "forward"};
+const ACT_ICON = {marks_mismatch: "x", marks_match: "check", create_ticket: "file-text", confirm_ticket: "check", next_step: "check", start_repair: "wrench", show_section: "book-open", handoff: "forward"};
 function answerActionsHtml(actions) {
   if (!actions || !actions.length) return "";
   return `<div class="answer-actions">` + actions.map((a, i) => `<button class="btn sm ${i === 0 && a.kind === "send" ? "primary" : "ghost"}" data-ai="${i}">${icon(ACT_ICON[a.id] || "chevron-right", 16)}<span>${esc(t("act_" + a.id) !== "act_" + a.id ? t("act_" + a.id) : a.label)}</span></button>`).join("") + `</div>`;
