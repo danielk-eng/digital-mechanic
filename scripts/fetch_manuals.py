@@ -53,6 +53,11 @@ def _stream(url: str, dst: Path) -> None:
 
 
 def _yandex_href(y: dict) -> str:
+    # the organizers' folder link lives in the environment only (organizers 27.11), not in the manifest / code
+    key = os.environ.get("TASK_MATERIALS_URL", "").strip() or y.get("public_key", "")
+    if not key:
+        raise RuntimeError("set TASK_MATERIALS_URL (organizers' materials folder link)")
+    y = {**y, "public_key": key}
     items = httpx.get(YA_API, params={"public_key": y["public_key"], "limit": 200}, timeout=30).json()["_embedded"]["items"]
     it = next(i for i in items if i["name"] == y["name"])
     return httpx.get(YA_API + "/download", params={"public_key": y["public_key"], "path": it["path"]}, timeout=30).json()["href"]

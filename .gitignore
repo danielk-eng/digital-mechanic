@@ -31,6 +31,12 @@ data/extra/images/
 *.sqlite
 *.part
 *.zip
+# Task materials (organizers 27.11): stub archive (ML / TOiR mocks + their data) and vehicle cards are not committed;
+# the stand downloads them at deploy time from TASK_MATERIALS_URL (scripts/fetch_task_materials.py). Our Dockerfile stays.
+*.pdf
+data/official/
+vendor/neurodvs_mock/*
+!vendor/neurodvs_mock/Dockerfile
 # KAMAZ manual from an unofficial mirror: excluded by owner decision 26.11
 *kamaz*
 *KAMAZ*

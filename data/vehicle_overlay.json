@@ -1,0 +1,6 @@
+{
+ "about": "Our additions on top of the organizers' vehicle cards (applied by scripts/fetch_task_materials.py). The cards themselves are task materials and are not in git.",
+ "fill_model": [
+  {"make": "МАЗ", "engine_model": "ЯМЗ-536", "model": "МАЗ-5340С2", "why": "в карточках model=null; по ЯМЗ-536 у МАЗ — 5340С2 (подбор руководства на автомобиль, docs/ПУБЛИКАЦИЯ.md)"}
+ ]
+}

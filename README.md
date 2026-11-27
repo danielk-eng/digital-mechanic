@@ -25,9 +25,18 @@
 
 ## Запуск за 5 минут
 
+Материалы задачи (заглушки ML/ТОиР, карточки машин, PDF руководств) в репозиторий не входят (требование организаторов 27.11).
+Стенд скачивает их при развёртывании по ссылке из переменной окружения `TASK_MATERIALS_URL` (публичная папка
+организаторов на Яндекс Диске или прямой URL архива заглушек):
+```bash
+cp .env.example .env                                   # вписать LLM_API_KEY и TASK_MATERIALS_URL
+set -a; . ./.env; set +a
+python scripts/fetch_task_materials.py                 # -> vendor/neurodvs_mock/, data/official/
+python scripts/fetch_manuals.py                        # PDF руководств -> data/manuals/, индексы data/index/
+```
+
 ### Docker (рекомендуется)
 ```bash
-cp .env.example .env          # вписать LLM_API_KEY (и, по желанию, DEEPGRAM_API_KEY)
 docker compose up -d --build  # официальные заглушки ML (8001) и ТОиР (8002) + приложение
 # открыть http://localhost:8000   (главный механик: http://localhost:8000/manager)
 ```
@@ -142,4 +151,4 @@ FastAPI, Uvicorn, Pydantic, httpx, openai-python, pypdf, PyYAML, snowballstemmer
 (GPL, вызывается как внешняя программа для текста и картинок страниц); опционально faster-whisper (MIT), Silero TTS
 (лицензия CC BY-NC-SA — только для некоммерческого демо), Opik (Apache-2.0). Внешние API: TokenRouter (LLM), Deepgram (STT).
 Интерфейс: шрифт Inter (SIL OFL 1.1, локально в `web/static/fonts/`), иконки Lucide (ISC, подмножество в `web/static/icons.js`).
-Заглушки ML/ТОиР в `vendor/neurodvs_mock/` — материалы Заказчика без изменений (добавлен только Dockerfile).
+Заглушки ML/ТОиР в `vendor/neurodvs_mock/` — материалы Заказчика, в git их нет: `scripts/fetch_task_materials.py` скачивает архив по `TASK_MATERIALS_URL` без изменений кода; в git только наш Dockerfile и `data/vehicle_overlay.json` (модель МАЗ-5340С2 там, где в карточке model=null).

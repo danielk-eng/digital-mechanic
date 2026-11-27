@@ -979,7 +979,8 @@ class Agent:
                     self.prefetch_expand(c, user, turn.text)
             return turn
 
-    _NO_DATA = re.compile(r"(?i)в руководстве[^.\n]{0,40}(данных|информации|сведений) нет|данных не нашёл")
+    _NO_DATA = re.compile(r"(?i)в руководстве[^.\n]{0,40}(данных|информации|сведений) нет|данных не нашёл"
+                          r"|в руководстве (для|на) [^.\n]{0,120}\sнет(?=[\s.,;:—-])")
 
     def _log_gap(self, c: Conv, user: dict, question: str, turn: Turn) -> None:
         """Day-2 briefing: «no data» or a contradiction -> an automatic item for the chief / admin («пробел в базе»):
