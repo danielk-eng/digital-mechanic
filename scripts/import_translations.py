@@ -137,7 +137,7 @@ def main():
             d = json.loads(ip.read_text(encoding="utf-8"))
             for l in langs:
                 d.setdefault(l, {}).update(ui[l])
-            ip.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+            ip.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")  # same layout as the file
     (src_dir / "import_report.md").write_text("\n".join(rep) + "\n", encoding="utf-8")
     print("\n".join(rep[:4 + len(langs)]))
     return 0 if a.force or not any(rej[l] for l in langs) else 1
