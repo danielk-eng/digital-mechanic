@@ -1610,18 +1610,20 @@ class Agent:
         n = len(ops)
         works = "работа" if n % 10 == 1 and n % 100 != 11 else "работы" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "работ"
         basis = d.get("urgency_basis") or []
-        basis = "; ".join(basis) if isinstance(basis, list) else str(basis)
+        # «итог: …; окончательный приоритет выбирает механик» repeated the level and the card (10 lines at 390 px, read aloud
+        # in the voice dialog): the level's meaning goes after the level, the basis keeps its reasons only
+        basis = "; ".join(b for b in basis if not str(b).startswith("итог:")) if isinstance(basis, list) else str(basis)
         m = len(parts)
         pw = "запчасть" if m % 10 == 1 and m % 100 != 11 else "запчасти" if m % 10 in (2, 3, 4) and m % 100 not in (12, 13, 14) else "запчастей"
         # The page chips get a short line of their own (at 390 px they wrapped under a long first line, a lone «с. 53» there)
         out = [f"Черновик заявки на дефектовку готов: {n} {works}" + (f" и {m} {pw}" if parts else "") + "."]
         if labs:
             out.append("Взято из руководства: " + " ".join(f"[{l}]" for l in labs))  # no dot after the chips
-        out += [f"Приоритет — {URG_RU.get(u, u)}." + (f" Основание: {basis.rstrip('.')}." if basis else "")]
+        out += [f"Приоритет — {policy.URGENCY_MEANING_FULL.get(u) or URG_RU.get(u, u)}." + (f" Основание: {basis.rstrip('.')}." if basis else "")]
         if d.get("requires_inspection"):
             out.append("Результат проверки под сомнением — перед отправкой " + ("подтверди" if ty else "подтвердите") + " неисправность осмотром.")
-        out.append("Проверь карточку и подтверди отправку в ТОиР — без подтверждения ничего не уходит." if ty else
-                   "Проверьте карточку и подтвердите отправку в ТОиР — без подтверждения ничего не уходит.")
+        out.append("Проверь карточку (приоритет можно поменять) и подтверди отправку в ТОиР — без подтверждения ничего не уходит." if ty else
+                   "Проверьте карточку (приоритет можно поменять) и подтвердите отправку в ТОиР — без подтверждения ничего не уходит.")
         return "\n".join(out)
 
     def draft_card(self, c: Conv) -> dict:
