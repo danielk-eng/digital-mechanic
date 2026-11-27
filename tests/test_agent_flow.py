@@ -45,6 +45,9 @@ def test_agent_picks_tools_and_ticket_goes_through_gate(make_agent):
     assert turn.tools[0]["auto"]  # procedures for the current fault prefetched for the ticket
     assert c.draft and len(c.draft["operations"]) == 1 and c.draft["rejected"]
     assert any(cd["kind"] == "ticket_draft" for cd in turn.cards)
+    # no third LLM round to retell the card: the text is built from the verified draft, with its page label
+    assert len(a.llm.calls) == 2 and turn.text.startswith("Черновик заявки на дефектовку готов: 1 работа")
+    assert "Приоритет —" in turn.text and "[S" in turn.text and turn.sources
     assert a.toir.sent == []  # nothing sent before confirmation
     turn2 = a.handle(c, {"lang": "ru"}, "Подтверждаю")
     assert "TKT-" in turn2.text and len(a.toir.sent) == 1

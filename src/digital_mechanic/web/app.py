@@ -1746,8 +1746,17 @@ def eng_companies(uid: str | None = Cookie(None)) -> dict:
             "all_vehicles": AGENT.fleet.all_ids()}
 
 
+class CleanupIn(BaseModel):
+    """Audit leftovers: everything one account wrote since the audit started (tickets, handoffs), optionally one vehicle."""
+    since: float | None = None
+    user_id: str = ""
+    vehicle_id: str = ""
+    keep_ticket_ids: list[str] = []
+    keep_handoff_ids: list[int] = []
+
+
 @app.post("/api/eng/cleanup-test-data")
-def eng_cleanup_test_data(uid: str | None = Cookie(None)) -> dict:
+def eng_cleanup_test_data(body: CleanupIn | None = None, uid: str | None = Cookie(None)) -> dict:
     """Load-test leftovers off the chief's dashboard (Vercel 26.11: 40 «race-222019-3» handoffs from handoff_race.py and
     TKT-0001/TKT-0002 three times each — the embedded TOiR mock restarted numbering before 8d2a2cd). Deletes handoffs whose
     note is a race marker and, for a ticket number seen more than once, every copy but the newest. Engineer only; the
@@ -1760,8 +1769,24 @@ def eng_cleanup_test_data(uid: str | None = Cookie(None)) -> dict:
                   " AND (u.ts > t.ts OR (u.ts = t.ts AND u.id > t.id)))")
     for r in dup:
         STORE.x("DELETE FROM tickets WHERE id=?", (r["id"],))
-    STORE.audit(user_id=me_["id"], role=me_["role"], action="cleanup_test_data", input=f"handoffs {len(race)}, tickets {len(dup)}", ok=1)
-    return {"handoffs_deleted": len(race), "tickets_deleted": len(dup)}
+    out = {"handoffs_deleted": len(race), "tickets_deleted": len(dup)}
+    if body and body.since is not None:
+        # audit_iter_*.py runs C1 as the demo mechanic: its tickets and handoffs (TKT-0001…0009 on M333YK47 by 27.11) are
+        # removed after the run; the account is required so nobody else's records go
+        if not body.user_id:
+            raise HTTPException(400, "user_id")
+        cond, args = "ts >= ? AND user_id = ?", [body.since, body.user_id]
+        if body.vehicle_id:
+            cond += " AND vehicle_id = ?"; args.append(body.vehicle_id)
+        tk = [r for r in STORE.q(f"SELECT id, ticket_id FROM tickets WHERE {cond}", tuple(args)) if r["ticket_id"] not in body.keep_ticket_ids]
+        hd = [r for r in STORE.q(f"SELECT id FROM handoffs WHERE {cond}", tuple(args)) if r["id"] not in body.keep_handoff_ids]
+        for r in tk:
+            STORE.x("DELETE FROM tickets WHERE id=?", (r["id"],))
+        for r in hd:
+            STORE.x("DELETE FROM handoffs WHERE id=?", (r["id"],))
+        out["audit_tickets_deleted"], out["audit_handoffs_deleted"] = len(tk), len(hd)
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="cleanup_test_data", input=json.dumps(out), ok=1)
+    return out
 
 
 @app.post("/api/eng/companies")

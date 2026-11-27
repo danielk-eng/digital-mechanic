@@ -33,6 +33,15 @@ from .prompts import DETAIL, EXPAND_PROMPT, EXPAND_SYSTEM, EXPERIENCE, MANAGER_S
 URG_RU = {"high": "высокий", "medium": "средний", "low": "низкий"}
 
 
+def work_of_quote(quote: str) -> str:
+    """«Ранний впрыск топлива в цилиндры — Отрегулировать угол опережения» -> «Отрегулировать угол опережения»
+    (fault-table row: the remedy after the dash); a plain sentence -> itself, capitalised, without the final dot."""
+    q = re.sub(r"\s+", " ", quote or "").strip(" .;")
+    parts = re.split(r"\s[—–]\s", q)
+    w = parts[-1].strip() if len(parts) > 1 and len(parts[-1]) > 6 else q
+    return (w[:1].upper() + w[1:])[:200]
+
+
 # requests that are actions (ticket, repair, diagnosis, history) — no manual prefetch before the LLM call
 PREFETCH_SKIP = re.compile(r"заявк|дефектовк|начать ремонт|начни ремонт|ремонт по шагам|истори|результат|получи\w* диагноз|главн\w* механик|"
                            r"сколько машин|подтвержда|отмен|^\s*(да|нет|ок|спасибо)[\s.!]*$", re.I)
@@ -49,11 +58,11 @@ TOOLS_MECHANIC = [
      "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "запрос по-русски терминами руководства"}}, "required": ["query"]}}},
     {"type": "function", "function": {"name": "get_vehicle_history", "description": "История проверок, заявок и ремонтов этой машины, динамика anomaly_score.",
      "parameters": {"type": "object", "properties": {}, "required": []}}},
-    {"type": "function", "function": {"name": "prepare_ticket", "description": "Подготовить черновик заявки на дефектовку в ТОиР (только по просьбе механика). Каждая работа и запчасть — с меткой фрагмента S# и дословной цитатой из него. Приоритет считает система.",
+    {"type": "function", "function": {"name": "prepare_ticket", "description": "Подготовить черновик заявки на дефектовку в ТОиР (только по просьбе механика). Каждая работа и запчасть — метка фрагмента S# и дословная цитата: строка таблицы «причина — способ устранения» или фраза с действием; формулировку работы система берёт из цитаты (text — только если цитата не называет действие). Приоритет считает система.",
      "parameters": {"type": "object", "properties": {
-         "conclusion": {"type": "string", "description": "диагноз для заявки, 1-2 предложения по-русски"},
-         "operations": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "source": {"type": "string"}, "quote": {"type": "string"}}, "required": ["text", "source", "quote"]}},
-         "spare_parts": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "source": {"type": "string"}, "quote": {"type": "string"}}, "required": ["text", "source", "quote"]}}},
+         "conclusion": {"type": "string", "description": "диагноз для заявки, одно предложение по-русски"},
+         "operations": {"type": "array", "items": {"type": "object", "properties": {"source": {"type": "string"}, "quote": {"type": "string"}, "text": {"type": "string"}}, "required": ["source", "quote"]}},
+         "spare_parts": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "source": {"type": "string"}, "quote": {"type": "string"}}, "required": ["source", "quote"]}}},
          "required": ["conclusion", "operations", "spare_parts"]}}},
     {"type": "function", "function": {"name": "start_repair", "description": "Начать ремонт по шагам: план из 3-12 шагов по руководству этого двигателя, каждый шаг с меткой S# и дословной цитатой.",
      "parameters": {"type": "object", "properties": {"title": {"type": "string"},
@@ -690,6 +699,7 @@ class Agent:
         ok, errs = [], []
         for it in items or []:
             lab, quote, text = str(it.get("source", "")).strip("[] "), str(it.get("quote", "")), str(it.get("text", "")).strip()
+            text = text or work_of_quote(quote)  # the draft asks for quotes only (half the tokens): the work is the remedy part
             f = c.frags.get(lab)
             if not text:
                 continue
@@ -1010,10 +1020,19 @@ class Agent:
                     break
                 messages.append({"role": "assistant", "content": msg.content or "", "tool_calls": [
                     {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in calls]})
+                drafted = False
                 for tc in calls:
                     res = self._run_tool(c, user, tc.function.name, tc.function.arguments, turn)
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(res, ensure_ascii=False)[:12000]})
-            answer = self._verify_answer(c, messages, answer, turn)
+                    drafted = drafted or (tc.function.name == "prepare_ticket" and bool(res.get("draft_ready")))
+                if drafted and c.draft:
+                    # The draft card is the answer: no extra LLM round to retell it (Vercel 26.11: 20–30 s per draft,
+                    # a third of it the model paraphrasing the card). The text is built from the verified draft.
+                    answer = self._draft_text(c, ty=(re.search(r"(?i)на «(ты|вы)»", messages[0]["content"]) or [None, "вы"])[1] == "ты")
+                    turn.tools.append({"tool": "draft_text", "auto": True})
+                    break
+            if not any(t["tool"] == "draft_text" for t in turn.tools):
+                answer = self._verify_answer(c, messages, answer, turn)
         except LlmUnavailable as e:
             turn.ok = False
             turn.tools.append({"tool": "llm", "error": str(e)})
@@ -1231,6 +1250,25 @@ class Agent:
             else:
                 out.append({"text": o.get("text"), "norm": None})
         return out
+
+    def _draft_text(self, c: Conv, ty: bool = False) -> str:
+        """Short text over the verified draft (the card lists the works): how many, from which pages, priority with its basis, next step."""
+        d = c.draft
+        u = (d.get("request") or {}).get("urgency") or ""
+        ops, parts = d.get("operations") or [], d.get("spare_parts") or []
+        labs = list(dict.fromkeys(it["label"] for it in ops + parts if it.get("label")))
+        n = len(ops)
+        works = "работа" if n % 10 == 1 and n % 100 != 11 else "работы" if n % 10 in (2, 3, 4) and n % 100 not in (12, 13, 14) else "работ"
+        basis = d.get("urgency_basis") or []
+        basis = "; ".join(basis) if isinstance(basis, list) else str(basis)
+        out = [f"Черновик заявки на дефектовку готов: {n} {works}" + (f", запчастей: {len(parts)}" if parts else "") + " с цитатами из руководства "
+               + " ".join(f"[{l}]" for l in labs) + ".",
+               f"Приоритет — {URG_RU.get(u, u)}" + (f" ({basis.rstrip('.')})." if basis else ".")]
+        if d.get("requires_inspection"):
+            out.append("Результат проверки под сомнением — перед отправкой " + ("подтверди" if ty else "подтвердите") + " неисправность осмотром.")
+        out.append("Проверь карточку и подтверди отправку в ТОиР — без подтверждения ничего не уходит." if ty else
+                   "Проверьте карточку и подтвердите отправку в ТОиР — без подтверждения ничего не уходит.")
+        return "\n".join(out)
 
     def draft_card(self, c: Conv) -> dict:
         d = c.draft

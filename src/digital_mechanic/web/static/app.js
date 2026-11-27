@@ -534,10 +534,15 @@ async function chatStream(payload, onLine) {
   if (!fin) { const e = new Error("stream ended"); e.stream = true; throw e; }
   return fin;
 }
+// Ticket draft (10–20 s on the free model): the same stream, timed stages say what is going on instead of one «думаю».
+const TICKET_STAGES = [[0, "📖 Подбираю работы по руководству для этой неисправности"], [4, "📝 Составляю черновик заявки с цитатами"], [9, "🔎 Сверяю каждую цитату со страницей"], [15, "⚖️ Считаю приоритет по результату проверки"]];
+const TICKET_ASK = /заявк|дефектовк/i;
 async function ask(text, event = null, sources = null) {
   if (BUSY) return null; BUSY = true;
-  const streamIt = event === "expand" && window.ReadableStream && window.TextDecoder;
-  const th = skeleton(streamIt ? trStep(EXPAND_STAGES[0][1]) : ""), t0 = Date.now();
+  const ticketIt = !event && TICKET_ASK.test(text || "") && !/подтвер/i.test(text) && !(LAST_DRAFT && LAST_DRAFT.vid === VID);
+  const stages = ticketIt ? TICKET_STAGES : EXPAND_STAGES;
+  const streamIt = (event === "expand" || ticketIt) && window.ReadableStream && window.TextDecoder;
+  const th = skeleton(streamIt ? trStep(stages[0][1]) : ""), t0 = Date.now();
   let live = false;  // the stream delivered steps/lines: no /api/progress poll
   const showDraft = draft => {
     if (!draft || draft === th.dataset.draft || !th.isConnected) return;  // live lines already checked against the manual (numbers), replaced by the final answer
@@ -551,7 +556,7 @@ async function ask(text, event = null, sources = null) {
     if (!live) { try { const p = await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`); steps = p.steps || []; draft = p.draft || ""; } catch (_) {} }
     if (!th.isConnected) return;
     const el = th.querySelector(".ptext");
-    if (el && streamIt && !steps.length && !th.dataset.sstep) { const st = EXPAND_STAGES.filter(x => sec >= x[0]).pop(); el.dataset.step = trStep(st[1]); }  // stage text when nothing arrives
+    if (el && streamIt && !steps.length && !th.dataset.sstep) { const st = stages.filter(x => sec >= x[0]).pop(); el.dataset.step = trStep(st[1]); }  // stage text when nothing arrives
     if (el) { if (steps.length) el.dataset.step = trStep(steps[steps.length - 1]); el.textContent = `${th.dataset.draft ? t("writing") : (el.dataset.step || t("thinking"))} · ${sec} ${t("sec")}`; }
     showDraft(draft);
     if (VOICE.on && steps.length) $("#vHint").textContent = steps[steps.length - 1];
@@ -563,7 +568,7 @@ async function ask(text, event = null, sources = null) {
       try {
         r = await chatStream(payload, m => {
           live = true; const el = th.querySelector(".ptext");
-          if (m.step && el && !m.step.startsWith("📖")) { th.dataset.sstep = 1; el.dataset.step = trStep(m.step); }  // «re-reading the pages» steps: keep the timed stages going
+          if (m.step && el && !ticketIt && !m.step.startsWith("📖")) { th.dataset.sstep = 1; el.dataset.step = trStep(m.step); }  // ticket: the tool steps come at the very end, the timed stages tell more  // «re-reading the pages» steps: keep the timed stages going
           if (m.draft) showDraft(m.draft);
         });
       } catch (e) { if (!e.stream) throw e; r = null; }  // the stream itself failed (proxy, old server): ask the plain way
