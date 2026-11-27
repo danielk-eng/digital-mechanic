@@ -32,7 +32,7 @@ def test_fallback_and_reasoning_stripped(monkeypatch):
     monkeypatch.setattr(l, "_create", create); monkeypatch.setattr("time.sleep", lambda *_: None)
     msg, _ = l.chat("t", [{"role": "user", "content": "q"}])
     assert msg.content == "Ответ"
-    assert [c[0] for c in calls] == ["cloudru", "cloudru", "tokenrouter"]
+    assert [c[0] for c in calls] == ["cloudru", "tokenrouter"]  # one attempt, then the other provider (V t564u: latency cap)
     assert calls[0][1] == l.s.cloudru_model and not calls[0][2] and calls[-1][2]  # thinking switch only for TokenRouter
 
 

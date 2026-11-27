@@ -957,11 +957,18 @@ class Agent:
             finally:
                 self.progress.pop(snap.cid, None); self.drafts.pop(snap.cid, None)
 
+        from .llm import REQUEST_CONV, REQUEST_FORCE_FALLBACK, REQUEST_LLM_EVENTS
+
         budget = getattr(getattr(self.llm, "s", None), "llm_turn_budget_s", 0) or 0
         tok = REQUEST_DEADLINE.set(time.time() + budget) if budget > 0 and REQUEST_DEADLINE.get() is None else None
+        events: list = []
+        toks = (REQUEST_LLM_EVENTS.set(events), REQUEST_CONV.set(c.cid), REQUEST_FORCE_FALLBACK.set(False))
         try:
-            return self._handle_locked(c, user, text, image_note, event, sources, session_id)
+            turn = self._handle_locked(c, user, text, image_note, event, sources, session_id)
+            turn.tools.extend(events)  # engineer's journal: which model answered, switches to the reserve and why
+            return turn
         finally:
+            REQUEST_LLM_EVENTS.reset(toks[0]); REQUEST_CONV.reset(toks[1]); REQUEST_FORCE_FALLBACK.reset(toks[2])
             if tok is not None:
                 REQUEST_DEADLINE.reset(tok)
 
@@ -1343,6 +1350,7 @@ class Agent:
         if not manager and not (self.extra and (c.vehicle.make or "").upper() in self.extra.makes()):
             tools = [t for t in tools if t["function"]["name"] != "search_extra_docs"]
         answer = ""
+        seen_calls: dict = {}
         try:
             for rnd in range(self.max_rounds + 1):
                 msg, tok = self.llm.chat(f"agent_r{rnd}", messages, tools=tools if rnd < self.max_rounds else None, max_tokens=4500,
@@ -1364,6 +1372,20 @@ class Agent:
                     {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}} for tc in calls]})
                 drafted = False
                 for tc in calls:
+                    sig = (tc.function.name, tc.function.arguments or "")
+                    seen_calls[sig] = seen_calls.get(sig, 0) + 1
+                    if seen_calls[sig] >= 3:  # tool-call loop: the same call a third time -> not run again, rest of the turn on the reserve
+                        from .llm import REQUEST_FORCE_FALLBACK, llm_event
+
+                        if not REQUEST_FORCE_FALLBACK.get():
+                            REQUEST_FORCE_FALLBACK.set(True)
+                            reserve = "cloudru" in self.llm.order() if hasattr(self.llm, "order") else False
+                            llm_event(tool="llm_fallback", step=f"agent_r{rnd}", **{"from": "primary"}, to="cloudru" if reserve else None,
+                                      reason=f"цикл вызовов: {tc.function.name} ×3 с теми же аргументами", skipped=not reserve,
+                                      note="" if reserve else "CLOUDRU_API_KEY не задан — резерв GigaChat-4 пропущен")
+                        messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(
+                            {"error": "Этот вызов с теми же аргументами уже был — используй полученный результат и ответь."}, ensure_ascii=False)})
+                        continue
                     res = self._run_tool(c, user, tc.function.name, tc.function.arguments, turn)
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(res, ensure_ascii=False)[:12000]})
                     drafted = drafted or (tc.function.name == "prepare_ticket" and bool(res.get("draft_ready")))

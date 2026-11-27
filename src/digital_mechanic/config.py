@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     llm_stream: bool = True  # stream answers: time-to-first-token hedge + live verified lines in the UI
     llm_stall_s: float = 20.0  # streaming: the winning stream sent nothing for N s -> drop it and retry; 0 = off
     llm_turn_budget_s: float = 60.0  # one chat turn: model calls stop after N s, the answer falls back to manual pages; 0 = off
+    # Automatic fallback to the reserve (Cloud.ru GigaChat-4 free) when the primary fails: no first token within
+    # llm_primary_timeout_s, HTTP 5xx/429, an empty answer or degenerate output (loops, repeats). With a reserve the
+    # primary gets one attempt, so a failure costs at most ~this many seconds before the reserve starts.
+    llm_primary_timeout_s: float = 25.0
+    llm_fallback: bool = True
+    llm_repeat_similarity: float = 0.9  # consecutive answers of one step to DIFFERENT prompts this similar = a loop
     llm_hedge_ttft_s: float = 5.0  # streaming: no first token after N s -> second identical request, first to start streaming wins
     # "off" sends thinking={"type":"disabled"} (DeepSeek-style); ~4x faster answers. "on" keeps model default.
     llm_thinking: str = "off"

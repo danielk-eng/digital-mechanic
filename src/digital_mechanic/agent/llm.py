@@ -70,6 +70,56 @@ REQUEST_PRIMARY: contextvars.ContextVar[str | None] = contextvars.ContextVar("re
 REQUEST_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("request_deadline", default=None)
 # Depersonalization before the text leaves the server (per company; None = the stand setting PII_MASKING, on by default)
 REQUEST_PII: contextvars.ContextVar[bool | None] = contextvars.ContextVar("request_pii", default=None)
+# Fallback journal of the current turn (Agent.handle sets a list): which model answered, switches and why
+REQUEST_LLM_EVENTS: contextvars.ContextVar[list | None] = contextvars.ContextVar("request_llm_events", default=None)
+REQUEST_CONV: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_conv", default=None)
+# set by the agent when the primary loops on tool calls: the rest of the turn goes to the reserve first
+REQUEST_FORCE_FALLBACK: contextvars.ContextVar[bool] = contextvars.ContextVar("request_force_fallback", default=False)
+
+PROV_RU = {"tokenrouter": "DeepSeek (TokenRouter, free)", "cloudru": "GigaChat-4 (Cloud.ru, free)", "quality": "сервер «Подробнее»"}
+
+
+def llm_event(**kw: Any) -> None:
+    ev = REQUEST_LLM_EVENTS.get()
+    if ev is not None:
+        ev.append(kw)
+
+
+def degenerate_text(text: str) -> str | None:
+    """Loop inside one answer: the same line 3+ times, or one 6-word sequence repeated so that repeats cover >= 30 % of the text."""
+    t = (text or "").strip()
+    lines = [ln.strip() for ln in t.splitlines() if len(ln.strip()) >= 20]
+    if lines:
+        from collections import Counter
+
+        ln, n = Counter(lines).most_common(1)[0]
+        if n >= 3:
+            return f"строка повторяется {n} раз"
+    w = re.findall(r"\w+", t.lower())
+    if len(w) >= 36:
+        from collections import Counter
+
+        grams = Counter(tuple(w[i:i + 6]) for i in range(len(w) - 5))
+        g, n = grams.most_common(1)[0]
+        rep = sum(c - 1 for c in grams.values() if c >= 3)
+        if n >= 3 and rep / max(1, len(w) - 5) >= 0.3:
+            return f"повтор фразы «{' '.join(g)}» ×{n}"
+    return None
+
+
+def similar(a: str, b: str) -> float:
+    from difflib import SequenceMatcher
+
+    return SequenceMatcher(None, (a or "")[:2000], (b or "")[:2000]).ratio()
+
+
+def failure_reason(e: BaseException) -> str:
+    code = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
+    if code:
+        return f"HTTP {code}"
+    if isinstance(e, TimeoutError) or "Timeout" in type(e).__name__:
+        return f"таймаут ({e})" if str(e) else "таймаут"
+    return type(e).__name__
 
 
 class Llm:
@@ -79,6 +129,7 @@ class Llm:
         self.usage = Usage()
         self._lock = threading.Lock()
         self._client = None  # optional injected TokenRouter client (tests)
+        self._last: dict = {}  # (conversation, step) -> (prompt hash, answer): a loop across consecutive calls
         self._pool = None
         self._opik = None
         if s.comet_api_key:
@@ -113,7 +164,10 @@ class Llm:
             c = (country if country is not None else REQUEST_COUNTRY.get()) or ""
             ru = {x.strip().upper() for x in self.s.cloudru_countries.split(",") if x.strip()}
             prim = "cloudru" if (not c or c.upper() in ru) else "tokenrouter"
-        return sorted(have, key=lambda n: n != prim)
+        out = sorted(have, key=lambda n: n != prim)
+        if REQUEST_FORCE_FALLBACK.get() and len(out) > 1:
+            out = out[1:] + out[:1]
+        return out
 
     def _cli(self, prov: str = "tokenrouter"):
         if prov == "tokenrouter" and self._client is not None:  # injected client (tests)
@@ -203,7 +257,7 @@ class Llm:
             att.first.set()
             att.done.set()
 
-    def _race(self, kw: dict, on_text=None, prov: str = "tokenrouter", limit: float | None = None) -> Any:
+    def _race(self, kw: dict, on_text=None, prov: str = "tokenrouter", limit: float | None = None, first: float | None = None) -> Any:
         """Streamed request with a time-to-first-token hedge: if no token arrived in `llm_hedge_ttft_s`
         (the free model sometimes sits in a queue), a second identical request is sent; the first one that
         starts streaming wins and the other is cancelled. Output length no longer triggers useless duplicates."""
@@ -258,10 +312,10 @@ class Llm:
                 start()
             elif len(atts) < 3 and el > hedge * (1 if len(atts) == 1 else 2.5):
                 start()
-            if el > limit:
+            if el > limit or (first is not None and el > first):
                 for a in atts:
                     a.cancel = True
-                raise TimeoutError("llm first token timeout")
+                raise TimeoutError(f"нет первого токена за {int(min(limit, first or limit))} с")
             time.sleep(0.05)
 
     def _account(self, step: str, r: Any, dt: float, prov: str = "") -> int:
@@ -304,20 +358,27 @@ class Llm:
         if left() < 3:
             raise LlmUnavailable("turn budget")
         last: Exception | None = None
-        for prov in order:
+        conv = REQUEST_CONV.get()
+        prompt_key = hash(str(messages[-1].get("content"))[:4000]) if messages else 0
+        reserve_missing = (self.s.llm_fallback and "cloudru" not in order and not self.s.cloudru_api_key and order[0] == "tokenrouter")
+        for i, prov in enumerate(order):
+            has_next = self.s.llm_fallback and i < len(order) - 1
+            nxt = order[i + 1] if i < len(order) - 1 else None
             kw: dict[str, Any] = dict(model=(model if prov == "tokenrouter" and model else self._provider(prov)[2]),
                                       messages=messages, temperature=temperature, max_tokens=max_tokens)
             if tools:
                 kw["tools"] = tools
             if prov == "tokenrouter" and self.s.llm_thinking.lower() in ("off", "0", "false", "disabled"):
                 kw["extra_body"] = {"thinking": {"type": "disabled"}}
-            for attempt in range(2):
+            switched = False
+            for attempt in range(1 if has_next else 2):  # with a reserve: one attempt, then the reserve (latency cap)
                 lim = min(self.s.llm_timeout_s, left())
                 if lim < 3 or (attempt and lim < 8):  # no time for a useful retry: the caller answers without the model
                     raise LlmUnavailable(type(last).__name__ if last else "turn budget") from None
+                first = self.s.llm_primary_timeout_s if (has_next and self.s.llm_primary_timeout_s > 0) else None
                 try:
-                    r = (self._race(kw, on_text, prov, lim) if self.s.llm_stream
-                         else self._create({**kw, "timeout": lim}, prov))
+                    r = (self._race(kw, on_text, prov, lim, first) if self.s.llm_stream
+                         else self._create({**kw, "timeout": min(lim, first or lim)}, prov))
                     tok = self._account(step, r, time.time() - t, prov)
                     msg = r.choices[0].message
                     if getattr(msg, "content", None):
@@ -329,13 +390,51 @@ class Llm:
                             fn = getattr(tc, "function", None)
                             if fn is not None and getattr(fn, "arguments", None):
                                 fn.arguments = mk.unmask(fn.arguments)
+                    bad = self._degenerate(conv, step, prompt_key, msg)
+                    if bad and has_next:
+                        llm_event(tool="llm_fallback", step=step, **{"from": prov}, to=nxt, model=self._provider(nxt)[2], reason=bad)
+                        last, switched = RuntimeError(bad), True
+                        break
+                    if bad and reserve_missing:
+                        llm_event(tool="llm_fallback", step=step, **{"from": prov}, skipped=True, reason=bad,
+                                  note="CLOUDRU_API_KEY не задан — резерв GigaChat-4 пропущен")
+                    if conv and getattr(msg, "content", None):
+                        self._last[(conv, step)] = (prompt_key, msg.content)
+                        if len(self._last) > 5000:
+                            self._last.clear()
+                    if i > 0 or REQUEST_FORCE_FALLBACK.get():
+                        llm_event(tool="llm_answered", step=step, provider=prov, model=self._provider(prov)[2])
                     return msg, tok
                 except LlmUnavailable:
                     break
                 except Exception as e:  # network, rate limit, 5xx, stall: never leak the key
                     last = e
+                    if has_next:
+                        llm_event(tool="llm_fallback", step=step, **{"from": prov}, to=nxt, model=self._provider(nxt)[2], reason=failure_reason(e))
+                        switched = True
+                        break
+                    if reserve_missing and attempt == 0:
+                        llm_event(tool="llm_fallback", step=step, **{"from": prov}, skipped=True, reason=failure_reason(e),
+                                  note="CLOUDRU_API_KEY не задан — резерв GigaChat-4 пропущен")
                     time.sleep(min(1.5 * (attempt + 1), max(0.0, left() - 3)))
+            if not switched and last is None:
+                continue
         raise LlmUnavailable(type(last).__name__ if last else "no provider") from None
+
+    def _degenerate(self, conv: str | None, step: str, prompt_key: int, msg: Any) -> str | None:
+        """Why this answer is unusable (empty / a loop), or None."""
+        text = getattr(msg, "content", None) or ""
+        if not text.strip() and not (getattr(msg, "tool_calls", None) or []):
+            return "пустой ответ"
+        bad = degenerate_text(text)
+        if bad:
+            return bad
+        prev = self._last.get((conv, step)) if conv else None
+        if prev and prev[0] != prompt_key and len(text) >= 80:
+            sim = similar(prev[1], text)
+            if sim >= self.s.llm_repeat_similarity:
+                return f"ответ почти совпадает с предыдущим на другой вопрос (сходство {sim:.2f})"
+        return None
 
     def json(self, step: str, system: str, user: str, max_tokens: int = 2000, on_text=None) -> dict:
         msg, _ = self.chat(step, [{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=max_tokens,

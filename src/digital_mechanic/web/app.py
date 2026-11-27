@@ -1451,6 +1451,7 @@ def eng_trace(aid: int, uid: str | None = Cookie(None)) -> dict:
 
 
 JOURNAL_RU = {
+    "llm_fallback": "Переключение на резервную модель", "llm_answered": "Ответила модель",
     "check_result": "посмотрел результат проверки ML", "search_manual": "искал в руководстве двигателя", "search_extra_docs": "искал в руководстве автомобиля",
     "prepare_ticket": "готовил черновик заявки", "start_repair": "начал пошаговый ремонт", "update_repair": "отметил шаг ремонта",
     "vehicle_history": "открыл историю машины", "policy": "применил правила (код, не модель)", "uncited_guard": "убрал числа без источника",
@@ -1482,6 +1483,15 @@ def agent_journal(tools: list) -> dict:
             line += f" → удалено: {len(t['removed'])}"
         if t.get("ticket_id"):
             line += f" → {t['ticket_id']}"
+        if name == "llm_fallback":
+            from ..agent.llm import PROV_RU
+
+            line += (f": {t.get('reason')}" + (f" → резерв не задан ({t.get('note')})" if t.get("skipped")
+                     else f" → {PROV_RU.get(t.get('to'), t.get('to'))}, {t.get('model') or ''}".rstrip(", ")))
+        if name == "llm_answered":
+            from ..agent.llm import PROV_RU
+
+            line += f": {PROV_RU.get(t.get('provider'), t.get('provider'))} ({t.get('model')}), шаг {t.get('step')}"
         if t.get("auto"):
             line += " (автоматически)"
         if t.get("error"):
