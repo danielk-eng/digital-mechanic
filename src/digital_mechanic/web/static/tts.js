@@ -4,10 +4,10 @@
 // default voice (Cyrillic/Latin comes out as gibberish). Fall back to the Russian original
 // with a ru-RU voice, or stay silent and tell the mechanic.
 (function () {
-  const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG"};
-  const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt", bn: "বাংলা", ky: "Кыргызча"};
+  const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", ky: "ky-KG"};
+  const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", ky: "Кыргызча"};
   const OWN_LETTERS = {kk: "әғқңөұүһі", ky: "ңөү", tg: "ғӣқӯҳҷ", uz: "ўқғҳʼʻ‘'"};
-  const LATIN_LANGS = {uz: 1, hi: 1, vi: 1, bn: 1};
+  const LATIN_LANGS = {uz: 1};
 
   function langCode(lang) { return String(lang || "ru").toLowerCase().replace(/_/g, "-").split("-")[0] || "ru"; }
   function voiceLang(v) { return String((v && v.lang) || "").toLowerCase().replace(/_/g, "-"); }

@@ -8,9 +8,8 @@ from concurrent.futures import ThreadPoolExecutor
 from digital_mechanic.agent.llm import Llm
 from digital_mechanic.config import get_settings
 
-LANGS = ["uz", "tg", "kk", "hi", "vi", "bn", "ky"]
-SCRIPT = {"uz": "узбекский, латиница", "tg": "таджикский, кириллица", "kk": "казахский, кириллица", "hi": "хинди, деванагари",
-          "vi": "вьетнамский", "bn": "бенгальский, бенгальское письмо", "ky": "киргизский, кириллица"}
+LANGS = ["uz", "tg", "kk", "ky"]
+SCRIPT = {"uz": "узбекский, латиница", "tg": "таджикский, кириллица", "kk": "казахский, кириллица", "ky": "киргизский, кириллица"}
 llm = Llm(get_settings())
 cnt = Counter()
 for fn in ("data/index/pages.jsonl.gz", "data/index/extra_pages.jsonl.gz"):
@@ -37,7 +36,7 @@ for part in [cand[i:i + 350] for i in range(0, 1400, 350)]:
             print("retry", type(e).__name__)
 terms = list(terms.values())[:220]
 print("terms", len(terms))
-SYS = ("Переведи технические термины мастерской на 7 языков. Нужен термин, которым реально пользуются механики (допустимы устоявшиеся "
+SYS = ("Переведи технические термины мастерской на 4 языка. Нужен термин, которым реально пользуются механики (допустимы устоявшиеся "
        "заимствования из русского, если так говорят в мастерских, иначе литературный термин). Языки и письмо: "
        + "; ".join(f"{k} = {v}" for k, v in SCRIPT.items())
        + ". Верни JSON {\"items\": [{\"ru\": \"...\", " + ", ".join(f"\"{l}\": \"...\"" for l in LANGS) + "}]} в том же порядке.")

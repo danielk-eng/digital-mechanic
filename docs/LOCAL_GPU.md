@@ -71,9 +71,7 @@ tok/s ≈ η · BW / (P_active · bpw/8 + KV_bytes_per_token · L_ctx)
 | ASR ru | **GigaAM-v3 e2e_rnnt** | MIT | ~240M, <1 ГБ fp16 | реальное время ≪ 1 [оценка] | WER 8,4 % в среднем против 25,1 % у Whisper [9]; пунктуация и нормализация из коробки |
 | ASR ru (стриминг) | T-one (Т-Банк) | Apache-2.0 [10] | ~70M | потоковая | для телефонии; GigaAM-v3 точнее (19,4 % против 8,4 % WER) [9] |
 | ASR kk / uz | **GigaAM-Multilingual-v2** (rnnt) | MIT | 776M, ~1,6 ГБ fp16 | [оценка] < 0,5 с на фразу | WER: kk 3,95 %, uz 3,70 % против 35,8 % и 104,8 % у Whisper-large-v3 [11]. Закрывает нашу дыру с узбекским (у нас navai 0,17, облачный whisper 0,96) |
-| ASR hi / vi (и запасной) | **whisper-large-v3-turbo** (faster-whisper, CTranslate2) | MIT | ~1,6 ГБ fp16 / ~0,8 ГБ int8 | замеры faster-whisper [12] | на наших фразах hi/vi WER 0 (cloud whisper-large-v3) |
-| TTS ru / kk / uz | **Silero v5_cis_base(_nostress)** | **MIT** [13] | CPU | быстрый на CPU | ru-голоса с префиксом `ru_`; ударения — разметкой `+` |
-| TTS hi / vi | браузерный TTS (как сейчас) | — | — | — | открытых TTS с коммерческой лицензией для hi/vi с нужным качеством не нашли |
+| TTS ru / kk / uz / ky / tg | **Silero v5_cis_base(_nostress)** | **MIT** [13] | CPU | быстрый на CPU | speaker-префиксы `ru_`, `kaz_`, `uzb_`, `kir_`, `tgk_`; для ru ударения и числа словами |
 | Эмбеддинги (опц.) | bge-m3 | MIT | 568M, ~1,1 ГБ | — | гибрид BM25+dense не дал прироста на 18 вопросах (bake-off) |
 | Реранкер (опц.) | bge-reranker-v2-m3 | Apache-2.0 | 568M | — | ухудшил hit@1 (0,94 → 0,83) — не включаем |
 
@@ -139,7 +137,7 @@ tok/s ≈ η · BW / (P_active · bpw/8 + KV_bytes_per_token · L_ctx)
 - «качество» `gpu3090`: `unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M`, llama.cpp `server-cuda-b12808`, `enable_thinking=false`, MTP n=2, 2 слота × 12k, KV q8_0, mmproj — понимает фото узлов; ответ ~20–27 с;
 - «быстрый» `gpu3090-fast`: `unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:Q4_K_M`, 3 слота × 12k, ~190 tok/s, ответ 5–8 с, фото не распознаёт;
 - автоматический резерв без смены кода возможен только через второй слот приложения (слот Cloud.ru, `CLOUDRU_BASE_URL` → второй локальный сервер), но второй сервер на ту же карту не помещается; 30B-A3B с экспертами в ОЗУ (`--n-cpu-moe`) — вариант, если у ПК ≥ 32 ГБ RAM [оценка скорости ~15–25 tok/s, не замерено];
-- ASR: GigaAM-v3 (ru) + GigaAM-Multilingual-v2 (kk, uz) на GPU; whisper-large-v3-turbo int8 на CPU (hi, vi); TTS Silero v5_cis_base_nostress на CPU (MIT), голоса ru/kk/uz/ky/tg.
+- ASR: GigaAM-v3 (ru) + GigaAM-Multilingual-v2 (kk, uz) на GPU; whisper-large-v3-turbo int8 на CPU как общий резерв; TTS Silero v5_cis_base_nostress на CPU (MIT), голоса ru/kk/uz/ky/tg.
 
 **DGX Spark (сервер предприятия / филиала):**
 - основной: `Qwen/Qwen3.6-35B-A3B-FP8` в vLLM (`vllm/vllm-openai:v0.32.0`, arm64, tool parser `qwen3_coder`, без «рассуждения»); NVFP4 + MTP — 90 tok/s [20]. Прежний `Qwen/Qwen3-30B-A3B-Instruct-2507-FP8` остаётся через `SPARK_MODEL`;

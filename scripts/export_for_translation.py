@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-LANGS = ["uz", "tg", "kk", "hi", "vi", "bn", "ky"]
+LANGS = ["uz", "tg", "kk", "ky"]
 CYR = re.compile(r"[А-Яа-яЁё]")
 WORD = re.compile(r"[а-яё]{3,}")
 EXCLUDE_DOCS = re.compile(r"KAMAZ|КАМАЗ", re.I)  # avtoalfa mirror stays out

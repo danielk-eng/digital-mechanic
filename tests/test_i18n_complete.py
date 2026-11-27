@@ -18,7 +18,7 @@ def test_demo_titles_translated():
     accs = json.loads((ROOT / "data/demo_users.json").read_text(encoding="utf-8"))["accounts"]
     for a in accs:
         assert I18N["ru"]["title_" + a["key"]] == a["title"]
-        for lang in ("uz", "hi", "vi", "bn"):
+        for lang in ("uz",):  # uz is the remaining non-Cyrillic product language
             assert not any("а" <= c <= "я" for c in I18N[lang]["title_" + a["key"]].lower()), (lang, a["key"])
 
 
@@ -26,6 +26,13 @@ def test_login_titles_use_lang_string():
     js = (ROOT / "src/digital_mechanic/web/static/app.js").read_text(encoding="utf-8")
     assert 'TT("title_" + a.key, a.title)' in js
     assert "applyI18n(); demoAccounts(); }" in js  # re-rendered when the language changes on the login screen
+
+
+def test_discontinued_languages_are_not_product_languages():
+    from digital_mechanic.i18n import LANGS
+    assert set(LANGS) == {"ru", "uz", "tg", "kk", "ky"}
+    assert not {"hi", "vi", "bn", "be"} & set(LANGS)
+    assert not {"hi", "vi", "bn", "be"} & set(I18N)
 
 
 def test_language_picker_offers_every_language():

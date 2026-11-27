@@ -22,7 +22,6 @@ def test_month_names_follow_ui_language():
     assert _run("ru", 'fmtDate("2026-05-02")') == "2 мая 2026"
     assert _run("uz", 'fmtDate("2026-11-19")') == "19 noy 2026"
     assert _run("kk", 'fmtDate("2026-10-29T15:20", true)') == "29 қаз 2026, 15:20"
-    assert _run("vi", 'fmtDate("2026-11-19")') == "19 thg 11, 2026"
     assert _run("xx", 'fmtDate("2026-11-19")') == "19 ноя 2026"
 
 

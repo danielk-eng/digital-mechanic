@@ -1,6 +1,6 @@
 """Speech. STT order: local speech service (faster-whisper large-v3-turbo, audio stays on the stand) ->
-Deepgram nova-3 (cloud, ru/hi/vi, mip_opt_out) -> in-process faster-whisper -> browser Web Speech (client side).
-TTS: Cloud.ru SaluteSpeech (ru) -> NVIDIA hosted multilingual voices where supported -> local Silero/browser speech.
+Deepgram nova-3 (cloud, where enabled, mip_opt_out) -> in-process faster-whisper -> browser Web Speech (client side).
+TTS: Cloud.ru SaluteSpeech (ru/kk/uz/ky) -> NVIDIA hosted voices where supported -> local Silero/browser speech.
 
 Audio is not stored; only the masked transcript goes to the agent. Voice control in the UI also
 works in the browser (Web Speech API) when the server has no STT configured.
@@ -22,6 +22,7 @@ from urllib.parse import quote
 import httpx
 
 from .config import Settings
+from .i18n import LANGS as PRODUCT_LANGS
 
 _whisper = None
 _whisper_lock = threading.Lock()
@@ -514,7 +515,8 @@ def server_tts_langs(s: Settings) -> list[str]:
         out.update(NVIDIA_TTS_PROFILES)
     if getattr(s, "speech_url", "") or getattr(s, "silero_enabled", False):
         out.update(SILERO_TTS_VOICES)
-    return sorted(out)
+    # hi/vi stay implemented in the provider layer for a possible future re-enable, but are not product languages now.
+    return sorted(out & set(PRODUCT_LANGS))
 
 
 def tts_configured(s: Settings) -> bool:

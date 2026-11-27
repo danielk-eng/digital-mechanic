@@ -131,7 +131,8 @@ def test_nvidia_magpie_tts_multipart_language_voice_and_rate(monkeypatch):
     assert sent["rate"] == "44100"
     assert voice.nvidia_tts("Kiểm tra áp suất.", "vi", s).startswith(b"RIFF")
     assert sent["language"] == "vi-VN" and sent["voice"] == "Magpie-Multilingual.VI-VN.Long"
-    assert "ru" in voice.server_tts_langs(s) and voice.tts_configured(s)
+    langs = voice.server_tts_langs(s)
+    assert "ru" in langs and not {"hi", "vi"} & set(langs) and voice.tts_configured(s)
 
 
 def test_nvidia_chatterbox_uses_grpc_and_wraps_pcm(monkeypatch):

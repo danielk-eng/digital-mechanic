@@ -5,7 +5,7 @@
 Веб-чат для механика на посту ТО (работает с телефона). Механик выбирает машину и проверку, агент берёт
 результат из ML-сервиса, объясняет его простыми словами, отвечает на вопросы **только по руководствам на
 двигатель этой машины** со ссылкой на страницу PDF, составляет заявку на дефектовку и отправляет её в ТОиР
-после подтверждения механика. Есть режим главного механика (сводка по парку), голосовой ввод и диалог, фото, 8 языков интерфейса и ответов.
+после подтверждения механика. Есть режим главного механика (сводка по парку), голосовой ввод и диалог, фото, 5 языков интерфейса и ответов.
 
 **Стенды:** основной — deb (docker compose + Cloudflare tunnel, адрес в `stand/PUBLIC_URL.txt`, с картинками страниц
 и локальным распознаванием речи); резерв — https://digital-mechanic-iikuznitsa.vercel.app (те же код и индекс,
@@ -97,8 +97,8 @@ FastAPI (web/app.py) ── журнал, согласие, маскирован
 | `ingest/pages.py`, `retrieval/bm25.py` | Постраничный индекс PDF (pdftotext/pypdf), BM25 со стеммингом |
 | `agent/` | LLM-клиент, промпты, инструменты, проверка ответа |
 | `store.py`, `pii.py` | SQLite (пользователи, проверки, заявки, ремонты, переписка, аудит), маскирование ПДн |
-| `i18n.py`, `web/static/i18n.json` | ru, uz, tg, kk, hi, vi, bn, ky |
-| `voice.py`, `services/speech/` | STT: Cloud.ru GigaASR/whisper-large-v3 → локальный faster-whisper → NVIDIA Parakeet (ru) → Deepgram → браузер; TTS: Cloud.ru SaluteSpeech (ru) → NVIDIA Chatterbox gRPC (ru) / Magpie HTTP (hi/vi) → Silero/браузер |
+| `i18n.py`, `web/static/i18n.json` | ru, uz, tg, kk, ky |
+| `voice.py`, `services/speech/` | STT: Cloud.ru SaluteSpeech/GigaASR (ru/kk/uz/ky) → локальный faster-whisper → NVIDIA Parakeet (ru) → Deepgram → браузер; TTS: Cloud.ru SaluteSpeech (ru/kk/uz/ky) → NVIDIA Chatterbox gRPC (ru) → локальный Silero CIS/браузер |
 | `retrieval/sections.py`, `retrieval/synonyms.py` | Разделы руководств для цитат; нормализация жаргона и опечаток |
 | `agent/facts.py`, `agent/suggest.py`, `agent/handoff.py`, `proven.py`, `inspection.py` | Важное из руководства, подсказки, резюме/передача, проверенные решения, акт осмотра |
 
@@ -109,7 +109,7 @@ FastAPI (web/app.py) ── журнал, согласие, маскирован
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | Любой OpenAI-совместимый API. По умолчанию TokenRouter, `deepseek/deepseek-v4.1-flash-1017-free` |
 | `LLM_THINKING` | `off` (по умолчанию) — без «размышлений», ответ в 3–4 раза быстрее (10–20 с) |
 | `CLOUDRU_API_KEY`, `CLOUDRU_TTS` | Резервная LLM GigaChat-4, серверный STT и основная русская озвучка SaluteSpeech |
-| `NVIDIA_API_KEY` | NVIDIA Build: пакетный перевод, серверные TTS Chatterbox/Magpie и русский Parakeet STT |
+| `NVIDIA_API_KEY` | NVIDIA Build: пакетный перевод, резервный TTS Chatterbox (ru) и русский Parakeet STT |
 | `DEEPGRAM_API_KEY` | Дополнительный резерв распознавания речи |
 | `SILERO_ENABLED` | Локальный синтез речи (нужен torch); иначе — Cloud.ru/NVIDIA или синтез браузера |
 | `COMET_API_KEY` | Трассировка в Opik (необязательно, `pip install opik`) |
@@ -120,12 +120,12 @@ FastAPI (web/app.py) ── журнал, согласие, маскирован
 ## Голос и языки
 Микрофон в поле чата работает как диктовка в мессенджере: запись с таймером и волной, крестик удаляет аудио без отправки,
 галочка завершает запись и отправляет её в `/api/stt`; если сеть или STT временно не сработали, аудио остаётся локально
-и его можно повторить без перезаписи. Серверная цепочка STT: Cloud.ru GigaASR (ru) / whisper-large-v3 (другие языки),
+и его можно повторить без перезаписи. Серверная цепочка STT: Cloud.ru SaluteSpeech/GigaASR для ru/kk/uz/ky,
 локальный сервис `speech` (faster-whisper large-v3-turbo int8, CPU; `docker compose --profile speech up -d`,
 `SPEECH_URL=http://speech:9000`), NVIDIA Parakeet для русского, Deepgram nova-3 (`mip_opt_out`) и браузерный Web Speech.
 Порядок учитывает страну пользователя и требования локализации данных. Замеры — `docs/STT_ЗАМЕРЫ.md`.
-Ответы озвучиваются сервером: русская речь — Cloud.ru Realtime `GigaChat/SaluteSpeech` (`Bab-Freespeech`), резерв —
-NVIDIA Chatterbox gRPC (ru) и Magpie HTTP (hi/vi), затем локальный Silero или браузер. Режим «руки свободны» читает ответ и снова
+Ответы озвучиваются сервером: Cloud.ru Realtime `GigaChat/SaluteSpeech` (`Bab-Freespeech`) для ru/kk/uz/ky, резерв —
+NVIDIA Chatterbox gRPC (ru), затем локальный Silero CIS (ru/kk/uz/ky/tg) или браузер. Режим «руки свободны» читает ответ и снова
 включает микрофон; субтитры речи — отдельная accessibility-настройка и по умолчанию выключены, чтобы не дублировать ответ.
 Язык интерфейса выбирается при входе, язык ответов можно задать отдельно в настройках; руководства русские, поэтому
 исходные цитаты и названия документов остаются доступны на русском.

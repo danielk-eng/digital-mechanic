@@ -7,8 +7,8 @@ const _ic = (n, s = 16) => (typeof icon === "function" ? icon(n, s) : "");
 const _MONS = {
   ru: "янв фев мар апр мая июн июл авг сен окт ноя дек", uz: "yan fev mar apr may iyn iyl avg sen okt noy dek",
   tg: "янв фев мар апр май июн июл авг сен окт ноя дек", ky: "янв фев мар апр май июн июл авг сен окт ноя дек",
-  kk: "қаң ақп нау сәу мам мау шіл там қыр қаз қар жел",
-  hi: "जन॰ फ़र॰ मार्च अप्रैल मई जून जुल॰ अग॰ सित॰ अक्टू॰ नव॰ दिस॰", bn: "জানু ফেব মার্চ এপ্রি মে জুন জুল আগ সেপ অক্টো নভে ডিসে"};
+  kk: "қаң ақп нау сәу мам мау шіл там қыр қаз қар жел"
+};
 const _MON = _MONS.ru.split(" ");
 const _ulang = () => (typeof ME !== "undefined" && ME && ME.lang) || "ru";
 const _tt = (k, d) => { const x = typeof t === "function" ? t(k) : k; return x && x !== k ? x : d; };  // page's own translator if any
@@ -16,7 +16,6 @@ function fmtDate(iso, time = false) {
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(String(iso || ""));
   if (!m) return String(iso || "");
   const L = _ulang(), tm = time && m[4] ? `, ${m[4]}` : "";
-  if (L === "vi") return `${+m[3]} thg ${+m[2]}, ${m[1]}` + tm;
   return `${+m[3]} ${(_MONS[L] || _MONS.ru).split(" ")[+m[2] - 1]} ${m[1]}` + tm;
 }
 

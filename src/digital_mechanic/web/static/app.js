@@ -4,8 +4,8 @@ const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
 let LAST_CHECK = null, LAST_DRAFT = null;  // {vid, sid} of the check diagnosed in this dialog: sent with chat (Vercel instances do not share it)
 let I18N = {}, ME = null, VID = new URLSearchParams(location.search).get("v") || localStorage.getItem("vid") || "", VEH = null, VLIST = [], BUSY = false, LAST_Q = "", HYP = false;
-const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", hi: "hi-IN", vi: "vi-VN", bn: "bn-IN", ky: "ky-KG"};
-const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt", bn: "বাংলা", ky: "Кыргызча"};  // = i18n.LANGS
+const SPEECH_LANG = {ru: "ru-RU", uz: "uz-UZ", tg: "tg-TJ", kk: "kk-KZ", ky: "ky-KG"};
+const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", ky: "Кыргызча"};  // = i18n.LANGS
 const t = k => (I18N[(ME && ME.lang) || $("#l_lang")?.value || "ru"] || I18N.ru || {})[k] || (I18N.ru || {})[k] || k;
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const TT = (k, dflt) => { const L = (ME && ME.lang) || $("#l_lang")?.value || "ru"; return (I18N[L] || {})[k] || dflt; };  // per-language string or the given (Russian) text
@@ -321,7 +321,7 @@ function renderCard(c) {
     let h = `<div class="vh"><div class="vi">${icon(LIGHT_ICON[c.light] || "activity", 22)}</div><div><div class="vt">${head}</div>` +
       (c.light_text && c.status === "anomaly" ? `<div class="vs">${esc(c.light_text)}</div>` : "") + `</div></div>`;
     h += `<div class="kv"><span>${t("session")}</span><span class="mono">${esc(ch.session_id)}, ${esc(typeof fmtDate === "function" ? fmtDate(ch.checked_at, true) : (ch.checked_at || "").slice(0, 16).replace("T", " "))}</span>`;
-    if (ch.anomaly_score != null) h += `<span>${t("score")}</span><span class="mono">${ch.anomaly_score.toFixed(2).replace(".", ALANG() === "hi" ? "." : ",")}</span>`;
+    if (ch.anomaly_score != null) h += `<span>${t("score")}</span><span class="mono">${ch.anomaly_score.toFixed(2).replace(".", ",")}</span>`;
     if (ch.confidence != null) h += `<span>${t("confidence")}</span><span class="mono">${Math.round(ch.confidence * 100)}%</span>`;
     h += `<span>${t("quality")}</span><span>${esc(t(QUALITY[ch.signal_quality] || ch.signal_quality))}</span>`;
     if (ch.description) h += `<span>${t("ml_says")}</span><span>${esc(ch.description)}</span>`;

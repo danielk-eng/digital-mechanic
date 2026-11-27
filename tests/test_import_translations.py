@@ -15,8 +15,8 @@ def test_checks():
     assert "потеряны числа" in it.check(r, "uz", "GBTs boltlarini 196 N·m bilan torting, 31-bet [S1], kod F08.")
     assert "лишние" in it.check(r, "uz", "GBTs boltlarini 196–216 N·m, 31-bet [S1], kod F08, 5 marta.")
     assert "коды" in it.check(rec("Код F08, деталь 236-1003012"), "uz", "Kod F 08, detal 236-1003012")
-    assert "письменности" in it.check(rec("Проверить зазор клапанов"), "hi", "Check valve clearance")
-    assert it.check(rec("Проверить зазор клапанов"), "hi", "वाल्व क्लीयरेंस जांचें") is None
+    assert "письменности" in it.check(rec("Проверить зазор клапанов"), "kk", "Check valve clearance")
+    assert it.check(rec("Проверить зазор клапанов"), "kk", "Клапан тіркесін тексеру") is None
     assert "чужой" in it.check(rec("Проверить зазор клапанов двигателя на холодную"), "uz", "Klapan tirqishini sovuq dvigatelda tekshiring, проверить зазор клапанов")
 
 
@@ -28,7 +28,7 @@ def test_import_end_to_end(tmp_path):
             {"id": "ui:hello", "type": "ui_string", "text_ru": "Привет", "text_uz": "Salom"},
             {"id": "s1", "type": "repair_step", "text_ru": "Затянуть 118–147 Н·м", "text_uz": "118 N·m torting"}]
     (src / "data/a.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in rows), encoding="utf-8")
-    (src / "glossary_ru.csv").write_text("ru,category,uz,tg,kk,hi,vi,bn,ky,status,note\nболт,деталь,bolt,,,,,,,,черновик,\n", encoding="utf-8")
+    (src / "glossary_ru.csv").write_text("ru,category,uz,tg,kk,ky,status,note\nболт,деталь,bolt,,,,,черновик,\n", encoding="utf-8")
     p = subprocess.run([sys.executable, str(Path(it.__file__)), str(src), "--app", str(app), "--langs", "uz"], capture_output=True, text=True)
     assert p.returncode == 1  # one record rejected
     with gzip.open(app / "data/i18n/pages_uz.jsonl.gz", "rt", encoding="utf-8") as fh:
