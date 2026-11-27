@@ -271,3 +271,14 @@ def test_quality_server_routes_only_expand():
     l.chat("expand", [{"role": "user", "content": "x"}])
     l.chat("agent_r0", [{"role": "user", "content": "x"}])
     assert calls == [("quality", "q27b"), ("tokenrouter", s.llm_model)]
+
+
+def test_history_line_no_double_dot(make_agent):
+    """Audit 27.11 12:20 (390 px): «Ремонты этой машины: …, Кузнецов Д..» — the initial's dot plus the closing one."""
+    a = make_agent([])
+    from types import SimpleNamespace
+    a.briefing = SimpleNamespace(_events=lambda vid: [{"date": "2026-10-30", "ticket_id": "TKT-DEMO-106", "unit": "", "mechanic": "Кузнецов Д."}])
+    note = a.resume_note("M333YK47", {"id": "m2"})
+    assert note["text"].endswith("Кузнецов Д.") and ".." not in note["text"]
+    a.briefing = SimpleNamespace(_events=lambda vid: [{"date": "2026-10-30", "ticket_id": "TKT-DEMO-106", "unit": ""}])
+    assert a.resume_note("M333YK47", {"id": "m2"})["text"].endswith("TKT-DEMO-106.")

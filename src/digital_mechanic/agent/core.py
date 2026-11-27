@@ -1092,7 +1092,8 @@ class Agent:
                 d = e["date"][8:10] + "." + e["date"][5:7] + "." + e["date"][:4]
                 unit = self.fleet.fault_types.get(e.get("unit") or "", e.get("unit") or "")
                 return f"{d} — {e['ticket_id']}" + (f", {unit}" if unit else "") + (f", {e['mechanic']}" if e.get("mechanic") else "")
-            lines.append("**Ремонты этой машины:** " + "; ".join(one(e) for e in past[:3]) + ".")
+            body = "; ".join(one(e) for e in past[:3])
+            lines.append("**Ремонты этой машины:** " + body + ("" if body.endswith(".") else "."))  # «Кузнецов Д.» + "." gave «Д..» (audit 27.11 12:20)
             kind = kind or "history"
         if not lines:
             return None
