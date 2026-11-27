@@ -120,15 +120,16 @@ function inline(h, src) {
   }).replace(/[ \t]*\u0000/g, "");
   return collapseCites(h);
 }
-function collapseCites(h) {
+function collapseCites(h, block = false) {
   // «работа [с. 52], работа [с. 52], работа [с. 52]» -> one chip after the last item: the same page cited clause after
-  // clause in one paragraph cluttered the answer; a chip for another page in between breaks the run
+  // clause in one paragraph cluttered the answer; a chip for another page in between breaks the run.
+  // block: a whole paragraph or list (lines, items, sentences) — «с. 52» after each of 4–5 lines on a 390 px screen (audit 23:17)
   const re = /[ \t]*<button class="cite[^"]*" data-doc="([^"]*)" data-page="(\d+)"[^>]*>[^<]*<\/button>/g;
   const ms = [...h.matchAll(re)]; if (ms.length < 2) return h;
   const drop = new Set();
   for (let i = 0; i + 1 < ms.length; i++) {
     const a = ms[i], b = ms[i + 1], gap = h.slice(a.index + a[0].length, b.index);
-    if (a[1] === b[1] && a[2] === b[2] && gap.length < 240 && !/<(b|br)>/.test(gap) && !/[.!?]\s/.test(gap)) drop.add(i);
+    if (a[1] === b[1] && a[2] === b[2] && (block || gap.length < 240 && !/<(b|br)>/.test(gap) && !/[.!?]\s/.test(gap))) drop.add(i);
   }
   if (!drop.size) return h;
   let out = "", pos = 0;
@@ -152,8 +153,8 @@ function md(text, sources) {
   const src = Object.fromEntries((sources || []).map(s => [s.label, s]));
   const lines = esc(unflatten(text)).replace(/\r/g, "").replace(/[ \t]+([.,;:!?)])/g, "$1").replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?\s?/gu, "").split("\n");
   let out = "", list = null, para = [];
-  const flushP = () => { if (para.length) { out += `<p>${inline(para.join("<br>"), src)}</p>`; para = []; } };
-  const flushL = () => { if (list) { out += `<${list.tag}>${list.items.map(i => `<li>${inline(i, src)}</li>`).join("")}</${list.tag}>`; list = null; } };
+  const flushP = () => { if (para.length) { out += `<p>${collapseCites(inline(para.join("<br>"), src), true)}</p>`; para = []; } };
+  const flushL = () => { if (list) { out += `<${list.tag}>${collapseCites(list.items.map(i => `<li>${inline(i, src)}</li>`).join(""), true)}</${list.tag}>`; list = null; } };
   for (const raw of lines) {
     const l = raw.trim();
     let m;
@@ -986,13 +987,14 @@ async function vOnRecorded() {
   vHeard(text);
 }
 async function vHeard(text) {
-  $("#vSaid").textContent = text; $("#vReply").textContent = "";
+  $("#vSaid").textContent = text; $("#vReply").textContent = ""; $("#vReply").classList.remove("long");
   vSet("thinking");
   const turn = await send(text);
   if (!VOICE.on) return;
   const reply = turn && (turn.text || (turn.cards || []).map(c => c.light_text || "").join(" "));
   if (!reply) { vSet("idle", t("v_no_answer")); return; }
   $("#vReply").textContent = plain(reply).slice(0, 400) + (plain(reply).length > 400 ? "…" : "");
+  $("#vReply").classList.toggle("long", plain(reply).length > 140); $("#vReply").scrollTop = 0;
   if (!A11Y.voiceSpeaks()) return vListen();
   vSet("speaking"); VOICE.speechMs = 0;
   Player.play(reply, null, {onend: () => { if (VOICE.on && VOICE.state === "speaking") vListen(); }});

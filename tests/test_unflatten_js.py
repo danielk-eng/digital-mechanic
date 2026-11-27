@@ -45,3 +45,27 @@ def test_manager_idle_days_use_decimal_comma():
 def test_fleet_table_last_check_uses_short_date_and_decimal_comma():
     src = (JS.parent / "manager.js").read_text(encoding="utf-8")
     assert 'fmtDate((l.checked_at || "").slice(0, 10))' in src and "_dec(l.anomaly_score)" in src  # «20 ноя 2026, 0,93», was «2026-11-20, 0.93»
+
+
+def _md(text: str, sources: list) -> str:
+    src = JS.read_text(encoding="utf-8")
+    fns = src[src.index("function inline("):src.index("const ACT_ICON")]
+    pre = ("const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');"
+           "const t=k=>({page_short:'с.'})[k]||k;")
+    out = subprocess.run(["node", "-e", pre + fns + f"; process.stdout.write(md({json.dumps(text, ensure_ascii=False)}, {json.dumps(sources)}))"],
+                         capture_output=True, text=True, check=True)
+    return out.stdout
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_same_page_chip_once_per_paragraph_and_list():
+    """Audit 23:17 (390 px): «с. 52» after each of five lines of one answer. One chip per run of the same page in a
+    paragraph or list; another page in between keeps both."""
+    S = [{"label": "S1", "doc_id": "D", "page": 52, "document": "РЭ"}, {"label": "S2", "doc_id": "D", "page": 53, "document": "РЭ"}]
+    h = _md("F08 — четыре причины [S1].\nПервая: воздух [S1].\nВторая: насос [S1].\nТретья: рейка [S2].", S)
+    assert h.count('data-page="52"') == 1 and h.count('data-page="53"') == 1
+    assert h.index('data-page="52"') > h.index("Вторая")  # the chip stays after the last line of the run
+    h = _md("**Что проверить**\n1. Герметичность [S1].\n2. Насос [S1].\n3. Рейка [S1].", S)
+    assert h.count('data-page="52"') == 1 and h.index('data-page="52"') > h.index("Рейка")
+    h = _md("Первая [S1].\n\nВторая [S1].", S)  # separate paragraphs keep their own chip
+    assert h.count('data-page="52"') == 2
