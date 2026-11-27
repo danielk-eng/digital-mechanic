@@ -12,7 +12,7 @@ JS = Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static/app.
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 def test_prefetch_two_distinct_pages_and_reuse_on_open():
     src = JS.read_text(encoding="utf-8")
-    fn = src[src.index("const EXTRACTS = new Map()"):src.index("async function openCitation")]
+    fn = src[src.index("const BGQ = []"):src.index("async function expandClick")] + src[src.index("const EXTRACTS = new Map()"):src.index("async function openCitation")]
     prog = """
 let LAST_Q = "почему стучит", BUSY = false; const VOICE = {on: false}; const calls = [];
 function api(path, o) { calls.push(o.json); return o.json.page === 99 ? Promise.reject(new Error("x")) : Promise.resolve({ok: true, text: "t" + o.json.page}); }
@@ -67,3 +67,40 @@ chatStream({}, () => {}).then(() => process.stdout.write("NO"), e => process.std
 """
     out = subprocess.run(["node", "-e", prog], capture_output=True, text=True, timeout=20)
     assert out.stdout == "OK", out.stdout + out.stderr
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_expand_prefetch_goes_first_one_background_call_at_a_time():
+    """«Подробнее» prefetch + 2 extracts: one request at a time (free model slows with parallel calls), the expand first,
+    nothing while a question is being answered; a tap while the expand is still queued asks the usual way."""
+    src = JS.read_text(encoding="utf-8")
+    fn = src[src.index("const EXPANDS = new Map()"):src.index("async function eventTurn")] + src[src.index("const EXTRACTS = new Map()"):src.index("async function openCitation")]
+    prog = """
+let LAST_Q = "q", BUSY = false, VID = "V1", LAST_CHECK = null; const VOICE = {on: false}; const calls = []; const pend = [];
+const Player = {stop() {}}; const asked = [];
+function eventTurn(ev) { asked.push(ev); return null; }
+function api(path, o) { calls.push(o.json.event || ("p" + o.json.page)); return new Promise(r => pend.push(() => r(o.json.event ? {text: "long", sig: "s", sources: []} : {ok: true, text: "t"}))); }
+const realST = setTimeout; global.setTimeout = (f, ms) => realST(f, 0);
+""" + fn + """
+const b = (doc, page) => ({dataset: {doc, page: String(page), q: ""}});
+BUSY = true;
+prefetchExtracts([b("d", 52), b("d", 53)]);
+const turn = {text: "short [S1]", sources: [{label: "S1", doc_id: "d", page: 52}]};
+prefetchExpand(turn);
+realST(() => {
+  if (calls.length) throw new Error("started while busy " + calls);
+  BUSY = false;
+  realST(() => {
+    if (calls.join() !== "expand") throw new Error("expand first, alone: " + calls);
+    pend.shift()();
+    realST(() => {
+      if (calls.join() !== "expand,p52") throw new Error("then extracts one by one: " + calls);
+      const t2 = {text: "other [S1]", sources: turn.sources}; BUSY = true; prefetchExpand(t2); BUSY = false;
+      // the queued expand of t2 is not started yet (p52 in flight): a tap asks the usual way and drops it from the queue
+      expandClick(t2).then(() => { if (asked.join() !== "expand") throw new Error("queued tap " + asked); process.stdout.write("OK"); });
+    }, 20);
+  }, 3000);
+}, 20);
+"""
+    out = subprocess.run(["node", "-e", prog], capture_output=True, text=True, timeout=30)
+    assert out.stdout == "OK", out.stderr

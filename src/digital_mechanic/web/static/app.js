@@ -619,16 +619,32 @@ function prefetchExpand(turn) {
   if (VOICE.on || !VID || EXPANDS.has(turn)) return;
   const payload = {vehicle_id: VID, text: turn.text, event: "expand", prefetch: true, ...(LAST_CHECK && LAST_CHECK.vid === VID ? {session_id: LAST_CHECK.sid} : {}),
     sources: (turn.sources || []).map(s => ({label: s.label, doc_id: s.doc_id, page: s.page}))};
-  const x = {t0: Date.now(), vid: VID, r: undefined};
-  x.p = api("/api/chat", {json: payload, signal: AbortSignal.timeout ? AbortSignal.timeout(90000) : undefined})
-    .then(r => (r && r.sig && r.text ? r : null)).catch(() => null).then(r => (x.r = r));
+  const x = {t0: Date.now(), vid: VID, r: undefined, started: false};
+  x.p = new Promise(res => { x.job = () => { x.started = true; x.t0 = Date.now();
+    return api("/api/chat", {json: payload, signal: AbortSignal.timeout ? AbortSignal.timeout(90000) : undefined})
+      .then(r => (r && r.sig && r.text ? r : null)).catch(() => null).then(r => { x.r = r; res(r); }); }; });
   if (EXPANDS.size > 20) EXPANDS.delete(EXPANDS.keys().next().value);
   EXPANDS.set(turn, x);
+  bgPush(x.job, true);
+}
+// Background requests (the «Подробнее» above, citation extracts) go one at a time and never start while a question is being
+// answered: the free model slows down with parallel calls (Vercel 27.11 03:30: a chip question took 102 s next to two prefetches).
+const BGQ = []; let BG_RUN = false;
+function bgPush(job, front = false) { front ? BGQ.unshift(job) : BGQ.push(job); bgNext(); }
+function bgNext() {
+  if (BG_RUN) return;
+  if (VOICE.on) { BGQ.length = 0; return; }
+  if (!BGQ.length) return;
+  if (BUSY) return void setTimeout(bgNext, 1500);
+  const j = BGQ.shift(); BG_RUN = true;
+  let pr; try { pr = Promise.resolve(j()); } catch (_) { pr = Promise.resolve(); }
+  pr.catch(() => {}).finally(() => { BG_RUN = false; bgNext(); });
 }
 async function expandClick(turn) {
   Player.stop();
   const x = EXPANDS.get(turn); EXPANDS.delete(turn);
-  if (!x || x.vid !== VID || BUSY || x.r === null) return eventTurn("expand", turn.text, null, true, turn.sources);
+  if (x && !x.started) { const i = BGQ.indexOf(x.job); if (i >= 0) BGQ.splice(i, 1); }  // still queued: ask the usual (streamed) way
+  if (!x || !x.started || x.vid !== VID || BUSY || x.r === null) return eventTurn("expand", turn.text, null, true, turn.sources);
   let r = x.r;
   if (r === undefined) {
     BUSY = true;
@@ -883,10 +899,8 @@ function prefetchExtracts(btns) {
   for (const b of btns) { const k = b.dataset.doc + "#" + b.dataset.page; if (!b.dataset.doc || seen.has(k)) continue; seen.add(k); pick.push(b); if (pick.length >= 2) break; }
   if (!pick.length) return;
   const question = LAST_Q;
-  // one at a time, never while a question is being answered (same instance, same free model)
-  const next = () => { if (VOICE.on) return; if (BUSY) return setTimeout(next, 1500); const b = pick.shift(); if (!b) return;
-    getExtract(b.dataset.doc, +b.dataset.page, b.dataset.q || "", question).catch(() => {}).finally(next); };
-  setTimeout(next, 1200);
+  // one at a time with the other background requests, never while a question is being answered (same free model)
+  for (const b of pick) bgPush(() => getExtract(b.dataset.doc, +b.dataset.page, b.dataset.q || "", question));
 }
 async function openCitation(doc, page, q) {
   Player.stop(); page = +page;
