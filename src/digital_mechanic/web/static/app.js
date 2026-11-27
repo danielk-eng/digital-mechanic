@@ -239,8 +239,11 @@ function skeleton(text) {
   return d;
 }
 function errorMsg(e) { return addMsg("bot", `<span class="err">${esc(friendlyError(e))}</span>`); }
+// A proxy/tunnel error page (Cloudflare 530/502 HTML, 27.11 10:17 the deb tunnel lost its edge) or a dropped connection
+// («Failed to fetch») must not be printed into the chat as raw markup: say the request did not go through.
 function friendlyError(e) {
   const m = String(e && e.message || e);
+  if (/<(!doctype|html|head|body|title)\b/i.test(m) || /^(TypeError: )?(Failed to fetch|NetworkError|Load failed|network error)/i.test(m)) return t("err_generic");
   if (e && e.status === 502) return m.includes("ML") ? t("err_ml") : m.includes("ТОиР") ? t("err_toir") : m;
   if (e && e.status === 401) return t("err_session");
   return m || t("err_generic");

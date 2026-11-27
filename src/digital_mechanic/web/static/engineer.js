@@ -9,7 +9,12 @@ async function api(p, o = {}) {
   if (o.json) { o.method = "POST"; o.headers = {"Content-Type": "application/json"}; o.body = JSON.stringify(o.json); }
   const r = await fetch(p, {credentials: "same-origin", ...o});
   if (r.status === 401 || r.status === 403) { location.href = "/"; throw new Error("auth"); }
-  if (!r.ok) throw new Error(await r.text()); return r.json();
+  if (!r.ok) {  // JSON detail, not the raw body; a proxy/tunnel HTML error page (Cloudflare 530) -> one plain line
+    let m = await r.text(); try { m = JSON.parse(m).detail || m; } catch (_) {}
+    if (/<(!doctype|html|head|body|title)\b/i.test(String(m))) m = "Не удалось выполнить запрос." + ` (${r.status})`;
+    throw new Error(String(m).slice(0, 300));
+  }
+  return r.json();
 }
 const time = ts => new Date(ts * 1000).toLocaleTimeString("ru-RU");
 async function health() {

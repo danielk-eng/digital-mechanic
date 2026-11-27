@@ -8,7 +8,12 @@ async function api(p, o = {}) {
   if (o.json) { o.method = "POST"; o.headers = {"Content-Type": "application/json"}; o.body = JSON.stringify(o.json); }
   const r = await fetch(p, {credentials: "same-origin", ...o});
   if (r.status === 401 || r.status === 403) { location.href = "/"; throw new Error("auth"); }
-  if (!r.ok) throw new Error(await r.text()); return r.json();
+  if (!r.ok) {  // JSON detail, not the raw body; a proxy/tunnel HTML error page (Cloudflare 530) -> one plain line
+    let m = await r.text(); try { m = JSON.parse(m).detail || m; } catch (_) {}
+    if (/<(!doctype|html|head|body|title)\b/i.test(String(m))) m = t("err_generic") + ` (${r.status})`;
+    throw new Error(String(m).slice(0, 300));
+  }
+  return r.json();
 }
 // days of idle «15,9 дн.» with the decimal mark of the interface language (was «15.9» next to «0,76» elsewhere)
 const dec = n => { try { return new Intl.NumberFormat(document.documentElement.lang || "ru", {maximumFractionDigits: 1}).format(n); } catch (_) { return String(n); } };
