@@ -290,6 +290,7 @@ function renderCard(c) {
     if (ch.description) h += `<span>${t("ml_says")}</span><span>${esc(ch.description)}</span>`;
     h += `</div>`;
     if (c.doubt && c.doubt.length) h += `<p class="warn-text small" style="margin-top:12px">${t("doubt")}: ${c.doubt.map(esc).join("; ")}</p>`;
+    if (c.status === "anomaly" && c.thresholds) h += `<p class="small muted conf-threshold" style="margin-top:8px">${esc(t("conf_threshold"))}</p>`;
     if (c.urgency_basis && c.urgency_basis.length) h += `<details class="more"><summary>${icon("chevron-right", 16)}${t("why_priority")} ${esc(t("urg_" + c.urgency))}</summary><div class="small muted">${c.urgency_basis.map(esc).join("<br>")}</div></details>`;
     if (c.trend) h += `<div class="spark">${spark(c.trend)}</div>`;
     const say = c.status === "anomaly" ? `${t("status_anomaly")}: ${ch.anomaly_title}. ${c.light_text || ""}` : head;
@@ -303,14 +304,30 @@ function renderCard(c) {
       : `<p class="small muted">${t("parts_none")}</p>`;
     if (c.labor) { const known = c.labor.filter(l => l.norm);
       h += `<p class="small muted">${t("labor")}: ` + (known.length ? known.map(l => `${esc(l.norm)} <button class="cite" data-doc="${esc(l.doc_id)}" data-page="${l.page}">${t("page_short")} ${l.page}</button>`).join("; ") : t("labor_na")) + `</p>`; }
+    if (c.warning) h += `<p class="warn-text small">${t("doubt")}: ${esc(c.warning)}</p>`;
+    if (c.prohibition) h += `<p class="err small"><b>${t("prohibition")}:</b> «${esc(c.prohibition.quote)}» <button class="cite" data-doc="${esc(c.prohibition.doc_id)}" data-page="${c.prohibition.page}" data-q="${esc(c.prohibition.quote)}">${t("page_short")} ${c.prohibition.page}</button></p>`;
+    if (c.urgency_options) h += `<label class="small urg-label">${t("priority_pick")}<select class="urg-pick" aria-label="${esc(t("priority_pick"))}">` +
+      ["high", "medium", "low"].map(u => `<option value="${u}"${u === r.urgency ? " selected" : ""}>${esc(c.urgency_options[u] || u)}</option>`).join("") + `</select></label>`;
     h += `<details class="more"><summary>${icon("chevron-right", 16)}${t("json_toir")}</summary><pre class="json">${esc(JSON.stringify(r, null, 1))}</pre></details><div class="card-actions"></div>`;
     const d = addMsg("bot", h);
     const row = d.querySelector(".card-actions");
-    const ok = document.createElement("button"); ok.className = "btn primary"; ok.textContent = c.requires_inspection ? t("inspection_ok") : t("confirm_send");
-    ok.onclick = () => confirmTicket(c.draft_id, true, row, c.token);
+    const ok = document.createElement("button"); ok.className = "btn primary"; ok.textContent = c.requires_inspection ? t("warn_ack") : t("confirm_send");
+    ok.onclick = () => confirmTicket(c.draft_id, true, row, c.token, d.querySelector("select.urg-pick")?.value);
     const no = document.createElement("button"); no.className = "btn ghost"; no.textContent = c.requires_inspection ? t("inspection_no") : t("cancel");
     no.onclick = () => c.requires_inspection ? confirmTicket(c.draft_id, false, row, c.token) : (row.innerHTML = `<span class="muted small">${t("cancelled")}</span>`);
     row.append(ok, no);
+  } else if (c.kind === "contradiction") {
+    let h = `<div class="card-title">${icon("triangle-alert", 20)}${t("contradiction")}: ${esc(c.topic)}</div><ul class="small">` +
+      c.sides.map(sd => `<li>${esc(sd.document)}: «${esc(sd.quote)}» <button class="cite" data-doc="${esc(sd.doc_id)}" data-page="${sd.page}" data-q="${esc(sd.quote)}">${t("page_short")} ${sd.page}</button></li>`).join("") + `</ul>` +
+      `<p><b>${t("safe_rule")}:</b> ${esc(c.safe_rule)}</p>` + (c.resolution ? `<details class="more"><summary>${icon("chevron-right", 16)}${t("why_rule")}</summary><div class="small">${esc(c.resolution)}</div></details>` : "") +
+      `<p class="small muted">${esc(c.clarify)}</p>`;
+    addMsg("bot", h, {cls: "verdict service", speak: `${t("contradiction")}. ${t("safe_rule")}: ${c.safe_rule}`});
+  } else if (c.kind === "no_instruction") {
+    const d = addMsg("bot", `<div class="card-title">${icon("triangle-alert", 20)}${t("no_ticket")}</div><p>${esc(c.reason)}</p>` +
+      `<div class="label">${t("defect_rec")}</div><p class="small rec-text">${esc(c.recommendation)}</p><div class="card-actions"></div>`, {speak: c.reason});
+    const b = document.createElement("button"); b.className = "btn ghost"; b.textContent = t("copy");
+    b.onclick = () => { try { navigator.clipboard.writeText(c.recommendation); b.textContent = t("copied"); } catch (_) {} };
+    d.querySelector(".card-actions").append(b);
   } else if (c.kind === "ticket_created") {
     addMsg("bot", `<div class="vh"><div class="vi">${icon("circle-check", 22)}</div><div><div class="vt">${t("ticket_created")}: <span class="mono">${esc(c.ticket_id)}</span></div><div class="vs">${esc(c.request.conclusion)}</div></div></div>`, {cls: "verdict go", speak: `${t("ticket_created")} ${c.ticket_id}`});
   } else if (c.kind === "repair") {
@@ -337,10 +354,10 @@ async function loadProven(box, code) {
         f.steps.map(st => `<li>${esc(st.text)}${st.page ? ` <button class="cite" data-doc="${esc(st.doc_id)}" data-page="${st.page}" data-q="${esc(st.text)}">${t("page_short")} ${st.page}</button>` : ""}</li>`).join("") + `</ol></div>`).join("") + `</details>`);
   } catch (_) {}
 }
-async function confirmTicket(draftId, ok, row, token) {
+async function confirmTicket(draftId, ok, row, token, urgency) {
   row.innerHTML = `<span class="muted small">${icon("loader-circle", 16, "spin")}</span>`;
   try {
-    const r = await api("/api/ticket/confirm", {json: {vehicle_id: VID, draft_id: draftId, inspection_ok: ok, ...(token ? {token} : {})}});
+    const r = await api("/api/ticket/confirm", {json: {vehicle_id: VID, draft_id: draftId, inspection_ok: ok, ...(urgency ? {urgency} : {}), ...(token ? {token} : {})}});
     row.innerHTML = "";
     if (r.card) renderCard(r.card); else addMsg("bot", md(r.text || r.error || ""), {speak: r.text});
     refreshVehicle();

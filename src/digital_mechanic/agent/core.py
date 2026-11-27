@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from .. import pii, policy
-from . import answer_post
+from . import answer_post, applicability, contradictions
 from ..clients import Fleet, MlClient, ServiceError, ToirClient
 from ..i18n import LANGS, answer_lang, lang_or_default
 from ..retrieval.bm25 import ExtraIndex, ManualIndex, snippet
@@ -35,6 +35,9 @@ FALLBACK_HEAD = "Ассистент сейчас не успел ответит�
 from .prompts import DETAIL, EXPAND_PROMPT, EXPAND_SYSTEM, EXPERIENCE, MANAGER_SYSTEM, MECHANIC_SYSTEM
 
 URG_RU = {"high": "высокий", "medium": "средний", "low": "низкий"}
+# Organizers 26.11: no «обратитесь к специалисту» (the mechanic IS the specialist) -> a concrete action.
+NO_DATA_TEXT = ("В руководстве для этого двигателя данных нет. Что можно сделать: провести дефектовку узла по порядку автопарка "
+                "или открыть ближайший раздел руководства («Руководства» в карточке машины); вопрос записан в журнал пробелов базы для главного механика.")
 
 
 def work_of_quote(quote: str) -> str:
@@ -126,6 +129,8 @@ class Conv:
     n_s: int = 0
     n_x: int = 0
     preface: str = ""
+    contra: list = field(default_factory=list)  # known manual contradictions matched by the current question
+    no_instruction: Optional[str] = None  # defect-check recommendation when the manual has no applicable repair
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -424,7 +429,9 @@ class Agent:
             hist = [h for h in hist if (h.checked_at or "") <= (c.check.checked_at or "~")]
         chips = [ch.as_dict() for ch in suggest.build(
             self.index, c.vehicle, c.check, hist, self.repair_card(c.vehicle.vehicle_id), c.draft,
-            bool(self.store.tickets(c.vehicle.vehicle_id)), user.get("experience") or "experienced")]
+            bool(self.store.tickets(c.vehicle.vehicle_id)), user.get("experience") or "experienced",
+            ticket_allowed=policy.may_create_ticket(c.check, c.vehicle) if c.check else True,
+            blocked=c.decision.value if c.decision in (PolicyDecision.diagnosis_mismatch, PolicyDecision.recheck_low_confidence) else None)]
         if c.check and c.check.anomaly_type:
             tl = self.timeline(c.vehicle.vehicle_id, until=c.check.checked_at)
             past = [e for e in tl["entries"][1:] if e["anomaly_type"] == c.check.anomaly_type and (e["repair"] or e["ticket"])]
@@ -473,10 +480,11 @@ class Agent:
             if s.session_id == sid:
                 check.checked_at = s.checked_at
         c.check, c.draft = check, None
-        c.decision = policy.decide(check)
-        u, why = policy.urgency(check) if check.status == CheckStatus.anomaly else (None, [])
+        c.decision = policy.decide(check, c.vehicle)
+        blocked = c.decision in (PolicyDecision.diagnosis_mismatch, PolicyDecision.recheck_low_confidence)
+        u, why = policy.urgency(check) if check.status == CheckStatus.anomaly and not blocked else (None, [])
         self.store.add_diagnosis(c.uid, check.model_dump(mode="json"), c.decision.value, u.value if u else None)
-        return self.verdict_card(check, c.decision, u, why)
+        return self.verdict_card(check, c.decision, u, why, c.vehicle)
 
     def restore_check(self, c: Conv, session_id: str | None) -> bool:
         """Another instance ran /api/diagnose (Vercel: requests of one dialog land on different instances, the
@@ -497,13 +505,20 @@ class Agent:
             if s.session_id == sid:
                 check.checked_at = s.checked_at
         c.check = check
-        c.decision = policy.decide(check)
+        c.decision = policy.decide(check, c.vehicle)
         return True
 
-    def verdict_card(self, check: CheckResult, decision: PolicyDecision, u: Urgency | None, why: list[str]) -> dict:
+    def verdict_card(self, check: CheckResult, decision: PolicyDecision, u: Urgency | None, why: list[str], vehicle=None) -> dict:
         card = {"kind": "verdict", "status": check.status.value, "decision": decision.value, "check": check.model_dump(mode="json"),
-                "doubt": policy.doubt_flags(check) if check.status == CheckStatus.anomaly else []}
-        if u:
+                "doubt": policy.doubt_flags(check) if check.status == CheckStatus.anomaly else [],
+                "thresholds": {"rerecord": policy.RERECORD_CONFIDENCE, "inspect": policy.LOW_CONFIDENCE},
+                "ticket_allowed": policy.may_create_ticket(check, vehicle)}
+        if decision == PolicyDecision.diagnosis_mismatch:
+            card.update(light="repeat", light_text=policy.mismatch(check, vehicle))
+        elif decision == PolicyDecision.recheck_low_confidence:
+            card.update(light="repeat", light_text=(f"Уверенность {policy._ru(check.confidence)} ниже порога {policy._ru(policy.RERECORD_CONFIDENCE)}: "
+                                                    "повторите запись. Заявка по этой проверке не оформляется."))
+        elif u:
             code, label = policy.LIGHT[u]
             card.update(urgency=u.value, light=code, light_text=label, urgency_basis=why)
         elif check.status == CheckStatus.normal:
@@ -529,12 +544,20 @@ class Agent:
             lines.append(f"Текущая проверка {ch.session_id} от {ch.checked_at}: status={ch.status.value}, тип={ch.anomaly_type} {ch.anomaly_title or ''}, "
                          f"anomaly_score={ch.anomaly_score}, confidence={ch.confidence}, signal_quality={ch.signal_quality.value}, описание модели: «{ch.description}».")
             lines.append(f"Решение политики: {c.decision.value if c.decision else '-'}.")
-            if ch.status == CheckStatus.anomaly:
+            mm = policy.mismatch(ch, v)
+            if mm:
+                lines.append("РАСХОЖДЕНИЕ С КАРТОЧКОЙ: " + mm + " Не объясняй этот тип неисправности, не ищи и не приводи нормативы и процедуры "
+                             "другого двигателя, не подменяй его похожим типом. Скажи о расхождении и рекомендуй повторить проверку или дефектовку.")
+            elif ch.status == CheckStatus.anomaly and ch.confidence is not None and ch.confidence < policy.RERECORD_CONFIDENCE:
+                lines.append(f"НИЗКАЯ УВЕРЕННОСТЬ {policy._ru(ch.confidence)} < порога {policy._ru(policy.RERECORD_CONFIDENCE)}: рекомендуй повторить запись; "
+                             "заявку не оформлять. Можно назвать, что проверить по руководству, как гипотезу.")
+            elif ch.status == CheckStatus.anomaly:
                 u, why = policy.urgency(ch)
                 lines.append(f"Приоритет (рассчитан системой): {u.value} — {'; '.join(why)}.")
                 flags = policy.doubt_flags(ch)
                 if flags:
-                    lines.append("СОМНЕНИЯ: " + "; ".join(flags) + ". Сначала осмотр узла по руководству, заявка — после подтверждения осмотром.")
+                    lines.append("СОМНЕНИЯ: " + "; ".join(flags) + ". Предупреди механика. Сначала осмотр узла на месте по руководству (заявку на осмотр не оформлять); "
+                                 "заявка на ремонт — только если механик сознательно подтвердит неисправность после осмотра.")
         else:
             lines.append("Проверка ещё не запрошена.")
         if v:
@@ -552,6 +575,8 @@ class Agent:
             if r:
                 cur = r["steps"][r["current"]] if r["current"] < len(r["steps"]) else None
                 lines.append(f"ИДЁТ РЕМОНТ «{r['title']}»: шаг {r['current'] + 1} из {len(r['steps'])}" + (f" — {cur['text']} ({cur['document']}, стр. {cur['page']})" if cur else ""))
+        if c.contra:
+            lines.append(contradictions.context_block(c.contra))
         if c.draft:
             lines.append(f"Черновик заявки ждёт подтверждения механика (приоритет {URG_RU.get(c.draft['request']['urgency'], c.draft['request']['urgency'])}).")
         if c.frags:
@@ -772,24 +797,34 @@ class Agent:
 
     def tool_prepare_ticket(self, c: Conv, args: dict) -> dict:
         ch = c.check
-        if not policy.may_create_ticket(ch):
-            why = "проверка не запрошена" if not ch else {"normal": "двигатель в норме — заявка не нужна", "check_failed": "сбой записи — диагноз не ставится, нужна повторная запись"}.get(ch.status.value, "нет отклонения")
-            return {"error": f"Заявку создать нельзя: {why}."}
+        why_not = policy.ticket_refusal(ch, c.vehicle)
+        if why_not:
+            return {"error": f"Заявку создать нельзя: {why_not}."}
         ops, e1 = self._verify_items(c, args.get("operations") or [], "работа")
         parts, e2 = self._verify_items(c, args.get("spare_parts") or [], "запчасть")
+        ops, e3 = applicability.repair_ops(ops, ch.anomaly_type, c.frags)
         if not ops:
-            return {"error": "Нет ни одной работы с подтверждённой цитатой. Найди процедуру (search_manual) или общую проверку/осмотр узла и повтори.", "rejected": e1 + e2}
+            rec = applicability.defect_recommendation(ch, c.vehicle)
+            c.no_instruction = rec
+            return {"error": "Заявку создать нельзя: в руководстве на двигатель этой машины нет применимой инструкции по ремонту найденной неисправности "
+                             "(осмотр/проверку в заявку не включают — их делают на месте). Покажи механику причину и текст рекомендации на дефектовку.",
+                    "rejected": e1 + e2 + e3, "defect_recommendation": rec}
         u, why = policy.urgency(ch)
+        ban = policy.prohibition({it["label"]: c.frags[it["label"]] for it in ops if it.get("label") in c.frags})
         refs, seen = [], set()
         for it in ops + parts:
             key = (it["document"], it["page"])
             if key not in seen:
                 seen.add(key); refs.append(Reference(manual=it["document"], pdf_page=it["page"]))
+        ev = applicability.oil_pressure_evidence(c.frags) if ch.anomaly_type == "F02" else None
+        if ev and (ev["document"], ev["page"]) not in seen:  # the manometer check page is the evidence of the conclusion
+            refs.append(Reference(manual=ev["document"], pdf_page=ev["page"]))
         conclusion = (args.get("conclusion") or "").strip() or f"{ch.anomaly_title}: {ch.description}"
         req = TicketRequest(vehicle_id=ch.vehicle_id, session_id=ch.session_id, anomaly_type=ch.anomaly_type, conclusion=pii.mask(conclusion),
                             urgency=u, operations=[o["text"] for o in ops], spare_parts=[p["text"] for p in parts], references=refs)
         c.draft = {"id": uuid.uuid4().hex[:8], "request": req.model_dump(mode="json"), "operations": ops, "spare_parts": parts, "urgency_basis": why,
-                   "requires_inspection": bool(policy.doubt_flags(ch)), "rejected": e1 + e2}
+                   "requires_inspection": bool(policy.doubt_flags(ch)), "rejected": e1 + e2 + e3,
+                   "prohibition": ban, "urgency_options": policy.URGENCY_MEANING_FULL}
         return {"draft_ready": True, "urgency": u.value, "urgency_ru": URG_RU.get(u.value, u.value), "operations": len(ops), "spare_parts": len(parts), "rejected": e1 + e2,
                 "requires_inspection": c.draft["requires_inspection"], "note": "Черновик показан механику, он подтвердит отправку кнопкой."}
 
@@ -903,12 +938,22 @@ class Agent:
                 self.restore_check(c, session_id)
             if event == "expand" and sources:
                 self.rehydrate_frags(c, sources)
+            c.contra = contradictions.find(c.vehicle.engine_model if c.vehicle else None, text) if event != "expand" else []
             turn = self._handle(c, user, text, image_note, event)
+            for k in c.contra:
+                if not any(cd.get("kind") == "contradiction" for cd in turn.cards):
+                    turn.cards.append(contradictions.card(k))
             if c.preface:  # deterministic part (e.g. triage order by the TZ urgency rules), not subject to LLM grounding
                 turn.text = c.preface + ("\n\n" + turn.text if turn.text else "")
                 c.preface = ""
             if turn.text:
                 turn.text, intents = answer_post.clean(turn.text)
+                turn.text = answer_post.no_specialist(turn.text)
+                if not turn.text.startswith(FALLBACK_HEAD):
+                    turn.text, removed = answer_post.guard_uncited(turn.text)
+                    if removed:
+                        turn.tools.append({"tool": "uncited_guard", "removed": [r[:160] for r in removed]})
+                self._log_gap(c, user, text, turn)
                 labels = set(cited_labels(turn.text))
                 turn.sources = [s for s in turn.sources if s["label"] in labels]
                 if c.vehicle:
@@ -923,6 +968,33 @@ class Agent:
                         and (user.get("detail") or "brief") == "brief"):
                     self.prefetch_expand(c, user, turn.text)
             return turn
+
+    _NO_DATA = re.compile(r"(?i)в руководстве[^.\n]{0,40}(данных|информации|сведений) нет|данных не нашёл")
+
+    def _log_gap(self, c: Conv, user: dict, question: str, turn: Turn) -> None:
+        """Day-2 briefing: «no data» or a contradiction -> an automatic item for the chief / admin («пробел в базе»):
+        who, which fleet, which vehicle and engine, what was asked. One per vehicle and topic a day."""
+        if not c.vehicle or user.get("role") == "manager" or not question:
+            return
+        kinds = []
+        if self._NO_DATA.search(turn.text or ""):
+            kinds.append(("no_data", question))
+        kinds += [("contradiction", k["topic"]) for k in c.contra]
+        for kind, topic in kinds:
+            try:
+                day = time.time() - 86400
+                dup = self.store.q("SELECT id FROM handoffs WHERE kind='kb_gap' AND vehicle_id=? AND ts>? AND note=?",
+                                   (c.vehicle.vehicle_id, day, pii.mask(topic)[:300]))
+                if dup:
+                    continue
+                payload = {"gap": kind, "question": pii.mask(question)[:300], "engine": c.vehicle.engine_model,
+                           "vehicle_id": c.vehicle.vehicle_id, "company": user.get("company_id"), "mechanic": user.get("name") or user.get("id")}
+                summary = ("Нет данных в руководстве" if kind == "no_data" else "Противоречие в руководствах") + \
+                          f": {c.vehicle.engine_model}, машина {c.vehicle.vehicle_id}. Вопрос: {pii.mask(question)[:200]}"
+                self.store.add_handoff(user.get("id") or c.uid, c.vehicle.vehicle_id, "kb_gap", pii.mask(topic)[:300], summary, payload)
+                turn.tools.append({"tool": "kb_gap", "ok": True, "gap": kind})
+            except Exception:
+                pass
 
     def answer_actions(self, c: Conv, turn: Turn, intents: set[str]) -> list[dict]:
         """Buttons under an answer, from the conversation state (+ what the LLM tried to offer in words).
@@ -940,11 +1012,11 @@ class Agent:
             out.append({"id": "next_step", "kind": "send", "label": "Следующий шаг", "text": "Готово, следующий шаг"})
         elif c.draft:
             out.append({"id": "confirm_ticket", "kind": "send", "label": "Подтвердить заявку", "text": "Подтверждаю заявку"})
-        elif status == "anomaly" and not has_ticket:
+        elif status == "anomaly" and not has_ticket and policy.may_create_ticket(c.check, c.vehicle):
             out.append({"id": "create_ticket", "kind": "send", "label": "Создать заявку", "text": "Создать заявку на дефектовку"})
         elif has_ticket and ("repair" in intents or status == "anomaly"):
             out.append({"id": "start_repair", "kind": "send", "label": "Начать ремонт по шагам", "text": "Начать ремонт по шагам"})
-        elif "ticket" in intents and status != "normal":
+        elif "ticket" in intents and status != "normal" and policy.may_create_ticket(c.check, c.vehicle):
             out.append({"id": "create_ticket", "kind": "send", "label": "Создать заявку", "text": "Создать заявку на дефектовку"})
         src = next((s for s in turn.sources if not s.get("extra")), turn.sources[0] if turn.sources else None)
         if src:
@@ -1033,9 +1105,16 @@ class Agent:
                       "если в них нет нужного — сделай не более одного дополнительного поиска.\n\n" + frag_txt)
         if image_note:
             masked = (masked + "\n" if masked else "") + ("[Материал от механика (не ML-диагноз), описание: " + image_note + "]")
+        ticket_ask = bool(c.vehicle and c.check and c.check.status == CheckStatus.anomaly and TICKET_RE.search(raw or "") and not c.draft)
+        if ticket_ask:
+            c.no_instruction = None
+            refusal = policy.ticket_refusal(c.check, c.vehicle)
+            if refusal:  # policy, not the model: no LLM call, the same answer every time
+                turn.text = "Заявку не оформляю: " + refusal.rstrip(".") + "."
+                turn.tools.append({"tool": "policy", "ok": True, "decision": c.decision.value if c.decision else None})
+                return turn
         if not self.llm.available:
             return self._fallback(c, masked, turn)
-        ticket_ask = bool(c.vehicle and c.check and c.check.status == CheckStatus.anomaly and TICKET_RE.search(raw or "") and not c.draft)
         if (self.facts_pass and c.vehicle and not manager and not orig_event and raw and not ticket_ask and not image_note
                 and not c.draft and not PREFETCH_SKIP.search(raw)):
             t = self._two_pass(c, user, raw, turn)
@@ -1126,6 +1205,9 @@ class Agent:
         turn.sources = [self._source_view(l, c) for l in cited_labels(turn.text) if l in c.frags]
         if c.draft and any(t["tool"] == "prepare_ticket" and t.get("ok") for t in turn.tools):
             turn.cards.append(self.draft_card(c))
+        elif c.no_instruction and not c.draft and any(t["tool"] == "prepare_ticket" for t in turn.tools):
+            turn.cards.append({"kind": "no_instruction", "reason": "В руководстве на двигатель этой машины нет инструкции по найденной неисправности — заявка не отправлена.",
+                               "recommendation": c.no_instruction})
         if any(t["tool"] in ("start_repair", "update_repair") for t in turn.tools) and c.vehicle:
             card = self.repair_card(c.vehicle.vehicle_id)
             if card:
@@ -1310,7 +1392,7 @@ class Agent:
             return turn
         res = self.tool_search_manual(c, text)
         if not res["fragments"]:
-            turn.text = "В руководстве для этого двигателя данных не нашёл. Рекомендую дефектовку у специалиста."
+            turn.text = NO_DATA_TEXT
             return turn
         lines = [FALLBACK_HEAD]
         for f in res["fragments"][:3]:
@@ -1362,17 +1444,23 @@ class Agent:
     def draft_card(self, c: Conv) -> dict:
         d = c.draft
         return {"kind": "ticket_draft", "draft_id": d["id"], "request": d["request"], "operations": d["operations"], "spare_parts": d["spare_parts"],
-                "urgency_basis": d["urgency_basis"], "requires_inspection": d["requires_inspection"], "labor": self.labor_norms(c, d["operations"])}
+                "urgency_basis": d["urgency_basis"], "requires_inspection": d["requires_inspection"], "labor": self.labor_norms(c, d["operations"]),
+                "prohibition": d.get("prohibition"), "urgency_options": d.get("urgency_options") or policy.URGENCY_MEANING_FULL,
+                "warning": "; ".join(policy.doubt_flags(c.check)) if c.check else ""}
 
-    def confirm(self, c: Conv, draft_id: str | None, inspection_ok: bool = True) -> dict:
+    def confirm(self, c: Conv, draft_id: str | None, inspection_ok: bool = True, urgency: str | None = None) -> dict:
         if not c.draft or (draft_id and draft_id != c.draft["id"]):
             return {"error": "нет черновика для подтверждения"}
         if not inspection_ok:
             c.draft = None
             return {"cancelled": True, "text": "Осмотр не подтвердил неисправность — заявка не отправлена, машина может вернуться на линию. Результат записан в журнал."}
-        if not policy.may_create_ticket(c.check):
+        if not policy.may_create_ticket(c.check, c.vehicle):
             c.draft = None
-            return {"error": "по текущей проверке заявка не допускается"}
+            return {"error": "по текущей проверке заявка не допускается: " + (policy.ticket_refusal(c.check, c.vehicle) or "")}
+        if urgency in ("high", "medium", "low") and urgency != c.draft["request"].get("urgency"):
+            # the mechanic's choice on confirm is final (organizers 26.11); the proposed level stays in the basis
+            c.draft["request"]["urgency"] = urgency
+            c.draft["urgency_basis"] = list(c.draft.get("urgency_basis") or []) + [f"механик изменил приоритет на «{URG_RU[urgency]}»"]
         req = TicketRequest(**c.draft["request"])
         ack = self.toir.create_ticket(req)
         self.store.add_ticket(c.uid, c.draft["request"], ack.ticket_id)

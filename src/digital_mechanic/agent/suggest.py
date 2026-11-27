@@ -102,7 +102,7 @@ CODE_CHIP = "Ввести код ошибки F…"
 
 
 def build(index, vehicle, check, history: list, repair: dict | None, draft: dict | None, has_ticket: bool,
-          experience: str = "experienced", limit: int = 5) -> list[Chip]:
+          experience: str = "experienced", limit: int = 5, ticket_allowed: bool = True, blocked: str | None = None) -> list[Chip]:
     eng = vehicle.engine_model
     expert, novice = experience == "expert", experience == "novice"
     chips: list[Chip] = []
@@ -135,6 +135,12 @@ def build(index, vehicle, check, history: list, repair: dict | None, draft: dict
     # 2) the current check result
     if status == "check_failed":
         chips.append(Chip("Почему запись не принята и как перезаписать?", "action"))
+    elif status == "anomaly" and blocked == "diagnosis_mismatch":  # card wins: no chips about the impossible fault
+        chips.append(Chip("Почему результат не подходит этому двигателю?", "action"))
+        chips.append(Chip("Как повторить проверку?", "action"))
+    elif status == "anomaly" and blocked == "recheck_low_confidence":
+        chips.append(Chip("Как повторить запись, чтобы уверенность была выше?", "action"))
+        chips.append(Chip(f"Что осмотреть по узлу «{check.anomaly_title or check.anomaly_type}»?", "action"))
     elif status == "anomaly":
         title = f"«{check.anomaly_title or check.anomaly_type}»"
         if (check.confidence is not None and check.confidence < 0.6) or getattr(check.signal_quality, "value", check.signal_quality) == "warning":
@@ -144,7 +150,7 @@ def build(index, vehicle, check, history: list, repair: dict | None, draft: dict
         manual(TOPICS.get(check.anomaly_type or "", []))
         if draft:
             chips.append(Chip("Подтверждаю заявку", "action"))
-        elif not has_ticket and not (repair and repair.get("status") == "open"):
+        elif ticket_allowed and not has_ticket and not (repair and repair.get("status") == "open"):
             chips.append(Chip("Создать заявку на дефектовку", "action"))
         elif not (repair and repair.get("status") == "open"):
             chips.append(Chip("Начать ремонт по шагам", "action"))

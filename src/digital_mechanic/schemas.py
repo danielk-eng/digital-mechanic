@@ -88,4 +88,6 @@ class PolicyDecision(str, Enum):
     repeat_recording = "repeat_recording"
     no_ticket_normal = "no_ticket_normal"
     propose_ticket = "propose_ticket"
-    verify_then_ticket = "verify_then_ticket"  # low confidence / noisy record: inspect unit first
+    verify_then_ticket = "verify_then_ticket"  # 0,50 <= confidence < 0,60 or noisy record: inspect unit on site first
+    recheck_low_confidence = "recheck_low_confidence"  # confidence < 0,50: re-record, no ticket (organizers 26.11)
+    diagnosis_mismatch = "diagnosis_mismatch"  # fault type impossible for this engine (card wins): model error, no ticket

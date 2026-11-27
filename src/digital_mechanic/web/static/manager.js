@@ -219,7 +219,7 @@ async function loadHandoffs() {
   r.handoffs = r.handoffs.filter(h => vMatch(vById(h.vehicle_id)));
   r.handoffs.forEach(h => { h.payload = Object.assign({pages: [], photos: [], dialog: [], items: []}, h.payload); });
   $("#tab-handoffs").innerHTML = r.handoffs.length ? r.handoffs.map(h => `<div class="panel"><div class="pad">` +
-    `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><b class="mono">${esc(h.vehicle_id)}</b><span class="small muted">${h.kind === "inspection" ? t("inspection") + ", " : ""}${mskTime(h.ts)}, ${esc(h.user_name)}</span><span class="pill ${stc[h.status]}" style="margin-left:auto">${t(st[h.status] || h.status)}</span></div>` +
+    `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><b class="mono">${esc(h.vehicle_id)}</b><span class="small muted">${h.kind === "inspection" ? t("inspection") + ", " : h.kind === "kb_gap" ? `<span class="pill attention">${t("kb_gap")}</span> ` : ""}${mskTime(h.ts)}, ${esc(h.user_name)}</span><span class="pill ${stc[h.status]}" style="margin-left:auto">${t(st[h.status] || h.status)}</span></div>` +
     (h.note ? `<p><b>${esc(h.note)}</b></p>` : "") + `<div class="small" style="margin-top:8px">${mdl(h.summary, h.payload.pages)}</div>` +
     (h.payload.items.length ? `<ul class="small">${h.payload.items.map(it => `<li><b>${esc(it.component)}</b>: ${esc(it.finding)} <span class="muted">(${esc(it.severity)})</span>${it.page ? " " + pageLink(it) : ""}</li>`).join("")}</ul>` : "") +
     (h.payload.pages.length ? `<div style="margin-top:8px">${h.payload.pages.map(pageLink).join(" ")}</div>` : "") +

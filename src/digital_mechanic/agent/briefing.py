@@ -20,7 +20,7 @@ LAST_RX = re.compile(r"(последн\w*|свеж\w*|недавн\w*)\W+(?:\w+\
                      r"|(сканир\w*|провер\w*|записыв\w*)\W+(?:\w+\W+){0,3}?последн\w*", re.I)
 YES_RX = re.compile(r"^\W*(да|давай|создай|создавай|создать|оформи|оформляй|ок|окей|хорошо|согласен|подтверждаю|назнач\w*|поехали)\b", re.I)
 NO_RX = re.compile(r"^\W*(нет|не надо|не нужно|отмена|отбой|позже|потом)\b", re.I)
-REPEAT_DAYS = 90
+REPEAT_DAYS = 200  # «через полгода» (day-2 briefing): repeat repairs of the same unit within ~6.5 months
 URG_RU = {"high": "высокая", "medium": "средняя", "low": "низкая"}
 
 
@@ -170,7 +170,7 @@ class Briefing:
         turn.cards.append(card)
         turn.sources = sources
         turn.tools.append({"tool": "briefing.latest_scan", "ok": True, "vehicle_id": vid, "insights": [i["kind"] for i in insights]})
-        if st == "anomaly" and policy.may_create_ticket(s) and sources:
+        if st == "anomaly" and policy.may_create_ticket(s, self.a.fleet.get(vid)) and sources:
             fixer = self._account_by_name(sim[0]["mechanic"]) if sim and sim[0]["result"] == "normal" else None
             pick = fixer or owner
             why = (f"он закрыл такой же случай на {sim[0]['vehicle_id']}" if fixer else "он закреплён за этой машиной")

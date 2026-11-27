@@ -93,3 +93,46 @@ def clean(text: str) -> tuple[str, set[str]]:
     t = re.sub(r"\n{3,}", "\n\n", t).strip()
     intents = {name for o in offers for name, rx in INTENTS if rx.search(o)}
     return (t or text), intents
+
+
+# ---------------------------------------------------------------- organizers 26.11: numbers only with a page, labelled hypotheses
+_UNIT_NUM = re.compile(r"\d+(?:[.,]\d+)?(?:\s*(?:[-–…]|до)\s*\d+(?:[.,]\d+)?)?\s*(?:кгс\s*[·*.⋅]?\s*м|кгс\s*/\s*см|н\s*[·*.⋅]?\s*м|нм\b|кпа|мпа|бар\b|мм\b|°\s*c|ºс|°с|град|об\s*/\s*мин|мин[-−]1|л\b|литр)", re.I)
+_LABEL_ANY = re.compile(r"\[(?:[^\]]*\b)?[SX]\d+\b[^\]]*\]")
+_LONG_QUOTE = re.compile(r"«[^»]{25,}»")
+_NOT_MANUAL = re.compile(r"(не из руководства|гипотез)", re.I)
+_SPECIALIST = re.compile(r"[,;]?\s*(?:и\s+|или\s+)?(?:рекоменду\w+\s+)?(?:обрат\w+|проконсультир\w+)\s+(?:к|с|у)\s+специалист\w*(?:[^.\n]*)?", re.I)
+
+
+def guard_uncited(text: str) -> tuple[str, list[str]]:
+    """A number with a unit (norm, tolerance, torque, pressure) and no [S#]/[X#] label in its line, a number in a
+    «Не из руководства» / «Гипотеза» line, or a long «quote» without a label -> the sentence is removed.
+    -> (text, removed sentences)."""
+    if not text:
+        return text, []
+    out, removed = [], []
+    for line in text.split("\n"):
+        labelled = bool(_LABEL_ANY.search(line))
+        no_src = bool(_NOT_MANUAL.search(line))
+        if (_UNIT_NUM.search(line) and (not labelled or no_src)) or (_LONG_QUOTE.search(line) and not labelled):
+            sents = re.split(r"(?<=[.!?])\s+", line)
+            keep = []
+            for s in sents:
+                bad = (_UNIT_NUM.search(s) and (no_src or not labelled)) or (_LONG_QUOTE.search(s) and not labelled)
+                (removed if bad else keep).append(s)
+            line = " ".join(keep)
+            if not line.strip():
+                continue
+        out.append(line)
+    return "\n".join(out), removed
+
+
+def no_specialist(text: str) -> str:
+    """«обратитесь к специалисту» -> a concrete action (the mechanic IS the specialist)."""
+    if not text or "специалист" not in text.lower():
+        return text
+    def rep(m: re.Match) -> str:
+        before = text[:m.start()].rstrip()
+        if not before or before[-1] in ".!?\n:":
+            return " Проведите дефектовку узла или откройте ближайший раздел руководства"
+        return " — проведите дефектовку узла или откройте ближайший раздел руководства"
+    return re.sub(r" {2,}", " ", _SPECIALIST.sub(rep, text)).strip()

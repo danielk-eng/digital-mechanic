@@ -1083,6 +1083,7 @@ class ConfirmIn(BaseModel):
     vehicle_id: str
     draft_id: str | None = None
     inspection_ok: bool = True
+    urgency: str | None = None  # the mechanic's final priority (may differ from the proposed one)
     token: str | None = None  # the signed draft from the card (see draft_token)
 
 
@@ -1098,7 +1099,7 @@ def confirm(body: ConfirmIn, uid: str | None = Cookie(None)) -> dict:
                 c.draft = d
                 AGENT.restore_check(c, (d.get("request") or {}).get("session_id"))
     try:
-        r = AGENT.confirm(c, body.draft_id, body.inspection_ok)
+        r = AGENT.confirm(c, body.draft_id, body.inspection_ok, body.urgency)
     except ServiceError as e:
         STORE.audit(user_id=u["id"], role=u["role"], vehicle_id=body.vehicle_id, action="ticket_confirm", output=f"{e.status} {e.detail[:300]}", ok=0)
         raise HTTPException(502, f"ТОиР: {e.status} {e.detail[:200]}")
