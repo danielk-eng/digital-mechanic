@@ -150,6 +150,8 @@ async function openVehicle(vid, brief) {
   const body = $("#layer .vbd"); if (body) body.innerHTML = b;
 }
 
+// times on the chief's panel in Moscow time like the checks and tickets («27.11.2026, 06:21 МСК»), not the browser's zone
+function mskTime(ts) { try { return new Date(ts * 1000).toLocaleString("ru-RU", {timeZone: "Europe/Moscow", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"}) + " МСК"; } catch (_) { return new Date(ts * 1000).toLocaleString("ru-RU"); } }
 function pageLink(x) {
   return `<button class="cite" data-doc="${esc(x.doc_id)}" data-page="${x.page}" title="${esc(x.document)}">${t("page_short")} ${x.page}</button>`;
 }
@@ -215,7 +217,7 @@ async function loadHandoffs() {
   r.handoffs = r.handoffs.filter(h => vMatch(vById(h.vehicle_id)));
   r.handoffs.forEach(h => { h.payload = Object.assign({pages: [], photos: [], dialog: [], items: []}, h.payload); });
   $("#tab-handoffs").innerHTML = r.handoffs.length ? r.handoffs.map(h => `<div class="panel"><div class="pad">` +
-    `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><b class="mono">${esc(h.vehicle_id)}</b><span class="small muted">${h.kind === "inspection" ? t("inspection") + ", " : ""}${new Date(h.ts * 1000).toLocaleString("ru-RU")}, ${esc(h.user_name)}</span><span class="pill ${stc[h.status]}" style="margin-left:auto">${t(st[h.status] || h.status)}</span></div>` +
+    `<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><b class="mono">${esc(h.vehicle_id)}</b><span class="small muted">${h.kind === "inspection" ? t("inspection") + ", " : ""}${mskTime(h.ts)}, ${esc(h.user_name)}</span><span class="pill ${stc[h.status]}" style="margin-left:auto">${t(st[h.status] || h.status)}</span></div>` +
     (h.note ? `<p><b>${esc(h.note)}</b></p>` : "") + `<div class="small" style="margin-top:8px">${mdl(h.summary, h.payload.pages)}</div>` +
     (h.payload.items.length ? `<ul class="small">${h.payload.items.map(it => `<li><b>${esc(it.component)}</b>: ${esc(it.finding)} <span class="muted">(${esc(it.severity)})</span>${it.page ? " " + pageLink(it) : ""}</li>`).join("")}</ul>` : "") +
     (h.payload.pages.length ? `<div style="margin-top:8px">${h.payload.pages.map(pageLink).join(" ")}</div>` : "") +

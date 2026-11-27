@@ -38,7 +38,7 @@ from ..agent.prompts import VISION_PROMPT
 from ..bootstrap import build_agent
 from ..clients import ServiceError
 from ..config import get_settings
-from ..history import mask_name
+from ..history import mask_name, msk_time
 from ..i18n import LANGS, answer_lang, lang_or_default
 
 S = get_settings()
@@ -644,7 +644,7 @@ def tickets_list(uid: str | None = Cookie(None)) -> dict:
             continue
         p = t["payload"]
         out.append({"ticket_id": t["ticket_id"], "vehicle_id": t["vehicle_id"], "urgency": t["urgency"], "anomaly_type": t["anomaly_type"],
-                    "at": time.strftime("%d.%m.%Y %H:%M", time.localtime(t["ts"])), "conclusion": p.get("conclusion", ""),
+                    "at": msk_time(t["ts"]), "ts": t["ts"], "conclusion": p.get("conclusion", ""),
                     "operations": p.get("operations", []), "status": t.get("status"), "attachments": t.get("attachments"), "review": t.get("review")})
     return {"tickets": out}
 

@@ -145,3 +145,10 @@ def summary_for_agent(tl: dict, limit: int = 6) -> str:
             s += f"; повторная проверка {e['recheck']['session_id']}: {e['recheck']['status_ru']}"
         lines.append(s)
     return "\n".join(lines)
+
+
+def msk_time(ts: float | None = None) -> str:
+    """«27.11.2026 06:21 МСК»: the stands run in UTC (Vercel) or the box zone; checks and the demo fleet are in Moscow time."""
+    from datetime import datetime, timedelta, timezone
+
+    return datetime.fromtimestamp(time.time() if ts is None else ts, timezone(timedelta(hours=3))).strftime("%d.%m.%Y %H:%M") + " МСК"

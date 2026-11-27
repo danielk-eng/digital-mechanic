@@ -25,7 +25,7 @@ from ..i18n import LANGS, answer_lang, lang_or_default
 from ..retrieval.bm25 import ExtraIndex, ManualIndex, snippet
 from ..schemas import CheckResult, CheckStatus, PolicyDecision, Reference, TicketRequest, Urgency, Vehicle
 from ..store import Store
-from ..history import summary_for_agent as hist_summary, timeline as build_timeline
+from ..history import msk_time, summary_for_agent as hist_summary, timeline as build_timeline
 from .grounding import cited_labels, quote_in_text, unverified_numbers
 from .llm import Llm, LlmUnavailable
 from .prompts import DETAIL, EXPAND_PROMPT, EXPAND_SYSTEM, EXPERIENCE, MANAGER_SYSTEM, MECHANIC_SYSTEM
@@ -458,7 +458,7 @@ class Agent:
             lines.append(f"ИСТОРИЯ МАШИНЫ (до текущей проверки включительно; дней с прошлой проверки: {tl['days_since_last_check']}; пробег — демо):\n" + hist_summary(tl))
             tks = self.store.tickets(v.vehicle_id)
             if tks:
-                lines.append("Заявки в ТОиР: " + "; ".join(f"{t['ticket_id']} {t['anomaly_type']} {t['urgency']} {time.strftime('%d.%m %H:%M', time.localtime(t['ts']))}" for t in tks[:5]))
+                lines.append("Заявки в ТОиР: " + "; ".join(f"{t['ticket_id']} {t['anomaly_type']} {t['urgency']} {msk_time(t['ts'])}" for t in tks[:5]))
             r = self.store.repair_open(v.vehicle_id)
             if r:
                 cur = r["steps"][r["current"]] if r["current"] < len(r["steps"]) else None
@@ -473,7 +473,7 @@ class Agent:
         lang = LANGS[answer_lang(user)]["llm"]
         personal = "".join("\n" + user[k] for k in ("_style", "_memory") if user.get(k))  # agent/style.py, agent/memory.py
         if manager:
-            return MANAGER_SYSTEM.format(lang_name=lang, context=f"Сейчас {time.strftime('%d.%m.%Y %H:%M')}.") + personal
+            return MANAGER_SYSTEM.format(lang_name=lang, context=f"Сейчас {msk_time()}.") + personal
         rule = EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"])
         if user.get("_vocab_hint"):
             rule += "\n" + user["_vocab_hint"]  # adaptive profile: the mechanic's own terms (agent/profile.py)
@@ -661,7 +661,7 @@ class Agent:
         trend = "растёт" if len(scores) >= 2 and scores[-1] - scores[0] > 0.15 else "снижается" if len(scores) >= 2 and scores[0] - scores[-1] > 0.15 else "стабильно"
         return {"vehicle_id": vehicle_id, "timeline": hist_summary(self.timeline(vehicle_id)), "checks": [s.model_dump(mode="json") for s in ss], "anomaly_score_trend": trend,
                 "tickets": [{"ticket_id": t["ticket_id"], "urgency": t["urgency"], "anomaly_type": t["anomaly_type"], "conclusion": t["payload"]["conclusion"],
-                             "at": time.strftime("%d.%m.%Y %H:%M", time.localtime(t["ts"]))} for t in self.store.tickets(vehicle_id)],
+                             "at": msk_time(t["ts"])} for t in self.store.tickets(vehicle_id)],
                 "repairs": [{"title": r["title"], "status": r["status"], "step": r["current"] + 1, "steps": len(r["steps"])} for r in self.store.q(
                     "SELECT title,status,current,steps FROM repairs WHERE vehicle_id=? ORDER BY id DESC LIMIT 5", (vehicle_id,)) for r in [{**r, "steps": json.loads(r["steps"])}]]}
 

@@ -16,3 +16,8 @@ def test_human_numbers_are_grounded():
     ch = {"anomaly_score": 0.76, "confidence": 0.73, "checked_at": "2026-10-29T15:20:00"}
     ev = [json.dumps(ch), json.dumps(human_check(ch), ensure_ascii=False)]
     assert unverified_numbers("Проверка 29 окт 2026, оценка 0,76, уверенность 73%.", ev) == []
+
+
+def test_msk_time_is_moscow_whatever_the_server_zone():
+    from digital_mechanic.history import msk_time
+    assert msk_time(0) == "01.01.1970 03:00 МСК"
