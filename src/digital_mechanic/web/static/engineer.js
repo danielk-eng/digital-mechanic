@@ -134,7 +134,7 @@ async function ask(textIn) {
   delete th.dataset.busy;
 }
 // ---------------------------------------------------------------- companies (tenants): the engineer sees and manages all
-const PRIM = {"": "как на стенде", auto: "Cloud.ru для РФ-региона (152-ФЗ)", tokenrouter: "основная модель", cloudru: "Cloud.ru (РФ)"};
+const PRIM = {"": "как на стенде", auto: "Cloud.ru для РФ-региона (152-ФЗ)", tokenrouter: "основная модель", cloudru: "Cloud.ru (РФ)", local: "локальная модель на GPU (on-prem)"};
 async function companies() {
   const r = await api("/api/eng/companies"); COS = r.companies;
   const vOwner = {}; r.companies.forEach(c => c.vehicles.forEach(v => vOwner[v] = c.name));

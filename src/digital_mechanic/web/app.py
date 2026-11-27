@@ -1734,7 +1734,7 @@ def _email_or_none(e: str | None) -> str | None:
     return e if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", e) else None
 
 
-LLM_PRIMARY_OPTS = ("", "auto", "tokenrouter", "cloudru")
+LLM_PRIMARY_OPTS = ("", "auto", "tokenrouter", "cloudru", "local")
 
 
 class CompanyIn(BaseModel):

@@ -91,6 +91,7 @@ class Llm:
         """Providers to try, primary first. Only those with a key."""
         have = [n for n in ("cloudru", "tokenrouter") if self._provider(n)[1]]
         prim = (REQUEST_PRIMARY.get() or self.s.llm_primary or "auto").lower()
+        prim = "tokenrouter" if prim == "local" else prim  # LLM_PRIMARY=local: the OpenAI-compatible slot points at LOCAL_LLM_URL (docs/LOCAL_GPU.md)
         if prim == "auto":
             c = (country if country is not None else REQUEST_COUNTRY.get()) or ""
             ru = {x.strip().upper() for x in self.s.cloudru_countries.split(",") if x.strip()}
