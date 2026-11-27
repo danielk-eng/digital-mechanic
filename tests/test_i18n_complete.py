@@ -26,3 +26,12 @@ def test_login_titles_use_lang_string():
     js = (ROOT / "src/digital_mechanic/web/static/app.js").read_text(encoding="utf-8")
     assert 'TT("title_" + a.key, a.title)' in js
     assert "applyI18n(); demoAccounts(); }" in js  # re-rendered when the language changes on the login screen
+
+
+def test_language_picker_offers_every_language():
+    import re
+    from digital_mechanic.i18n import LANGS
+    js = (ROOT / "src/digital_mechanic/web/static/app.js").read_text(encoding="utf-8")
+    names = dict(re.findall(r'(\w+): "([^"]+)"', re.search(r"const LANG_NAMES = \{([^}]*)\}", js).group(1)))
+    assert names == {k: v["name"] for k, v in LANGS.items()}  # bn/ky/be were imported but not selectable
+    assert set(I18N) == set(LANGS)

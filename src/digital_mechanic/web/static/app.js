@@ -12,7 +12,7 @@ function ttsVoice(lang) {
   for (const p of TTS_FALLBACK[lang] || [lang]) { const v = vs.find(x => (x.lang || "").toLowerCase().startsWith(p)); if (v) return v; }
   return null;
 }
-const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt"};
+const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt", bn: "বাংলা", ky: "Кыргызча", be: "Беларуская"};  // = i18n.LANGS
 const t = k => (I18N[(ME && ME.lang) || $("#l_lang")?.value || "ru"] || I18N.ru || {})[k] || (I18N.ru || {})[k] || k;
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const TT = (k, dflt) => { const L = (ME && ME.lang) || $("#l_lang")?.value || "ru"; return (I18N[L] || {})[k] || dflt; };  // per-language string or the given (Russian) text
