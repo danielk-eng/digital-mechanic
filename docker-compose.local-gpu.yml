@@ -1,17 +1,37 @@
 # Fully local mode on the engineer's GPU (docs/LOCAL_GPU.md). Overlay on top of docker-compose.yml:
 #   cp local-gpu.env.example .env
-#   docker compose -f docker-compose.yml -f docker-compose.local-gpu.yml --profile gpu3090 up -d   # RTX 3090 (x86_64)
+#   docker compose -f docker-compose.yml -f docker-compose.local-gpu.yml --profile gpu3090 up -d        # RTX 3090: Qwen3.8-27B
+#   docker compose -f docker-compose.yml -f docker-compose.local-gpu.yml --profile gpu3090-fast up -d   # RTX 3090: Qwen3-30B-A3B (swap)
 #   docker compose -f docker-compose.yml -f docker-compose.local-gpu.yml --profile spark up -d     # DGX Spark (arm64)
 # Both LLM services answer as host "llm" (OpenAI-compatible /v1) and speech as host "speech", so the app config is the same.
 services:
-  # RTX 3090: llama.cpp server, Qwen3-30B-A3B-Instruct-2507 Q4_K_M (17.3 GiB), 3 slots x 12k context, q8_0 KV cache
+  # RTX 3090, profile gpu3090 (primary, V 27.11): Qwen3.8-27B UD-Q4_K_M (15.4 GiB) dense + vision, thinking off,
+  # MTP n=2 (llama.cpp PR #22673; the gain is single-stream, gone by ~4 parallel streams), 2 slots x 12k, q8_0 KV
   llm-3090:
     profiles: [gpu3090]
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda-b12808}
     command: >
-      -hf ${LOCAL_GGUF:-unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:Q4_K_M}
+      -hf ${LOCAL_GGUF:-unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M}
       --alias local-llm --jinja -ngl 999 --flash-attn on
-      -c ${LOCAL_CTX_TOTAL:-36864} -np ${LOCAL_SLOTS:-3} --cache-type-k q8_0 --cache-type-v q8_0
+      --chat-template-kwargs '{"enable_thinking": false}'
+      --spec-type draft-mtp --spec-draft-n-max ${LOCAL_MTP_N:-2}
+      -c ${LOCAL_CTX_TOTAL:-24576} -np ${LOCAL_SLOTS:-2} --cache-type-k q8_0 --cache-type-v q8_0
+      --temp 0.1 --host 0.0.0.0 --port 8080 --api-key ${LOCAL_LLM_KEY:-local} ${LOCAL_EXTRA_ARGS:-}
+    volumes: ["${MODELS_DIR:-./var/models}/llama.cpp:/root/.cache/llama.cpp"]
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]}}}
+    healthcheck: {test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"], interval: 15s, timeout: 5s, retries: 80, start_period: 60s}
+    networks: {default: {aliases: [llm]}}
+    restart: unless-stopped
+
+  # RTX 3090, profile gpu3090-fast (swap in instead of llm-3090; both do not fit on 24 GB):
+  # Qwen3-30B-A3B-Instruct-2507 Q4_K_M (17.3 GiB), ~190 tok/s, 3 slots x 12k
+  llm-3090-fast:
+    profiles: [gpu3090-fast]
+    image: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda-b12808}
+    command: >
+      -hf ${LOCAL_GGUF_FAST:-unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF:Q4_K_M}
+      --alias local-llm --jinja -ngl 999 --flash-attn on
+      -c ${LOCAL_CTX_TOTAL_FAST:-36864} -np ${LOCAL_SLOTS_FAST:-3} --cache-type-k q8_0 --cache-type-v q8_0
       --temp 0.1 --host 0.0.0.0 --port 8080 --api-key ${LOCAL_LLM_KEY:-local}
     volumes: ["${MODELS_DIR:-./var/models}/llama.cpp:/root/.cache/llama.cpp"]
     deploy: {resources: {reservations: {devices: [{driver: nvidia, count: 1, capabilities: [gpu]}]}}}
@@ -19,28 +39,51 @@ services:
     networks: {default: {aliases: [llm]}}
     restart: unless-stopped
 
-  # DGX Spark: vLLM (NVIDIA container for GB10), Qwen3-30B-A3B-Instruct-2507-FP8; tool calls via the hermes parser
+  # DGX Spark, primary: vLLM (upstream arm64 image; native NVFP4 path on GB10 from v0.30), Qwen3-30B-A3B-Instruct-2507-FP8
   llm-spark:
     profiles: [spark]
-    image: ${SPARK_VLLM_IMAGE:-nvcr.io/nvidia/vllm:26.11-py3}
+    image: ${SPARK_VLLM_IMAGE:-vllm/vllm-openai:v0.32.0}
+    entrypoint: ["vllm", "serve"]
     command: >
-      vllm serve ${SPARK_MODEL:-Qwen/Qwen3-30B-A3B-Instruct-2507-FP8}
+      ${SPARK_MODEL:-Qwen/Qwen3-30B-A3B-Instruct-2507-FP8}
       --served-model-name local-llm --max-model-len ${LOCAL_MAX_LEN:-16384}
-      --gpu-memory-utilization ${SPARK_GPU_UTIL:-0.45} --max-num-seqs ${LOCAL_SLOTS:-8}
+      --gpu-memory-utilization ${SPARK_GPU_UTIL:-0.35} --max-num-seqs ${LOCAL_SLOTS_SPARK:-8}
       --enable-auto-tool-choice --tool-call-parser ${SPARK_TOOL_PARSER:-hermes}
       --host 0.0.0.0 --port 8080 --api-key ${LOCAL_LLM_KEY:-local}
-    environment:
-      HF_HOME: /models/hf
+    environment: {HF_HOME: /models/hf}
     volumes: ["${MODELS_DIR:-./var/models}:/models"]
     ipc: host
     deploy: {resources: {reservations: {devices: [{driver: nvidia, count: all, capabilities: [gpu]}]}}}
-    healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"], interval: 15s, timeout: 5s, retries: 120, start_period: 120s}
+    healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"], interval: 15s, timeout: 5s, retries: 120, start_period: 180s}
     networks: {default: {aliases: [llm]}}
+    restart: unless-stopped
+
+  # DGX Spark, second server "llm-quality": Qwen3.8-27B NVFP4 (QAD) + MTP, thinking off, for «Подробнее» / reports.
+  # Until the app routes the expand step here (code change after WORKER.lock), point the whole app at it with
+  # LOCAL_LLM_URL=http://llm-quality:8080/v1 to evaluate it.
+  llm-spark-quality:
+    profiles: [spark]
+    image: ${SPARK_VLLM_IMAGE:-vllm/vllm-openai:v0.32.0}
+    entrypoint: ["vllm", "serve"]
+    command: >
+      ${SPARK_QUALITY_MODEL:-nvidia/Qwen3.8-27B-NVFP4-QAD} ${SPARK_QUALITY_QUANT_ARGS---quantization modelopt}
+      --served-model-name local-llm --max-model-len ${LOCAL_MAX_LEN:-16384}
+      --gpu-memory-utilization ${SPARK_QUALITY_GPU_UTIL:-0.30} --max-num-seqs 8 --kv-cache-dtype fp8
+      --speculative-config '{"method": "mtp", "num_speculative_tokens": 2}'
+      --default-chat-template-kwargs '{"enable_thinking": false}'
+      --reasoning-parser qwen3 --enable-auto-tool-choice --tool-call-parser qwen3_coder
+      --host 0.0.0.0 --port 8080 --api-key ${LOCAL_LLM_KEY:-local}
+    environment: {HF_HOME: /models/hf}
+    volumes: ["${MODELS_DIR:-./var/models}:/models"]
+    ipc: host
+    deploy: {resources: {reservations: {devices: [{driver: nvidia, count: all, capabilities: [gpu]}]}}}
+    healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"], interval: 15s, timeout: 5s, retries: 120, start_period: 300s}
+    networks: {default: {aliases: [llm-quality]}}
     restart: unless-stopped
 
   # Speech on the same GPU: GigaAM-v3 (ru), GigaAM-Multilingual-v2 (kk, uz), whisper-large-v3-turbo (hi, vi, fallback), Silero v5 CIS TTS (MIT)
   speech-gpu:
-    profiles: [gpu3090, spark]
+    profiles: [gpu3090, gpu3090-fast, spark]
     build:
       context: ./services/speech_gpu
       args:
@@ -75,5 +118,6 @@ services:
       PII_MASKING: "true"
     depends_on:
       llm-3090: {condition: service_healthy, required: false}
+      llm-3090-fast: {condition: service_healthy, required: false}
       llm-spark: {condition: service_healthy, required: false}
       speech-gpu: {condition: service_started, required: false}

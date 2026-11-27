@@ -3,7 +3,9 @@
   llm     TTFT, decode tok/s, aggregate tok/s at N parallel requests against any OpenAI-compatible server
           python scripts/bench_local.py llm --base http://localhost:8080/v1 --model local-llm --prompt-tokens 10000 --concurrency 1,3,8
   app     our citation eval (same metric as audit/METRICS.md: cite_acc, cite_prec, refuse_acc) through the running app
-          python scripts/bench_local.py app --app http://localhost:8000 --qset eval/qset.json
+          python scripts/bench_local.py app --app http://localhost:8000 --qset eval/qset.json --label qwen38-27b
+  compare side by side of saved runs per label (cite eval + LLM speed) against the current cloud baseline
+          python scripts/bench_local.py compare --labels qwen38-27b,qwen3-30b-a3b
   speech  /stt latency (and WER if a .txt reference sits next to each audio file) against the speech service
           python scripts/bench_local.py speech --speech http://localhost:9000 --audio-dir audit/asr --lang ru
 
@@ -19,9 +21,11 @@ FILLER = ("Проверить зазоры клапанов на холодно�
           "Давление масла на прогретом двигателе при номинальной частоте вращения должно быть в пределах нормы. ")
 
 
-def _out(mode: str, data: dict) -> None:
+def _out(mode: str, data: dict, label: str = "") -> None:
     d = ROOT / "runs"; d.mkdir(exist_ok=True)
-    p = d / f"bench_local_{mode}_{time.strftime('%Y%m%d-%H%M%S')}.json"
+    tag = f"_{re.sub(r'[^A-Za-z0-9._-]', '_', label)}" if label else ""
+    p = d / f"bench_local_{mode}{tag}_{time.strftime('%Y%m%d-%H%M%S')}.json"
+    data["label"] = label
     p.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"-> {p}")
 
@@ -31,11 +35,11 @@ def _context(n_tokens: int) -> str:
     return (FILLER * (n_tokens * 32 // 10 // len(FILLER) + 1))[: n_tokens * 32 // 10]
 
 
-def one_llm(base: str, model: str, key: str, prompt_tokens: int, max_tokens: int, seed: int) -> dict:
+def one_llm(base: str, model: str, key: str, prompt_tokens: int, max_tokens: int, seed: int, extra: dict | None = None) -> dict:
     msgs = [{"role": "system", "content": "Ты помощник механика. Отвечай по фрагментам руководства, кратко, по-русски."},
             {"role": "user", "content": f"[{seed}] ФРАГМЕНТЫ:\n{_context(prompt_tokens)}\n\nВопрос: перечисли шаги проверки и нормы подробно."}]
     body = {"model": model, "messages": msgs, "max_tokens": max_tokens, "temperature": 0.1, "stream": True,
-            "stream_options": {"include_usage": True}}
+            "stream_options": {"include_usage": True}, **(extra or {})}
     t0 = time.time(); ttft = None; n_chunks = 0; usage = {}
     with httpx.stream("POST", f"{base.rstrip('/')}/chat/completions", json=body, timeout=600,
                       headers={"Authorization": f"Bearer {key}"}) as r:
@@ -61,12 +65,13 @@ def one_llm(base: str, model: str, key: str, prompt_tokens: int, max_tokens: int
 
 def cmd_llm(a) -> None:
     key = a.api_key or os.getenv("LOCAL_LLM_KEY") or os.getenv("LLM_API_KEY") or "local"
-    one_llm(a.base, a.model, key, 64, 8, -1)  # warm-up
-    res = {"base": a.base, "model": a.model, "prompt_tokens": a.prompt_tokens, "max_tokens": a.max_tokens, "runs": []}
+    extra = json.loads(a.extra_body) if a.extra_body else None
+    one_llm(a.base, a.model, key, 64, 8, -1, extra)  # warm-up
+    res = {"base": a.base, "model": a.model, "prompt_tokens": a.prompt_tokens, "max_tokens": a.max_tokens, "extra_body": extra, "runs": []}
     for n in [int(x) for x in a.concurrency.split(",")]:
         t0 = time.time()
         with cf.ThreadPoolExecutor(n) as ex:
-            rs = list(ex.map(lambda i: one_llm(a.base, a.model, key, a.prompt_tokens, a.max_tokens, i), range(n * a.rounds)))
+            rs = list(ex.map(lambda i: one_llm(a.base, a.model, key, a.prompt_tokens, a.max_tokens, i, extra), range(n * a.rounds)))
         wall = time.time() - t0
         row = {"concurrency": n, "requests": len(rs), "ttft_median_s": statistics.median(r["ttft_s"] for r in rs),
                "ttft_max_s": max(r["ttft_s"] for r in rs),
@@ -75,7 +80,7 @@ def cmd_llm(a) -> None:
                "turn_median_s": statistics.median(r["total_s"] for r in rs),
                "prompt_tokens_real": statistics.median(r["prompt_tokens"] or 0 for r in rs)}
         print(json.dumps(row, ensure_ascii=False)); res["runs"].append(row)
-    _out("llm", res)
+    _out("llm", res, a.label)
 
 
 REFUSE = re.compile(r"нет данных|данных[^.]{0,40} нет|сведений[^.]{0,40} нет|данных нет|не указан|не приведен|нет сведений|не найден|"
@@ -125,7 +130,7 @@ def cmd_app(a) -> None:
             "lat_median": statistics.median(lat), "lat_p90": lat[int(0.9 * (len(lat) - 1) + 0.5)],
             "errors": sum(r["status"] != 200 for r in res), "baseline": {"cite_acc": 0.944, "cite_prec": 0.89, "refuse_acc": 0.75, "lat_median": 11.4}}
     print(json.dumps(summ, ensure_ascii=False))
-    _out("app", {"summary": summ, "results": res})
+    _out("app", {"summary": summ, "results": res}, a.label)
 
 
 def _wer(ref: str, hyp: str) -> float:
@@ -156,19 +161,50 @@ def cmd_speech(a) -> None:
     _out("speech", {"speech": a.speech, "rows": rows})
 
 
+def _latest(mode: str, label: str) -> dict | None:
+    fs = sorted((ROOT / "runs").glob(f"bench_local_{mode}_{label}_*.json"))
+    return json.loads(fs[-1].read_text(encoding="utf-8")) if fs else None
+
+
+def cmd_compare(a) -> None:
+    """One row per label: cite eval from the latest `app` run, speed from the latest `llm` run (concurrency 1)."""
+    base = {"label": "cloud (deepseek-v4.1-flash)", "cite_acc": 0.944, "cite_prec": 0.89, "refuse_acc": 0.75, "lat_median": 11.4}
+    rows = [base]
+    for lab in [x.strip() for x in a.labels.split(",") if x.strip()]:
+        r = {"label": lab}
+        app = _latest("app", lab)
+        if app:
+            r.update({k: app["summary"].get(k) for k in ("cite_acc", "cite_prec", "refuse_acc", "lat_median", "lat_p90", "errors")})
+        llm = _latest("llm", lab)
+        if llm and llm.get("runs"):
+            one = min(llm["runs"], key=lambda x: x["concurrency"]); top = max(llm["runs"], key=lambda x: x["concurrency"])
+            r.update({"ttft_s": one["ttft_median_s"], "decode_tok_s": one["decode_per_user_tok_s"],
+                      f"aggregate_tok_s@{top['concurrency']}": top["aggregate_out_tok_s"]})
+        rows.append(r)
+    cols = []
+    for r in rows:
+        cols += [k for k in r if k not in cols]
+    print(" | ".join(cols)); print(" | ".join("---" for _ in cols))
+    for r in rows:
+        print(" | ".join("" if r.get(c) is None else str(r.get(c)) for c in cols))
+    _out("compare", {"rows": rows}, "_".join(x["label"] for x in rows[1:]))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sp = ap.add_subparsers(dest="mode", required=True)
     l = sp.add_parser("llm"); l.add_argument("--base", default="http://localhost:8080/v1"); l.add_argument("--model", default="local-llm")
     l.add_argument("--api-key", default=""); l.add_argument("--prompt-tokens", type=int, default=10000)
     l.add_argument("--max-tokens", type=int, default=900); l.add_argument("--concurrency", default="1,3,8"); l.add_argument("--rounds", type=int, default=2)
+    l.add_argument("--label", default=""); l.add_argument("--extra-body", default="", help='e.g. {"chat_template_kwargs": {"enable_thinking": false}}')
     p = sp.add_parser("app"); p.add_argument("--app", default="http://localhost:8000"); p.add_argument("--qset", default=str(ROOT / "eval/qset.json"))
     p.add_argument("--account", default="selftaught"); p.add_argument("--parallel", type=int, default=1)
-    p.add_argument("--limit", type=int, default=0); p.add_argument("--data-root", default=str(ROOT), help="checkout with data/index (stand only)")
+    p.add_argument("--limit", type=int, default=0); p.add_argument("--label", default=""); p.add_argument("--data-root", default=str(ROOT), help="checkout with data/index (stand only)")
     s = sp.add_parser("speech"); s.add_argument("--speech", default="http://localhost:9000"); s.add_argument("--audio-dir", required=True)
     s.add_argument("--lang", default="")
+    c = sp.add_parser("compare"); c.add_argument("--labels", required=True)
     a = ap.parse_args()
-    {"llm": cmd_llm, "app": cmd_app, "speech": cmd_speech}[a.mode](a)
+    {"llm": cmd_llm, "app": cmd_app, "speech": cmd_speech, "compare": cmd_compare}[a.mode](a)
 
 
 if __name__ == "__main__":
