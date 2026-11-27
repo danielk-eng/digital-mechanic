@@ -162,14 +162,27 @@ class Replica:
         return tag[2:] if tag.startswith("W/") else tag  # answered as W/"<hash>", the upload only accepts "<hash>" (seen on Vercel)
 
     def _get(self) -> tuple[dict, str]:
+        """(shared copy, its ETag). An overwritten blob can be served old for a while: the content must carry the ETag the
+        metadata reported, otherwise it is re-read (merging into an old copy and uploading it with the new ETag would drop
+        what the other instance just wrote)."""
         tag = self._head_etag() if self.cas else ""
         h = self._hdr()
         h.pop("x-api-version"); h.pop("x-vercel-blob-store-id")
-        r = self.http.get(self.url(), params={"cache": "0", "t": str(time.time())}, headers=h)
-        if r.status_code == 404:
-            return {}, ""
-        r.raise_for_status()
-        return r.json(), tag
+        for i in range(4):
+            r = self.http.get(self.url(), params={"cache": "0", "t": str(time.time())}, headers=h)
+            if r.status_code == 404:
+                return {}, ""
+            r.raise_for_status()
+            got = r.headers.get("etag", "")
+            got = got[2:] if got.startswith("W/") else got
+            if not tag or not got or got == tag:
+                return r.json(), tag
+            self.stats["stale_reads"] = self.stats.get("stale_reads", 0) + 1
+            self.stats["stale_last"] = f"{got[:14]} != {tag[:14]}"
+            time.sleep(0.2 * (i + 1))
+            if i == 1:
+                tag = self._head_etag()  # maybe the metadata was the old one
+        return r.json(), ""  # still not matching: no CAS for this upload (the merge keeps what this copy has)
 
     def push(self) -> bool:
         """Merge this instance's changes into the shared copy and upload it (if the mirrored tables changed).

@@ -24,6 +24,9 @@ def fake_blob():
             return httpx.Response(200, json={"etag": "W/" + box["etag"]})  # Vercel answers the weak form here too
         if req.headers.get("if-none-match") in (box["etag"], "W/" + box["etag"]):
             return httpx.Response(304)
+        if box.get("stale"):
+            v, tg = box["stale"].pop(0)
+            return httpx.Response(200, content=v, headers={"etag": "W/" + tg})
         out = httpx.Response(200, content=box["v"], headers={"etag": "W/" + box["etag"]})  # weak, as the real CDN answers
         hook = box.pop("after_get", None)
         if hook:
@@ -137,3 +140,20 @@ def test_same_instance_concurrent_requests_keep_unuploaded_rows(tmp_path):
     rc.pull(True)
     assert sorted(h["note"] for h in c.handoffs()) == ["h1", "h2", "h3", "h4"]
     assert len({h["id"] for h in c.handoffs()}) == 4
+
+
+def test_stale_content_after_overwrite_is_reread(tmp_path):
+    """The blob content lags its metadata after an overwrite: merging into the old copy would drop the other instance's row."""
+    cli = fake_blob()
+    a, b, c = Store(tmp_path / "a.db"), Store(tmp_path / "b.db"), Store(tmp_path / "c.db")
+    ra, rb, rc = (Replica(s, token="vercel_blob_rw_STORE1_x") for s in (a, b, c))
+    ra.http = rb.http = rc.http = cli
+    a.x("INSERT INTO companies(id,name,created) VALUES('c1','Автопарк',0)"); assert ra.push()
+    ra.pull(True); rb.pull(True)
+    old_v, old_tag = cli.box["v"], cli.box["etag"]
+    a.add_handoff("u1", "M333YK47", "chief", "A", "", {}); assert ra.push()
+    cli.box["stale"] = [(old_v, old_tag)] * 2  # the next 2 content reads still answer the previous version
+    b.add_handoff("u2", "M333YK47", "chief", "B", "", {}); assert rb.push()
+    assert rb.stats.get("stale_reads") == 2
+    rc.pull(True)
+    assert sorted(h["note"] for h in c.handoffs()) == ["A", "B"]
