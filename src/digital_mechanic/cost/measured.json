@@ -1,9 +1,9 @@
 {
- "measured_at": "2026-11-27 04:47",
+ "measured_at": "2026-11-27 09:18",
  "model": "deepseek/deepseek-v4.1-flash-1017-free",
  "runs": 3,
  "scenario": "диагностика → объяснение → 2 вопроса → «Подробнее» → 2 выжимки цитат → черновик заявки → подтверждение",
- "tokens_per_scenario_median": 38966,
+ "tokens_per_scenario_median": 45495,
  "lines": {
   "explain": {
    "calls_per_scenario": 1.33,
@@ -12,7 +12,9 @@
     "agent_r1"
    ],
    "in_per_call": 8173,
-   "out_per_call": 252
+   "out_per_call": 224,
+   "cached_share_provider": 0.415,
+   "cached_share_prefix": 0.425
   },
   "answer": {
    "calls_per_scenario": 4.0,
@@ -20,41 +22,59 @@
     "facts",
     "render_selftaught"
    ],
-   "in_per_call": 1892,
-   "out_per_call": 157
+   "in_per_call": 1896,
+   "out_per_call": 161,
+   "cached_share_provider": 0.101,
+   "cached_share_prefix": 0.138
   },
   "expand": {
    "calls_per_scenario": 1.0,
    "steps": [
     "expand"
    ],
-   "in_per_call": 1322,
-   "out_per_call": 441
+   "in_per_call": 1447,
+   "out_per_call": 470,
+   "cached_share_provider": 0.265,
+   "cached_share_prefix": 0.162
   },
   "extract": {
-   "calls_per_scenario": 1.33,
+   "calls_per_scenario": 1.67,
    "steps": [
     "section_extract"
    ],
-   "in_per_call": 1442,
-   "out_per_call": 265
+   "in_per_call": 1586,
+   "out_per_call": 230,
+   "cached_share_provider": 0.032,
+   "cached_share_prefix": 0.04
   },
   "ticket": {
-   "calls_per_scenario": 1.33,
+   "calls_per_scenario": 1.67,
    "steps": [
     "agent_r0",
-    "agent_r1"
+    "agent_r1",
+    "agent_r2"
    ],
-   "in_per_call": 6838,
-   "out_per_call": 343
+   "in_per_call": 8046,
+   "out_per_call": 325,
+   "cached_share_provider": 0.531,
+   "cached_share_prefix": 0.622
   },
   "retry": {
-   "calls_per_scenario": 1.0,
+   "calls_per_scenario": 0.67,
    "steps": [
     "agent_fix_numbers"
    ],
-   "in_per_call": 7658,
-   "out_per_call": 240
+   "in_per_call": 8251,
+   "out_per_call": 266,
+   "cached_share_provider": 0.341,
+   "cached_share_prefix": 0.128
   }
+ },
+ "cache": {
+  "input_tokens": 124458,
+  "provider_cached": 44288,
+  "prefix_cached": 45184,
+  "share_provider": 0.356,
+  "share_prefix": 0.363
  }
 }

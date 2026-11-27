@@ -47,8 +47,25 @@ def run(runs: int) -> dict:
     from digital_mechanic.bootstrap import build_agent
 
     a = build_agent()
+    seen: list[str] = []
+    orig_chat = a.llm.chat
+
+    def chat(step, messages, tools=None, *args, **kw):
+        """Prefix-cache estimate: the provider caches the longest prompt prefix it has already seen (DeepSeek: 64-token
+        blocks). Prompt text = tools schema + messages in order; prefix = longest common prefix with any earlier call."""
+        text = json.dumps(tools or [], ensure_ascii=False, default=str) + "".join(
+            f"<{m.get('role')}>" + (m.get("content") if isinstance(m.get("content"), str) else json.dumps(m.get("content"), ensure_ascii=False, default=str))
+            + (json.dumps(m.get("tool_calls"), ensure_ascii=False, default=str) if m.get("tool_calls") else "") for m in messages)
+        r = orig_chat(step, messages, tools, *args, **kw)
+        lcp = max((len(os.path.commonprefix([text, p])) for p in seen), default=0)
+        seen.append(text)
+        st = a.llm.usage.per_step[-1]
+        st["prefix_tokens"] = int(st["prompt_tokens"] * lcp / max(1, len(text))) // 64 * 64
+        return r
+
+    a.llm.chat = chat
     a.expand_prefetch = False  # «Подробнее» is measured explicitly below (same prompt as the background run)
-    per = defaultdict(lambda: {"calls": 0, "in": [], "out": [], "names": []})
+    per = defaultdict(lambda: {"calls": 0, "in": [], "out": [], "names": [], "cached": [], "prefix": []})
     scen_tokens = []
     for i in range(runs):
         vid, sid, qs = SCENARIOS[i % len(SCENARIOS)]
@@ -77,6 +94,7 @@ def run(runs: int) -> dict:
                 ln = line_of(st["step"], name)
                 per[ln]["calls"] += 1; per[ln]["names"].append(st["step"])
                 per[ln]["in"].append(st["prompt_tokens"]); per[ln]["out"].append(st["completion_tokens"])
+                per[ln]["cached"].append(st.get("cached_tokens", 0)); per[ln]["prefix"].append(st.get("prefix_tokens", 0))
                 total += st["prompt_tokens"] + st["completion_tokens"]
         scen_tokens.append(total)
         print(f"run {i + 1}: {vid} {sid}: {len(a.llm.usage.per_step) - before} model calls, {total} tokens", flush=True)
@@ -86,7 +104,17 @@ def run(runs: int) -> dict:
     for ln, d in per.items():
         out["lines"][ln] = {"calls_per_scenario": round(d["calls"] / runs, 2), "steps": sorted(set(d.get("names", []))),
                             "in_per_call": int(statistics.mean(d["in"])) if d["in"] else 0,
-                            "out_per_call": int(statistics.mean(d["out"])) if d["out"] else 0}
+                            "out_per_call": int(statistics.mean(d["out"])) if d["out"] else 0,
+                            # share of input tokens that can be billed at the cached price: provider-reported when it reports
+                            # caching, else the longest-common-prefix estimate
+                            "cached_share_provider": round(sum(d["cached"]) / max(1, sum(d["in"])), 3),
+                            "cached_share_prefix": round(sum(d["prefix"]) / max(1, sum(d["in"])), 3)}
+    tin = sum(sum(d["in"]) for d in per.values())
+    out["cache"] = {"input_tokens": tin,
+                    "provider_cached": sum(sum(d["cached"]) for d in per.values()),
+                    "prefix_cached": sum(sum(d["prefix"]) for d in per.values())}
+    out["cache"]["share_provider"] = round(out["cache"]["provider_cached"] / max(1, tin), 3)
+    out["cache"]["share_prefix"] = round(out["cache"]["prefix_cached"] / max(1, tin), 3)
     return out
 
 
