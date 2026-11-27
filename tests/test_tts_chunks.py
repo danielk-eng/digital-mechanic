@@ -43,3 +43,37 @@ def test_silero_tts_joins_chunks(monkeypatch):
 def test_client_keeps_server_voice_after_one_failure():
     js = open("src/digital_mechanic/web/static/app.js", encoding="utf-8").read()
     assert "if (r.status === 404) SERVER_TTS = false;" in js
+    assert "JSON.stringify({text: p, lang: spokenLang})" in js
+    assert "SERVER_TTS_LANGS.includes(spokenLang)" in js
+
+
+def test_unicode_tts_chunks_are_speakable():
+    assert voice.tts_chunks("Đã thay máy phun. Kiểm tra áp suất.") == ["Đã thay máy phun. Kiểm tra áp suất."]
+    assert voice.tts_chunks("क्लच बदल दिया गया। दबाव जाँचें।") == ["क्लच बदल दिया गया। दबाव जाँचें।"]
+
+
+def test_nvidia_tts_multipart_and_language(monkeypatch):
+    sent = {}
+
+    class R:
+        status_code = 200
+        content = _wav()
+
+    def post(url, headers, files, timeout):
+        sent["url"] = url
+        sent["auth"] = headers["Authorization"]
+        sent["language"] = files["language"][1]
+        sent["voice"] = files["voice"][1]
+        return R()
+
+    monkeypatch.setattr(voice.httpx, "post", post)
+    s = SimpleNamespace(nvidia_api_key="test-key", nvidia_tts_enabled=True,
+                        nvidia_tts_chatterbox_function_id="fn-id", nvidia_tts_magpie_function_id="mag-id",
+                        nvidia_tts_timeout_s=1)
+    wav = voice.nvidia_tts("Проверь затяжку 100 Н·м.", "ru", s)
+    assert wav.startswith(b"RIFF")
+    assert sent["url"].startswith("https://fn-id.invocation.api.nvcf.nvidia.com/")
+    assert sent["auth"] == "Bearer test-key"
+    assert sent["language"] == "ru-RU"
+    assert sent["voice"] == "Chatterbox-Multilingual.ru-RU.Male"
+    assert "ru" in voice.server_tts_langs(s) and voice.tts_configured(s)

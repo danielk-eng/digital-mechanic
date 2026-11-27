@@ -46,3 +46,5 @@ vendor/neurodvs_mock/*
 data/index/*.jsonl.gz
 data/i18n/pages_*.jsonl.gz
 data/extra/pdf/
+.vercel
+.env*

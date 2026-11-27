@@ -107,3 +107,30 @@ def test_browser_stt_fallback_wired():
     for lang, d in i18n.items():
         for k in ("v_browser_stt", "v_no_stt", "v_lang_unsupported", "v_stt_network"):
             assert d.get(k), (lang, k)
+
+
+def test_nvidia_stt_multipart_language_and_response(monkeypatch):
+    from types import SimpleNamespace
+    sent = {}
+
+    class R:
+        status_code = 200
+        def json(self): return {"text": "Я М З 536 стучит"}
+
+    def post(url, headers, files, data, timeout):
+        sent.update(url=url, auth=headers["Authorization"], filename=files["file"][0], mime=files["file"][2],
+                    language=data["language"], fmt=data["response_format"])
+        return R()
+
+    monkeypatch.setattr(voice.httpx, "post", post)
+    s = SimpleNamespace(nvidia_api_key="test-key", nvidia_stt_enabled=True, nvidia_stt_function_id="stt-id", speech_timeout_s=1)
+    assert voice.nvidia_stt(b"wav", "audio/wav", "ru", s) == "ЯМЗ-536 стучит"
+    assert sent["url"].startswith("https://stt-id.invocation.api.nvcf.nvidia.com/")
+    assert sent["auth"] == "Bearer test-key" and sent["filename"] == "voice.wav" and sent["mime"] == "audio/wav"
+    assert sent["language"] == "ru-RU" and sent["fmt"] == "json"
+
+
+def test_voice_recording_is_converted_to_wav_for_server_stt():
+    from pathlib import Path
+    js = (Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static/app.js").read_text(encoding="utf-8")
+    assert "blob = await toWav(blob, 15)" in js and 'name = "voice.wav"' in js

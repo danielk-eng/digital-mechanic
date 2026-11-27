@@ -16,6 +16,11 @@ import time
 from collections import Counter
 from pathlib import Path
 
+import httpx
+
+from . import pii
+from .agent.llm import LlmUnavailable, parse_json
+from .config import get_settings
 from .i18n import LANGS
 
 CYR = re.compile(r"[А-Яа-яЁё]")
@@ -50,9 +55,75 @@ def _h(lang: str, text: str) -> str:
     return hashlib.sha1(f"{lang}\n{text}".encode()).hexdigest()
 
 
+class NvidiaBatchTranslator:
+    """OpenAI-compatible NVIDIA Build chat model used as the first batch translation engine.
+
+    The specialised Riva translation endpoint covers only a subset of the app's languages, so the configurable
+    instruction-following model is used for the same JSON batch contract as the main LLM; formatting/glossary rules stay intact.
+    """
+
+    def __init__(self) -> None:
+        self.s = get_settings()
+
+    @property
+    def available(self) -> bool:
+        return bool(self.s.nvidia_translate_enabled and self.s.nvidia_key())
+
+    def json(self, step: str, system: str, user: str, max_tokens: int = 2000, on_text=None) -> dict:
+        key = self.s.nvidia_key()
+        if not key:
+            raise LlmUnavailable("no nvidia key")
+        mk = pii.Masker() if self.s.pii_masking else None
+        if mk:
+            system, user = mk.mask(system), mk.mask(user)
+        payload = {
+            "model": self.s.nvidia_translate_model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "temperature": 0,
+            "max_tokens": max_tokens,
+            "stream": False,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+        try:
+            r = httpx.post(f"{self.s.nvidia_base_url.rstrip('/')}/chat/completions",
+                           headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+                           json=payload, timeout=self.s.nvidia_translate_timeout_s)
+            deadline = time.monotonic() + min(self.s.nvidia_translate_timeout_s, 55.0)
+            while r.status_code == 202 and time.monotonic() < deadline:  # NVCF cold/queued invocation
+                reqid = r.headers.get("NVCF-REQID") or r.headers.get("nvcf-reqid")
+                if not reqid:
+                    break
+                time.sleep(0.7)
+                r = httpx.get(f"https://api.nvcf.nvidia.com/v2/nvcf/pexec/status/{reqid}",
+                              headers={"Authorization": f"Bearer {key}", "Accept": "application/json"}, timeout=10)
+        except httpx.HTTPError as e:
+            raise LlmUnavailable(f"nvidia translate network: {type(e).__name__}") from None
+        if r.status_code != 200:
+            raise LlmUnavailable(f"nvidia translate {r.status_code}")
+        try:
+            content = r.json()["choices"][0]["message"].get("content") or ""
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise LlmUnavailable("nvidia translate bad response") from None
+        res = parse_json(content)
+        if not mk:
+            return res
+
+        def restore(x):
+            if isinstance(x, str):
+                return mk.unmask(x)
+            if isinstance(x, list):
+                return [restore(v) for v in x]
+            if isinstance(x, dict):
+                return {k: restore(v) for k, v in x.items()}
+            return x
+
+        return restore(res)
+
+
 class Translator:
     def __init__(self, llm, store, i18n_dir: str | Path = "data/i18n"):
         self.llm, self.store = llm, store
+        self.nvidia = NvidiaBatchTranslator()
         self.dir = Path(i18n_dir)
         self.strings: dict[str, dict[str, str]] = {}  # lang -> {ru: tr} imported by people
         self.pages: dict[str, dict[tuple[str, int], str]] = {}  # lang -> {(doc_id, page): text}
@@ -117,21 +188,35 @@ class Translator:
         return [o or {"text": texts[k], "src": "failed"} for k, o in enumerate(out)]
 
     def _llm_batch(self, items: list[str], lang: str, idx: list[int], out: list) -> None:
-        if not getattr(self.llm, "available", True):
+        engines = []
+        if getattr(self.nvidia, "available", False):
+            engines.append(("nvidia", self.nvidia))
+        if getattr(self.llm, "available", True):
+            engines.append(("llm", self.llm))
+        if not engines:
             return
         sys_ = SYSTEM.format(name=LANGS[lang]["name"], lang=LANGS[lang]["llm"], glossary=self._glossary_hint(lang, items))
-        try:
-            res = self.llm.json("translate", sys_, json.dumps({"items": items}, ensure_ascii=False), max_tokens=min(8000, 600 + 3 * sum(map(len, items))))
-            got = res.get("items") if isinstance(res, dict) else None
-        except Exception:  # noqa: BLE001 - translation must never break the screen
-            got = None
-        if not isinstance(got, list) or len(got) != len(items):
-            return
-        for j, (src, tr) in zip(idx, zip(items, got)):
-            tr = str(tr or "")
-            if tr and numbers_kept(src, tr):
-                out[j] = {"text": tr, "src": "llm"}
-                self.store.x("INSERT OR REPLACE INTO translations(h,lang,src,out,ts,engine) VALUES (?,?,?,?,?,?)",
-                             (_h(lang, src), lang, src[:4000], tr, time.time(), "llm"))
-            else:
-                out[j] = {"text": src, "src": "failed"}
+        remaining = list(range(len(items)))
+        for engine_name, engine in engines:
+            if not remaining:
+                break
+            batch = [items[pos] for pos in remaining]
+            try:
+                res = engine.json("translate", sys_, json.dumps({"items": batch}, ensure_ascii=False),
+                                  max_tokens=min(8000, 600 + 3 * sum(map(len, batch))))
+                got = res.get("items") if isinstance(res, dict) else None
+            except Exception:  # noqa: BLE001 - translation must never break the screen
+                got = None
+            if not isinstance(got, list) or len(got) != len(batch):
+                continue
+            retry = []
+            for pos, src, tr in zip(remaining, batch, got):
+                j = idx[pos]
+                tr = str(tr or "")
+                if tr and numbers_kept(src, tr):
+                    out[j] = {"text": tr, "src": engine_name}
+                    self.store.x("INSERT OR REPLACE INTO translations(h,lang,src,out,ts,engine) VALUES (?,?,?,?,?,?)",
+                                 (_h(lang, src), lang, src[:4000], tr, time.time(), engine_name))
+                else:
+                    retry.append(pos)
+            remaining = retry

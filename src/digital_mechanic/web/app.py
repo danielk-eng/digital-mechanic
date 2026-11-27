@@ -428,8 +428,8 @@ def session(uid: str | None = Cookie(None)) -> dict:
     u = STORE.user(uid) if uid else None
     # server_tts: false -> the browser speaks itself (no POST /api/tts that can only answer 404)
     # server_stt: false -> the browser recognises speech itself (Web Speech API) instead of POST /api/stt that can only answer 503
-    return {"user": pub(u), "langs": {k: v["name"] for k, v in LANGS.items()}, "server_tts": bool(S.speech_url or S.silero_enabled),
-            "server_stt": voice.stt_configured(S)}
+    return {"user": pub(u), "langs": {k: v["name"] for k, v in LANGS.items()}, "server_tts": voice.tts_configured(S),
+            "server_tts_langs": voice.server_tts_langs(S), "server_stt": voice.stt_configured(S)}
 
 
 @app.get("/api/me")
@@ -1151,16 +1151,20 @@ async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), vehicle_id:
 
 class TtsIn(BaseModel):
     text: str
+    lang: str | None = None
 
 
 @app.post("/api/tts")
 def tts(body: TtsIn, uid: str | None = Cookie(None)):
     user_of(uid)
+    lang = lang_or_default(body.lang)
     try:
-        wav = voice.silero_tts(re.sub(r"\[(S|X)\d+\]", "", body.text), S)
-    except Exception:
-        if not (S.speech_url or S.silero_enabled):
+        wav = voice.tts_synthesize(re.sub(r"\[(S|X)\d+\]", "", body.text), lang, S)
+    except voice.SttUnavailable:
+        if not voice.tts_configured(S):
             raise HTTPException(404, "server TTS disabled; use browser speech")
+        if lang not in voice.server_tts_langs(S):
+            raise HTTPException(400, f"server TTS has no voice for {lang}")
         raise HTTPException(502, "this text could not be spoken; browser speech for this message")  # keep server voice for the next ones
     return Response(wav, media_type="audio/wav")
 
@@ -1394,7 +1398,7 @@ def health() -> dict:
     return {"ml": AGENT.ml.health(), "toir": AGENT.toir.health(), "llm_configured": AGENT.llm.available,
             "pages": len(AGENT.index.pages), "extra_pages": len(AGENT.extra.pages) if AGENT.extra else 0,
             "stt": "server" if (S.speech_url or S.deepgram_api_key or S.cloudru_api_key) else "browser",
-            "tts": "server" if (S.speech_url or S.silero_enabled) else "browser"}
+            "tts": "server" if voice.tts_configured(S) else "browser"}
 
 
 @app.get("/api/usage")

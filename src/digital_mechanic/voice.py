@@ -1,6 +1,6 @@
 """Speech. STT order: local speech service (faster-whisper large-v3-turbo, audio stays on the stand) ->
 Deepgram nova-3 (cloud, ru/hi/vi, mip_opt_out) -> in-process faster-whisper -> browser Web Speech (client side).
-TTS: local speech service (Silero, ru) -> in-process Silero -> browser speech (client side).
+TTS: NVIDIA hosted multilingual voices where supported -> local speech service (Silero, ru) -> in-process Silero -> browser speech (client side).
 
 Audio is not stored; only the masked transcript goes to the agent. Voice control in the UI also
 works in the browser (Web Speech API) when the server has no STT configured.
@@ -14,6 +14,7 @@ import io
 import re
 import tempfile
 import threading
+import time
 
 import httpx
 
@@ -166,6 +167,48 @@ def cloudru_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
     return postprocess((r.json().get("text") or "").strip(), lang)
 
 
+NVIDIA_STT_LANGS = {"ru": "ru-RU"}  # parakeet-tdt-0.6b: 25 European languages; among the app languages Russian is covered
+
+
+def _nvcf_wait(r: httpx.Response, key: str, timeout_s: float) -> httpx.Response:
+    """NVCF returns 202 while a public function is cold/queued; poll the generic status endpoint."""
+    deadline = time.monotonic() + min(float(timeout_s), 55.0)
+    while r.status_code == 202 and time.monotonic() < deadline:
+        reqid = r.headers.get("NVCF-REQID") or r.headers.get("nvcf-reqid")
+        if not reqid:
+            break
+        time.sleep(0.7)
+        r = httpx.get(f"https://api.nvcf.nvidia.com/v2/nvcf/pexec/status/{reqid}",
+                      headers={"Authorization": f"Bearer {key}"}, timeout=10)
+    return r
+
+
+def nvidia_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
+    """NVIDIA Parakeet HTTP ASR. The client sends 16 kHz mono WAV; webm/opus stays for the other engines."""
+    key = _nvidia_key(s)
+    if not key or lang not in NVIDIA_STT_LANGS or not getattr(s, "nvidia_stt_enabled", True):
+        raise SttUnavailable("no nvidia stt")
+    fid = getattr(s, "nvidia_stt_function_id", "")
+    if not fid:
+        raise SttUnavailable("no nvidia stt endpoint")
+    url = (fid.rstrip("/") if fid.startswith("https://") else f"https://{fid}.invocation.api.nvcf.nvidia.com/v1/audio/transcriptions")
+    ext = {"audio/wav": "wav", "audio/x-wav": "wav", "audio/flac": "flac", "audio/ogg": "ogg", "audio/opus": "opus"}.get((mime or "").split(";")[0], "wav")
+    try:
+        r = httpx.post(url, headers={"Authorization": f"Bearer {key}"},
+                       files={"file": (f"voice.{ext}", audio, mime or "audio/wav")},
+                       data={"language": NVIDIA_STT_LANGS[lang], "response_format": "json"}, timeout=s.speech_timeout_s)
+        r = _nvcf_wait(r, key, s.speech_timeout_s)
+    except httpx.HTTPError:
+        raise SttUnavailable("nvidia stt network") from None
+    if r.status_code != 200:
+        raise SttUnavailable(f"nvidia stt {r.status_code}")
+    try:
+        text = r.json().get("text") or ""
+    except ValueError:
+        text = r.text
+    return postprocess(text.strip(), lang)
+
+
 def speech_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
     if not s.speech_url:
         raise SttUnavailable("no speech service")
@@ -178,7 +221,7 @@ def speech_stt(audio: bytes, mime: str, lang: str, s: Settings) -> str:
 
 def stt_configured(s: Settings) -> bool:
     """Any server STT engine at all (speech service, cloud key or in-process faster-whisper); false on the Vercel stand."""
-    if s.speech_url or s.deepgram_api_key or (s.cloudru_api_key and s.cloudru_stt):
+    if s.speech_url or s.deepgram_api_key or (s.cloudru_api_key and s.cloudru_stt) or (_nvidia_key(s) and getattr(s, "nvidia_stt_enabled", True)):
         return True
     import importlib.util
     return importlib.util.find_spec("faster_whisper") is not None
@@ -195,6 +238,8 @@ def transcribe(audio: bytes, mime: str, lang: str, s: Settings, local_first: boo
     if s.cloudru_api_key and s.cloudru_stt and lang not in CLOUDRU_STT_SKIP and (country or "RU").upper() in ru_region:
         cr = ("cloudru", lambda: cloudru_stt(audio, mime, lang, s))
         chain.insert(0 if (not local_first or (country or "RU").upper() == "RU") else len(chain), cr)
+    if lang in NVIDIA_STT_LANGS and not local_first:
+        chain.append(("nvidia", lambda: nvidia_stt(audio, mime, lang, s)))
     if lang in DEEPGRAM_LANGS:
         dg = ("deepgram", lambda: deepgram_stt(audio, mime, lang, s))
         first = lang in DEEPGRAM_FIRST and s.stt_order == "cloud-first" and not local_first  # local-first (strict 152-FZ): audio stays on the stand
@@ -215,9 +260,14 @@ TTS_CHUNK = 220  # Silero gives up on ~400+ chars once numbers and units are spe
 TTS_MAX = 1200   # whole message as the client sends it (was cut at 900)
 
 
+def speakable(text: str) -> bool:
+    """Letters in any script or digits: Hindi/Vietnamese/… are speakable too, not only Russian."""
+    return any(ch.isalpha() or ch.isdigit() for ch in text)
+
+
 def tts_chunks(text: str, limit: int = TTS_CHUNK) -> list[str]:
     """Sentence-sized pieces (<= limit chars) for the synthesiser; a long sentence is split at , ; : — or spaces.
-    Pieces with nothing speakable (only Latin/punctuation, e.g. «F08») are glued to a neighbour, never sent alone."""
+    Pieces with nothing speakable (only punctuation, e.g. «—») are glued to a neighbour, never sent alone."""
     text = re.sub(r"\s+", " ", text or "").strip()[:TTS_MAX]
     out: list[str] = []
     for sent in re.findall(r"[^.!?…]+[.!?…]*", text):
@@ -230,11 +280,11 @@ def tts_chunks(text: str, limit: int = TTS_CHUNK) -> list[str]:
             out.append(sent)
     merged: list[str] = []
     for c in out:  # pack short neighbours together; keep unspeakable bits attached to real words
-        if merged and (len(merged[-1]) + 1 + len(c) <= limit or not re.search(r"[а-яё0-9]", c.lower())):
+        if merged and (len(merged[-1]) + 1 + len(c) <= limit or not speakable(c)):
             merged[-1] += " " + c
         else:
             merged.append(c)
-    return [c for c in merged if re.search(r"[а-яё0-9]", c.lower())]
+    return [c for c in merged if speakable(c)]
 
 
 def _wav_join(parts: list[bytes]) -> bytes:
@@ -250,6 +300,90 @@ def _wav_join(parts: list[bytes]) -> bytes:
         w.setparams(params)
         w.writeframes(b"".join(frames))
     return buf.getvalue()
+
+
+# Hosted NVIDIA Build speech endpoints. Chatterbox is the only NVIDIA-hosted multilingual model with Russian;
+# Magpie covers Vietnamese (and other languages), but not Russian. A missing voice parameter means the endpoint default.
+NVIDIA_TTS_PROFILES = {
+    "ru": {"provider": "chatterbox", "language": "ru-RU", "voice": "Chatterbox-Multilingual.ru-RU.Male"},
+    "hi": {"provider": "chatterbox", "language": "hi-IN"},
+    "vi": {"provider": "magpie", "language": "vi-VN"},
+}
+
+
+def _nvidia_key(s: Settings) -> str:
+    fn = getattr(s, "nvidia_key", None)
+    return fn() if callable(fn) else getattr(s, "nvidia_api_key", "")
+
+
+def _nvidia_tts_url(function_id: str) -> str:
+    if function_id.startswith("https://"):
+        return function_id.rstrip("/")
+    return f"https://{function_id}.invocation.api.nvcf.nvidia.com/v1/audio/synthesize"
+
+
+def nvidia_tts(text: str, lang: str, s: Settings) -> bytes:
+    """NVIDIA hosted TTS as one WAV. ru/hi use Chatterbox; vi uses Magpie Multilingual. Raises SttUnavailable."""
+    profile = NVIDIA_TTS_PROFILES.get(lang)
+    key = _nvidia_key(s)
+    if not profile or not key or not getattr(s, "nvidia_tts_enabled", True):
+        raise SttUnavailable(f"no nvidia tts for {lang}")
+    prepared = ru_tts.prepare(text) if lang == "ru" else text
+    chunks = tts_chunks(prepared, limit=450)  # Chatterbox hosted limit is about 500 chars; Magpie allows more
+    if not chunks:
+        raise SttUnavailable("nothing to speak")
+    fid = (getattr(s, "nvidia_tts_chatterbox_function_id", "") if profile["provider"] == "chatterbox"
+           else getattr(s, "nvidia_tts_magpie_function_id", ""))
+    if not fid:
+        raise SttUnavailable(f"no nvidia {profile['provider']} endpoint")
+    url = _nvidia_tts_url(fid)
+    parts = []
+    for chunk in chunks:
+        fields = {"text": chunk, "language": profile["language"], "encoding": "LINEAR_PCM", "sample_rate_hz": "24000"}
+        if profile.get("voice"):
+            fields["voice"] = profile["voice"]
+        try:
+            r = httpx.post(url, headers={"Authorization": f"Bearer {key}"},
+                           files={k: (None, v) for k, v in fields.items()}, timeout=getattr(s, "nvidia_tts_timeout_s", 60.0))
+            r = _nvcf_wait(r, key, getattr(s, "nvidia_tts_timeout_s", 60.0))
+        except httpx.HTTPError as e:
+            raise SttUnavailable(f"nvidia tts network: {type(e).__name__}") from None
+        if r.status_code != 200:
+            raise SttUnavailable(f"nvidia tts {r.status_code}")
+        if not r.content.startswith(b"RIFF"):
+            raise SttUnavailable("nvidia tts returned non-wav")
+        parts.append(r.content)
+    return _wav_join(parts) if len(parts) > 1 else parts[0]
+
+
+def server_tts_langs(s: Settings) -> list[str]:
+    out = set()
+    if _nvidia_key(s) and getattr(s, "nvidia_tts_enabled", True):
+        out.update(NVIDIA_TTS_PROFILES)
+    if getattr(s, "speech_url", "") or getattr(s, "silero_enabled", False):
+        out.add("ru")
+    return sorted(out)
+
+
+def tts_configured(s: Settings) -> bool:
+    return bool(server_tts_langs(s))
+
+
+def tts_synthesize(text: str, lang: str, s: Settings) -> bytes:
+    """Server voice for the answer language: NVIDIA where it supports the language, Silero as the Russian fallback."""
+    lang = (lang or "ru").lower().split("-")[0]
+    errors = []
+    if lang in NVIDIA_TTS_PROFILES and _nvidia_key(s) and getattr(s, "nvidia_tts_enabled", True):
+        try:
+            return nvidia_tts(text, lang, s)
+        except SttUnavailable as e:
+            errors.append(str(e))
+    if lang == "ru":
+        try:
+            return silero_tts(text, s)
+        except SttUnavailable as e:
+            errors.append(str(e))
+    raise SttUnavailable("; ".join(errors) or f"no server tts for {lang}")
 
 
 def silero_tts(text: str, s: Settings) -> bytes:

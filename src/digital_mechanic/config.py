@@ -71,6 +71,20 @@ class Settings(BaseSettings):
     llm_quality_steps: str = "expand,session_summary"
     cloudru_stt: bool = True  # STT on Cloud.ru: GigaASR (ru), whisper-large-v3 (other languages)
 
+    # NVIDIA Build hosted endpoints: batch translation + multilingual TTS. The key is env-only and never logged.
+    nvidia_api_key: str = ""
+    nvidia_api_key_file: str = ""
+    nvidia_base_url: str = "https://integrate.api.nvidia.com/v1"
+    nvidia_translate_enabled: bool = True
+    nvidia_translate_model: str = "nvidia/nemotron-3.5-bolt-e4b"
+    nvidia_translate_timeout_s: float = 45.0
+    nvidia_tts_enabled: bool = True
+    nvidia_tts_timeout_s: float = 60.0
+    nvidia_tts_chatterbox_function_id: str = "ddacc747-1269-4fab-bfd9-8f593dead106"
+    nvidia_tts_magpie_function_id: str = "877104f7-e885-42b9-8de8-f6e4c6303969"
+    nvidia_stt_enabled: bool = True
+    nvidia_stt_function_id: str = "2b940e91-a70e-4483-a958-d50408b96589"  # parakeet-tdt-0.6b, HTTP, ru/RU among 25 languages
+
     # Voice
     deepgram_api_key: str = ""
     deepgram_model: str = "nova-3"
@@ -94,6 +108,16 @@ class Settings(BaseSettings):
         if self.llm_api_key_file:
             try:
                 return open(self.llm_api_key_file, encoding="utf-8").read().strip()
+            except OSError:
+                return ""
+        return ""
+
+    def nvidia_key(self) -> str:
+        if self.nvidia_api_key:
+            return self.nvidia_api_key
+        if self.nvidia_api_key_file:
+            try:
+                return open(self.nvidia_api_key_file, encoding="utf-8").read().strip()
             except OSError:
                 return ""
         return ""

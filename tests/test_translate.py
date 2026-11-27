@@ -40,3 +40,17 @@ def test_kg_by_local_stt_and_kyrgyz_has_no_whisper():
     from digital_mechanic import privacy_laws, voice
     assert privacy_laws.requires_localization("KG") and privacy_laws.requires_localization("BY")
     assert {"bn", "be", "ky"} <= voice.DEEPGRAM_LANGS and "ky" in voice.NO_WHISPER
+
+
+def test_nvidia_translation_first_and_llm_repairs_rejected_items(tmp_path):
+    """NVIDIA is the first batch translator, but a translation that invents/loses numbers is retried by the normal LLM."""
+    store = Store(str(tmp_path / "a.db"))
+    nvidia = FakeLlm(lambda x: "nv 0,25 mm" if "0,25" in x else "bad 1")
+    nvidia.available = True
+    llm = FakeLlm(lambda x: "llm 0,25 mm" if "0,25" in x else "yaxshi")
+    tr = Translator(llm, store, str(tmp_path / "none"))
+    tr.nvidia = nvidia
+    r = tr.translate(["зазор 0,25 мм", "зазор клапанов"], "uz")
+    assert r[0] == {"text": "nv 0,25 mm", "src": "nvidia"}
+    assert r[1] == {"text": "yaxshi", "src": "llm"}
+    assert nvidia.calls == 1 and llm.calls == 1

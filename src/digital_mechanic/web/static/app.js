@@ -75,16 +75,18 @@ const Player = {
     const plan = ttsPlan(raw, original != null ? plain(original) : raw, lang || speakLang(), voices);
     if (plan.noticeKey) toast((t(plan.noticeKey) || plan.noticeKey).replace("{lang}", plan.noticeLang || ""));
     const p = plan.text || raw;
-    if (plan.useServer && SERVER_TTS) {
+    const spokenLang = langCode(plan.lang || lang || speakLang());
+    const serverHasVoice = SERVER_TTS && (SERVER_TTS_LANGS.includes(spokenLang) || (plan.useServer && (!SERVER_TTS_LANGS.length || SERVER_TTS_LANGS.includes("ru"))));
+    if (serverHasVoice) {
       try {
-        const r = await fetch("/api/tts", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: p})});
+        const r = await fetch("/api/tts", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({text: p, lang: spokenLang})});
         if (seq !== this.seq) return;
         if (r.ok) {
           const a = new Audio(URL.createObjectURL(await r.blob())); this.audio = a;
           a.ontimeupdate = () => { if (a.duration) captionFollow(p, a.currentTime / a.duration); };
           a.onended = done; a.onerror = done; await a.play().catch(done); return;
         }
-        if (r.status === 404) SERVER_TTS = false;  // no server voice on this stand; 502 = only this text failed
+        if (r.status === 404) SERVER_TTS = false;  // no server voice on this stand; 400/502 = only this language/text failed
       } catch (_) { SERVER_TTS = false; }
     }
     if (!plan.speak || !window.speechSynthesis) return done();
@@ -94,7 +96,7 @@ const Player = {
     speechSynthesis.speak(u);
   },
 };
-let SERVER_TTS = true, SERVER_STT = true;
+let SERVER_TTS = true, SERVER_STT = true, SERVER_TTS_LANGS = [];
 function speakLang() { return (typeof needsTr === "function" && needsTr() && ME && ME.lang) ? ME.lang : (ALANG() || "ru"); }
 function speakVisible(root, fallback) {
   if (!root) return fallback;
@@ -1147,10 +1149,11 @@ function vListen() {
 function stopRecorder() { if (VOICE.rec && VOICE.rec.state !== "inactive") { VOICE.rec.onstop = null; VOICE.rec.stop(); } VOICE.rec = null; }
 function vStopRec() { if (VOICE.rec && VOICE.rec.state !== "inactive") { vSet("transcribing"); VOICE.rec.stop(); } }
 async function vOnRecorded() {
-  const blob = new Blob(VOICE.chunks, {type: (VOICE.rec && VOICE.rec.mimeType) || "audio/webm"}); VOICE.rec = null;
+  let blob = new Blob(VOICE.chunks, {type: (VOICE.rec && VOICE.rec.mimeType) || "audio/webm"}), name = "voice.webm"; VOICE.rec = null;
   if (!VOICE.on) return;
   if (blob.size < 1500) return vListen();
-  const fd = new FormData(); fd.append("audio", blob, "voice.webm"); fd.append("lang", ME.lang || "ru"); fd.append("vehicle_id", VID || "");
+  try { blob = await toWav(blob, 15); name = "voice.wav"; } catch (_) {}  // NVIDIA/whisper need WAV; keep the original blob if the browser cannot decode it
+  const fd = new FormData(); fd.append("audio", blob, name); fd.append("lang", ME.lang || "ru"); fd.append("vehicle_id", VID || "");
   let text = "", intent;
   try { const r = await api("/api/stt", {method: "POST", body: fd}); text = (r.text || "").trim(); intent = r.intent; }
   catch (e) {
@@ -1424,6 +1427,6 @@ async function start() {
 (async () => {
   hydrateIcons();
   I18N = await (await fetch("/static/i18n.json")).json();
-  try { const ss = await api("/api/session"); SERVER_TTS = ss.server_tts !== false; SERVER_STT = WebSTT.server = ss.server_stt !== false; ME = ss.user; if (!ME) throw new Error("login"); start(); }
+  try { const ss = await api("/api/session"); SERVER_TTS = ss.server_tts !== false; SERVER_TTS_LANGS = ss.server_tts_langs || []; SERVER_STT = WebSTT.server = ss.server_stt !== false; ME = ss.user; if (!ME) throw new Error("login"); start(); }
   catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = () => { COUNTRIES = null; $("#l_country").innerHTML = ""; applyI18n(); demoAccounts(); }; $("#l_country").onchange = loginCountry; applyI18n(); demoAccounts(); $("#login").classList.remove("hidden"); }
 })();
