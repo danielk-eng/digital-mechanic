@@ -558,7 +558,8 @@ class Agent:
                 flags = policy.doubt_flags(ch)
                 if flags:
                     lines.append("СОМНЕНИЯ: " + "; ".join(flags) + ". Предупреди механика. Сначала осмотр узла на месте по руководству (заявку на осмотр не оформлять); "
-                                 "заявка на ремонт — только если механик сознательно подтвердит неисправность после осмотра. Не пиши, что заявку можно оформить или что черновик готов.")
+                                 "заявка на ремонт — только если механик сознательно подтвердит неисправность после осмотра. В объяснении не пиши, что заявку можно оформить или что черновик готов; "
+                                 "если механик сам просит заявку — вызови prepare_ticket, карточка попросит подтвердить предупреждение.")
         else:
             lines.append("Проверка ещё не запрошена.")
         if v:
@@ -1175,6 +1176,9 @@ class Agent:
                 turn.text = "Заявку не оформляю: " + refusal.rstrip(".") + "."
                 turn.tools.append({"tool": "policy", "ok": True, "decision": c.decision.value if c.decision else None})
                 return turn
+            if policy.doubt_flags(c.check):  # warning / 0,50–0,60: the mechanic asks himself -> the draft; the card asks to confirm the warning
+                masked = (masked or "") + ("\n(Механик сам просит заявку на ремонт: вызови prepare_ticket. Предупреждение о сомнении покажет карточка, "
+                                           "отправка в ТОиР — только после его подтверждения.)")
         if not self.llm.available:
             return self._fallback(c, masked, turn)
         if (self.facts_pass and c.vehicle and not manager and not orig_event and raw and not ticket_ask and not image_note
