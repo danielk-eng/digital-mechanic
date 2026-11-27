@@ -157,6 +157,18 @@ def test_country_consent_and_privacy_page(client):
     assert not {"IN", "VN", "BY"} & {c["code"] for c in cs["countries"]} and '["RU", "UZ", "KZ", "KG", "TJ"]' in mgr
 
 
+def test_mechanic_shell_routes(client):
+    from pathlib import Path
+    for path, shell in (("/", "auto"), ("/m", "mobile"), ("/desktop", "desktop")):
+        r = client.get(path)
+        assert r.status_code == 200 and f'data-shell="{shell}"' in r.text
+        assert 'id="deskNav"' in r.text and 'id="deskContext"' in r.text
+    js = (Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static/app.js").read_text(encoding="utf-8")
+    assert 'matchMedia("(min-width: 1024px)")' in js and 'function renderDesktopNav()' in js
+    css = (Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static/app.css").read_text(encoding="utf-8")
+    assert 'html[data-shell=desktop] .desktop-nav' in css and 'html[data-shell=desktop] .viewer' in css
+
+
 def test_chat_stream_ndjson(client):
     """«Подробнее» on Vercel: /api/chat/stream gives step lines then the same turn as /api/chat; 401 before the stream."""
     import json as _j

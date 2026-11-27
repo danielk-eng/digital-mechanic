@@ -484,3 +484,29 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 /* QR login button: icon + label on wide screens, icon only in the phone bar (label stays as aria-label/title) */
 #myqr{display:inline-flex;align-items:center;gap:6px}
 #myqr .qr-ic{display:inline-flex}#myqr .qr-ic svg{width:18px;height:18px}
+
+/* mechanic shells: /m keeps the phone layout; /desktop adds persistent navigation and context rails */
+.desktop-nav,.desktop-context{display:none}
+html[data-shell=desktop]{--nav-w:clamp(240px,22vw,320px);--ctx-w:clamp(300px,28vw,420px)}
+html[data-shell=desktop] body{overflow:hidden}
+html[data-shell=desktop] #app{height:100vh;display:grid;grid-template-columns:var(--nav-w) minmax(0,1fr) var(--ctx-w);grid-template-rows:auto minmax(0,1fr)}
+html[data-shell=desktop] .appbar{grid-column:1/-1;grid-row:1}
+html[data-shell=desktop] .desktop-nav{grid-column:1;grid-row:2;display:flex;flex-direction:column;gap:10px;min-height:0;padding:14px 12px;border-right:1px solid var(--border);background:var(--surface)}
+html[data-shell=desktop] .desktop-context{grid-column:3;grid-row:2;display:block;min-height:0;overflow-y:auto;padding:14px 12px calc(var(--composer-h,140px) + 20px);border-left:1px solid var(--border);background:var(--surface)}
+html[data-shell=desktop] main.chat-main{grid-column:2;grid-row:2;max-width:none;margin:0;min-height:0;overflow-y:auto;padding:20px 24px calc(var(--composer-h,140px) + 28px)}
+html[data-shell=desktop] .chat{max-width:840px;margin:0 auto}
+html[data-shell=desktop] #empty{max-width:760px;margin:0 auto}
+html[data-shell=desktop] .composer{left:var(--nav-w);right:var(--ctx-w)}
+html[data-shell=desktop] .composer .inner{max-width:840px}
+.dn-head,.dc-head{display:flex;align-items:center;gap:10px;min-height:36px;color:var(--text-2);font-size:.88rem;font-weight:600}
+.dc-head{margin-bottom:10px}
+.nav-list{flex:1;min-height:0;overflow-y:auto;margin:0 -4px;padding:0 4px}
+.nav-list .item{width:100%;margin:0;padding:8px 10px;min-height:54px}
+.nav-list .item .t span{font-size:.78rem}
+.nav-list .item>.small{display:none}
+.context-empty{padding:14px 4px;line-height:1.45}
+html[data-shell=desktop] .veh-card{margin:0 0 16px;padding:14px;border-radius:var(--r)}
+html[data-shell=desktop] .veh-card h2{font-size:1.1rem}
+html[data-shell=desktop] .diag-row .btn.primary{min-height:48px;font-size:.94rem}
+html[data-shell=desktop] .viewer{top:calc(var(--bar) + env(safe-area-inset-top));right:0;bottom:0;left:auto;width:min(620px,44vw);border-left:1px solid var(--border);box-shadow:var(--shadow-lg)}
+@media (min-width:1500px){html[data-shell=desktop]{--nav-w:320px;--ctx-w:430px}}

@@ -11,6 +11,17 @@ const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&
 const TT = (k, dflt) => { const L = (ME && ME.lang) || $("#l_lang")?.value || "ru"; return (I18N[L] || {})[k] || dflt; };  // per-language string or the given (Russian) text
 const ALANG = () => (ME && ME.answer_lang) || (ME && ME.lang) || "ru";
 
+// Mechanic shells share one logic bundle. /m forces the one-column phone layout, /desktop forces
+// the persistent desktop rails; / chooses by viewport (and can still be overridden by opening a route).
+const SHELL = (() => {
+  const forced = document.documentElement.dataset.shell;
+  if (forced === "desktop" || forced === "mobile") return forced;
+  if (location.pathname === "/desktop") return "desktop";
+  if (location.pathname === "/m") return "mobile";
+  try { return matchMedia("(min-width: 1024px)").matches ? "desktop" : "mobile"; } catch (_) { return "mobile"; }
+})();
+document.documentElement.dataset.shell = SHELL;
+
 async function api(path, opts = {}) {
   const o = {credentials: "same-origin", ...opts};
   if (o.json) { o.method = o.method || "POST"; o.headers = {"Content-Type": "application/json"}; o.body = JSON.stringify(o.json); delete o.json; }
@@ -33,6 +44,7 @@ function applyI18n() {
   document.documentElement.lang = (ME && ME.lang) || "ru";
   if (typeof VID !== "undefined" && !VID && $("#vehTitle")) $("#vehTitle").textContent = t("choose_vehicle");  // vehicle title is not an i18n label
   if ($("#l_country")) loginCountry();
+  if (typeof renderDesktopNav === "function") renderDesktopNav();
 }
 // Personal-data law by country: consent text names the law of the selected country, in the UI language.
 let COUNTRIES = null;
@@ -465,6 +477,33 @@ const vStatusText = v => v.in_repair ? t("in_repair") : t(v.status);
 function vehicleItem(v) {
   return `<button class="item ${v.vehicle_id === VID ? "sel" : ""}" data-v="${esc(v.vehicle_id)}"><span class="dot ${vStatus(v)}"></span><span class="t"><b class="mono">${esc(v.vehicle_id)}</b><span>${esc(v.model || "")}, ${esc(v.engine_model)}, ${esc(v.garage_no || "")}</span></span><span class="small muted">${esc(vStatusText(v))}</span></button>`;
 }
+
+function renderDesktopNav() {
+  if (SHELL !== "desktop" || !$("#navVehicles")) return;
+  const q = ($("#navFind") && $("#navFind").value || "").trim();
+  const sorted = VLIST.slice().sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || a.vehicle_id.localeCompare(b.vehicle_id));
+  const list = q ? findVehicles(q) : sorted;
+  $("#navVehicles").innerHTML = list.length ? list.slice(0, 100).map(vehicleItem).join("") : `<p class="muted small" style="padding:12px">${t("not_found")}</p>`;
+  $("#navVehicles").querySelectorAll("[data-v]").forEach(b => b.onclick = () => selectVehicle(b.dataset.v));
+}
+function syncDesktopShell() {
+  if (SHELL !== "desktop") return;
+  const empty = $("#contextEmpty");
+  if (empty) empty.classList.toggle("hidden", !!VID);
+  renderDesktopNav();
+}
+function initShell() {
+  const main = $("#main"), info = $("#vehInfo"), chat = $("#chat"), ctx = $("#deskContext");
+  if (!main || !info || !chat || !ctx) return;
+  if (SHELL === "desktop") {
+    ctx.insertBefore(info, $("#contextEmpty"));
+    const navFind = $("#navFind");
+    if (navFind) navFind.addEventListener("input", renderDesktopNav);
+  } else {
+    main.insertBefore(info, chat);
+  }
+  syncDesktopShell();
+}
 function vehiclePicker(box, onPick) {
   box.innerHTML = `<div class="field" style="margin-bottom:8px"><label for="vfind" class="label">${t("find_vehicle")}</label><input id="vfind" class="input" type="search" autocomplete="off" placeholder="${esc(t("find_vehicle_ph"))}"></div><div class="list" id="vlist"></div>`;
   const draw = () => {
@@ -481,6 +520,7 @@ function showEmpty() {
   $("#empty").innerHTML = `<div class="empty">${icon("truck", 40)}<h2>${t("choose_vehicle")}</h2><p>${t("choose_vehicle_text")}</p></div><div id="pick"></div>`;
   vehiclePicker($("#pick"), vid => selectVehicle(vid));
   $("#vehTitle").textContent = t("choose_vehicle"); $("#vehSub").textContent = ""; $("#vehDot").className = "dot";
+  syncDesktopShell();
 }
 async function loadVehicles() {
   const r = await api("/api/vehicles"); VLIST = r.vehicles;
@@ -489,6 +529,7 @@ async function loadVehicles() {
 async function selectVehicle(vid) {
   closeSheet(); Player.stop();
   VID = vid; localStorage.setItem("vid", vid); $("#chat").innerHTML = "";
+  syncDesktopShell();
   if (!vid) return showEmpty();
   $("#empty").classList.add("hidden"); $("#empty").innerHTML = ""; $("#composer").classList.remove("hidden"); $("#btnMenu").classList.remove("hidden");
   const lv = VLIST.find(v => v.vehicle_id === vid) || {};
@@ -1557,6 +1598,7 @@ $("#btnMenu").onclick = vehicleMenu;
 $("#vehBtn").onclick = pickVehicleSheet;
 $("#send").onclick = () => send();
 $("#dictate").onclick = dictateToggle;
+initShell();
 $("#dictCancel").onclick = dictateCancel; $("#dictDone").onclick = dictFinish;
 $("#txt").addEventListener("input", autosize);
 $("#txt").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });

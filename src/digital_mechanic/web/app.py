@@ -270,9 +270,24 @@ def _purge() -> None:
 
 
 # ---------------------------------------------------------------- pages
+def _mechanic_page(shell: str) -> str:
+    page = (STATIC / "index.html").read_text(encoding="utf-8")
+    return page.replace('<html lang="ru">', f'<html lang="ru" data-shell="{shell}">', 1)
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    return (STATIC / "index.html").read_text(encoding="utf-8")
+    return _mechanic_page("auto")
+
+
+@app.get("/m", response_class=HTMLResponse)
+def mobile_page() -> str:
+    return _mechanic_page("mobile")
+
+
+@app.get("/desktop", response_class=HTMLResponse)
+def desktop_page() -> str:
+    return _mechanic_page("desktop")
 
 
 @app.get("/manager", response_class=HTMLResponse)
