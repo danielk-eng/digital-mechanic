@@ -77,6 +77,27 @@ PROGRESS = {"search_manual": "🔎 Ищу в руководстве", "expand": 
             "update_repair": "✔ Отмечаю шаг", "fleet_overview": "📊 Сводка по парку"}
 
 
+_NODATA_SENT = re.compile(r"(?i)фрагмент[а-я]*\b[^.!?\n]{0,120}\b(нет|не привод|не указ|не найд|отсутств)|(нет|не привод|не указ|не найд)[^.!?\n]{0,80}\bфрагмент")
+
+
+def drop_unasked_nodata(answer: str) -> str:
+    """A grounded answer (2+ citations) that adds «числовых допусков в найденных фрагментах нет — в руководстве данных нет»:
+    the claim is about the retrieved fragments, not the manual (ЯМЗ-236 РЭ p. 31 has the valve clearances; Vercel audit
+    23:17, C1 explanation), and «фрагменты» is our jargon. Such a sentence goes; a refusal (no citations) stays as it is."""
+    if len(re.findall(r"\[(?:S|X)\d+\]", answer)) < 2:
+        return answer
+    out = []
+    for line in answer.split("\n"):
+        sents = re.split(r"(?<=[.!?])\s+", line)
+        keep = [x for x in sents if not _NODATA_SENT.search(x)]
+        rest = " ".join(keep).strip()
+        if keep != sents and not rest:
+            continue
+        out.append(rest if keep != sents else line)
+    res = "\n".join(out).strip()
+    return res if len(re.findall(r"\[(?:S|X)\d+\]", res)) >= 1 else answer
+
+
 @dataclass
 class Conv:
     cid: str
@@ -1148,7 +1169,7 @@ class Agent:
             answer = " ".join(s for s in sents if not unverified_numbers(s, evidence, allowed)).strip()
             answer += "\n\nЧасть цифр не подтверждена руководством и убрана — уточните по странице."
             turn.tools.append({"tool": "number_guard", "removed": bad})
-        return answer
+        return drop_unasked_nodata(answer)
 
     def triage(self, vehicle_id: str, last_n: int = 6) -> list[dict]:
         """Item 13: distinct anomalies in the recent checks, ordered by the TZ urgency rules, then by score."""
