@@ -9,7 +9,7 @@
 # Needs: git-filter-repo (pip install git-filter-repo), gitleaks (optional, for the final scan).
 set -euo pipefail
 SRC=${1:-$(git rev-parse --show-toplevel)}
-OUT=${2:-$SRC/../_work/public-export}
+OUT=$(realpath -m "${2:-$SRC/../_work/public-export}")
 BRANCH=${BRANCH:-main}
 rm -rf "$OUT"
 git clone --quiet --no-local --single-branch --branch "$BRANCH" "$SRC" "$OUT"
