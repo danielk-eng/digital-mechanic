@@ -294,8 +294,9 @@ class Llm:
                     time.sleep(min(1.5 * (attempt + 1), max(0.0, left() - 3)))
         raise LlmUnavailable(type(last).__name__ if last else "no provider") from None
 
-    def json(self, step: str, system: str, user: str, max_tokens: int = 2000) -> dict:
-        msg, _ = self.chat(step, [{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=max_tokens, temperature=0)
+    def json(self, step: str, system: str, user: str, max_tokens: int = 2000, on_text=None) -> dict:
+        msg, _ = self.chat(step, [{"role": "system", "content": system}, {"role": "user", "content": user}], max_tokens=max_tokens,
+                           temperature=0, on_text=on_text)
         return parse_json(msg.content or "")
 
     def vision(self, step: str, prompt: str, image_b64: str, mime: str = "image/jpeg", max_tokens: int = 900) -> str:

@@ -20,6 +20,8 @@ from typing import Any
 
 from .grounding import numbers
 
+_FACT_TEXT = re.compile(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"')  # a complete "text" string in the streamed facts JSON
+
 FACTS_SYSTEM = """Ты извлекаешь факты из фрагментов руководства по ремонту двигателя, чтобы ответить на вопрос механика.
 Верни JSON: {{"answerable": true|false, "facts": [{{"src": "S1", "text": "..."}}]}}.
 Правила:
@@ -113,7 +115,7 @@ class FactPipeline:
                            + f"\n{f['text'][:1400]}" for f in frags)
         try:
             out = self.a.llm.json("facts", FACTS_SYSTEM.format(limit=LIMITS.get(detail, LIMITS["brief"])),
-                                  f"Вопрос механика: {question}\n\nФРАГМЕНТЫ:\n\n{text}", max_tokens=1500)
+                                  f"Вопрос механика: {question}\n\nФРАГМЕНТЫ:\n\n{text}", max_tokens=1500, on_text=self._live_facts(c, frags))
         except Exception as e:  # noqa: BLE001 - LLM down or bad JSON: the agent loop handles it
             turn.tools.append({"tool": "facts", "error": str(e)[:200]})
             return None
@@ -134,6 +136,28 @@ class FactPipeline:
                        (k, vid, question[:300], json.dumps(facts, ensure_ascii=False), time.time()))
         turn.tools.append({"tool": "facts", "cached": False, "n": len(facts), "dropped": dropped, "ms": int((time.time() - t0) * 1000)})
         return facts or None
+
+    def _live_facts(self, c, frags: list[dict]):
+        """The facts pass is most of a typed answer's time (10–20 s of 12–22 s on the free model at night): every COMPLETE
+        fact of the streamed JSON whose figures are on the fragments is shown at once as a draft line («Нашёл в руководстве»),
+        the styled answer replaces it. Unverified figures never reach the screen."""
+        have = set().union(*(numbers(f["text"]) for f in frags)) if frags else set()
+        state = {"n": 0}
+
+        def cb(text: str) -> None:
+            got = []
+            for m in _FACT_TEXT.findall(text):
+                try:
+                    got.append(json.loads('"' + m + '"'))
+                except ValueError:
+                    got.append("")
+            if len(got) <= state["n"]:
+                return
+            state["n"] = len(got)
+            ok = [t.strip() for t in got if t.strip() and _nums(t) <= have][:6]
+            if ok:
+                self.a.drafts[c.cid] = "Нашёл в руководстве:\n" + "\n".join("— " + t for t in ok)
+        return cb
 
     def labelled(self, c, facts: list[dict]) -> list[dict]:
         """Attach this conversation's labels (S#) to the facts' pages."""

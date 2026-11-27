@@ -476,3 +476,16 @@ def test_llm_turn_budget_stops_calls():
     finally:
         REQUEST_DEADLINE.reset(tok)
     assert REQUEST_DEADLINE.get() is None
+
+
+def test_facts_pass_streams_verified_facts_as_draft(make_agent):
+    """Typed answer on Vercel: the facts pass is most of the wait. Complete facts of the streamed JSON show at once
+    (draft «Нашёл в руководстве»); a fact with a figure that is not on the fragments is never shown."""
+    a = make_agent([])
+    c = a.conv("u1", "M333YK47")
+    fp = a.fp
+    frags = [{"text": "Зазор между коромыслом и клапаном 0,25–0,30 мм на холодном двигателе."}]
+    cb = fp._live_facts(c, frags)
+    cb('{"answerable": true, "facts": [{"src": "S1", "text": "Зазор 0,25–0,30 мм на холодном"}, {"src": "S1", "text": "Момент 999 Н·м"}, {"src": "S1", "text": "недопис')
+    d = a.drafts[c.cid]
+    assert d.startswith("Нашёл в руководстве:") and "0,25–0,30 мм" in d and "999" not in d and "недопис" not in d
