@@ -2,7 +2,7 @@
 import sys, time, httpx
 B = sys.argv[1].rstrip("/")
 c = httpx.Client(base_url=B, timeout=300, follow_redirects=True)
-r = c.post("/api/login", json={"name": "Смоук Тест", "consent": True}); r.raise_for_status()
+r = c.post("/api/login/demo", json={"account": "student", "pin": "3003", "consent": True}); r.raise_for_status()  # demo mechanic; name-only login is intentionally disabled
 vs = c.get("/api/vehicles").json(); vs = vs.get("vehicles", vs) if isinstance(vs, dict) else vs
 vid = vs[0]["id"] if isinstance(vs[0], dict) and "id" in vs[0] else vs[0].get("vehicle_id")
 t = time.time(); d = c.post("/api/diagnose", json={"vehicle_id": vid}).json(); print("diagnose", round(time.time()-t,1), "s", str(d)[:300])

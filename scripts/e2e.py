@@ -23,7 +23,7 @@ def show(tag, r):
     return d
 
 
-r = c.post("/api/login", json={"name": "Тест", "role": "mechanic", "lang": sys.argv[2] if len(sys.argv) > 2 else "ru", "consent": True}); r.raise_for_status()
+r = c.post("/api/login/demo", json={"account": "student", "pin": "3003", "lang": sys.argv[2] if len(sys.argv) > 2 else "ru", "consent": True}); r.raise_for_status()
 V, SID = "M333YK47", "S-0005"
 d = show("diagnose C1", c.post("/api/diagnose", json={"vehicle_id": V, "session_id": SID}))
 print(json.dumps(d["card"]["check"], ensure_ascii=False), d["card"].get("urgency"), d["card"].get("light_text"))
@@ -37,3 +37,24 @@ if draft:
     show("confirm", c.post("/api/ticket/confirm", json={"vehicle_id": V, "draft_id": draft["draft_id"]}))
 show("repair", c.post("/api/chat", json={"vehicle_id": V, "text": "Начать ремонт по шагам"}))
 show("next", c.post("/api/chat", json={"vehicle_id": V, "text": "готово"}))
+
+# C3: a failed recording must not become a diagnosis or a ticket.
+V3, SID3 = "P456AT178", "S-0003"
+d3 = show("diagnose C3", c.post("/api/diagnose", json={"vehicle_id": V3, "session_id": SID3}))
+check3 = (d3.get("card") or {}).get("check") or {}
+print("C3 status:", check3.get("status"), "ticket_allowed:", bool((d3.get("card") or {}).get("ticket_allowed")))
+
+# C4: the chief sees quarantine, the priority list and the vehicle history.
+m = httpx.Client(base_url=B, timeout=240)
+r = m.post("/api/login/demo", json={"account": "chief", "pin": "1001", "consent": True}); r.raise_for_status()
+fl = m.get("/api/fleet")
+fl.raise_for_status()
+ov = fl.json()
+counts = ov.get("counts") or ov.get("summary") or {}
+print("\n=== C4 fleet", counts)
+quar = [x.get("vehicle_id") for x in ov.get("vehicles", []) if x.get("status") == "quarantine"][:5]
+print("quarantine sample:", quar)
+target = quar[0] if quar else V
+fv = m.get(f"/api/fleet/{target}"); fv.raise_for_status()
+hist = fv.json()
+print("C4 vehicle:", target, "history_events:", len(hist.get("timeline") or hist.get("events") or hist.get("history") or []), "diagnoses:", len(hist.get("diagnoses_run") or []))
