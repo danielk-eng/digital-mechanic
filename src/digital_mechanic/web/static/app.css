@@ -211,8 +211,9 @@ pre.json{white-space:pre-wrap;font-size:.75rem;background:var(--surface-2);paddi
 .dicttime{min-width:38px;text-align:center;color:var(--danger);font-size:.9rem;font-weight:600}
 .dictcancel{color:var(--danger)!important;background:var(--danger-soft)!important}
 .dictdone{background:var(--accent)!important;color:var(--on-accent)!important}
-.dictrec.transcribing .dictwave{opacity:.35}
+.dictrec.transcribing .dictwave,.dictrec.error .dictwave{opacity:.35}
 .dictrec.transcribing .dictdone{background:var(--surface-3)!important;color:var(--text-2)!important;pointer-events:none}
+.dictrec.error .dictdone{background:var(--accent)!important;color:var(--on-accent)!important}
 .inputbox .icon-btn.hidden{display:none}
 @media (max-width:390px){
   .inputbox{padding:3px;gap:2px}

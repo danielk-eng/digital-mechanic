@@ -41,6 +41,8 @@ def test_handlers_reuse_existing_stt_and_voice_mode():
     assert "MediaRecorder" in block and "toWav" in block and '"/api/stt"' in block  # server dictation records real audio first
     assert "WebSTT.listen" in block and "dictateBrowserStart" in block                # browser fallback remains
     assert "dictateCancel" in block and "dictFinish" in block
+    assert "dictationUpload" in block and "DICT.blob" in block and "rotate-ccw" in block  # failed upload keeps local audio for retry
+    assert "v_didnt_hear" in block and "same recording can be retried" in block  # empty recognition also keeps the local recording
     assert "cancelled while the browser was converting" in block  # cancel before upload: audio is never sent
     assert "Enter" in JS and "send()" in JS
     # old single teal mic-as-voice-mode-or-send swap is gone: mic no longer is the only right button
@@ -53,16 +55,18 @@ def test_dictation_has_messenger_style_recording_controls():
     assert '$("#dictCancel").onclick = dictateCancel' in JS and '$("#dictDone").onclick = dictFinish' in JS
     assert ".inputbox.recording .dictrec{display:flex}" in CSS
     assert ".inputbox.recording textarea" in CSS and "#dictate" in CSS and "#mic" in CSS
+    assert ".dictrec.error .dictdone" in CSS
     cancel = JS[JS.index("function dictateCancel()"):JS.index("async function dictateToggle()")]
     assert "DICT.seq++" in cancel and "dictReleaseMic" in cancel and "WebSTT.abort" in cancel
 
 
 def test_aria_labels_russian():
     assert I18N["ru"]["dictate"] == "Диктовка"
+    assert I18N["ru"]["retry"] == "Повторить"
     assert I18N["ru"]["voice_chat"] == "Голосовой чат"
     assert I18N["ru"]["send"] == "Отправить"
     for lang, m in I18N.items():
-        assert m.get("dictate") and m.get("voice_chat") and m.get("send"), lang
+        assert m.get("dictate") and m.get("voice_chat") and m.get("send") and m.get("retry"), lang
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")

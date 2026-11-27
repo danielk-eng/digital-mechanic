@@ -1363,7 +1363,7 @@ async function drawProfile(sh, prof) {
 async function saveProfile(patch) { try { ME = (await api("/api/me", {json: patch})).user; applyI18n(); } catch (e) { toast(friendlyError(e)); } }
 
 // ---------------------------------------------------------------- dictation into the composer: messenger-style record / cancel / accept, not hands-free chat
-const DICT = {on: false, seq: 0, mode: "", stream: null, ctx: null, an: null, rec: null, chunks: [], raf: 0, tick: 0, auto: 0, t0: 0, start: "", prefix: "", wave: []};
+const DICT = {on: false, seq: 0, mode: "", stream: null, ctx: null, an: null, rec: null, chunks: [], raf: 0, tick: 0, auto: 0, t0: 0, start: "", prefix: "", wave: [], blob: null, name: ""};
 function setDictateUi(on) {
   const b = $("#dictate"); if (!b) return;
   b.classList.toggle("on", on);
@@ -1406,7 +1406,7 @@ function dictMeter() {
 function dictUiStart() {
   const box = dictBox(); if (!box) return;
   DICT.wave = []; DICT.t0 = performance.now();
-  box.classList.add("recording"); $("#dictRec").classList.remove("transcribing");
+  box.classList.add("recording"); $("#dictRec").classList.remove("transcribing", "error");
   $("#dictDone").innerHTML = icon("check", 18);
   $("#dictTime").textContent = "0:00";
   clearInterval(DICT.tick); DICT.tick = setInterval(() => { const el = $("#dictTime"); if (el) el.textContent = dictTimerText(); }, 250);
@@ -1415,12 +1415,13 @@ function dictUiStart() {
 function dictUiDone(transcribing = false) {
   cancelAnimationFrame(DICT.raf); clearInterval(DICT.tick); clearTimeout(DICT.auto);
   if (transcribing) {
+    $("#dictRec").classList.remove("error");
     $("#dictRec").classList.add("transcribing");
     $("#dictDone").innerHTML = icon("loader-circle", 18, "spin");
     return;
   }
   const box = dictBox(); if (box) box.classList.remove("recording");
-  const rec = $("#dictRec"); if (rec) rec.classList.remove("transcribing");
+  const rec = $("#dictRec"); if (rec) rec.classList.remove("transcribing", "error");
   const done = $("#dictDone"); if (done) done.innerHTML = icon("check", 18);
 }
 function dictReleaseMic() {
@@ -1434,7 +1435,7 @@ function dictInsert(text) {
   autosize(); ta.focus();
 }
 function dictReset() {
-  DICT.on = false; DICT.mode = ""; DICT.rec = null; DICT.chunks = [];
+  DICT.on = false; DICT.mode = ""; DICT.rec = null; DICT.chunks = []; DICT.blob = null; DICT.name = "";
   setDictateUi(false); dictUiDone(false);
 }
 async function dictateServerStart() {
@@ -1466,21 +1467,36 @@ async function dictationTranscribe(my) {
   const mr = DICT.rec, chunks = DICT.chunks.slice();
   dictUiDone(true); dictReleaseMic();
   let blob = new Blob(chunks, {type: (mr && mr.mimeType) || "audio/webm"}), name = "dictation.webm";
+  if (blob.size < 1200) { dictReset(); return; }
+  try { blob = await toWav(blob, 30); name = "dictation.wav"; } catch (_) {}
+  if (my !== DICT.seq) return;  // cancelled while the browser was converting the recording: do not send the audio
+  DICT.blob = blob; DICT.name = name;
+  return dictationUpload(my);
+}
+function dictShowError(e, msg) {
+  const rec = $("#dictRec"), done = $("#dictDone");
+  if (rec) rec.classList.remove("transcribing"), rec.classList.add("error");
+  if (done) {
+    done.innerHTML = icon("rotate-ccw", 18);
+    done.setAttribute("aria-label", t("retry")); done.title = t("retry");
+  }
+  toast(msg || friendlyError(e));
+}
+async function dictationUpload(my) {
+  if (my !== DICT.seq || !DICT.blob) return;
+  dictUiDone(true);
+  const fd = new FormData(); fd.append("audio", DICT.blob, DICT.name || "dictation.webm"); fd.append("lang", (ME && ME.lang) || "ru"); fd.append("vehicle_id", VID || "");
   try {
-    if (blob.size < 1200) throw Object.assign(new Error("short"), {code: "short"});
-    try { blob = await toWav(blob, 30); name = "dictation.wav"; } catch (_) {}
-    if (my !== DICT.seq) return;  // cancelled while the browser was converting the recording: do not send the audio
-    const fd = new FormData(); fd.append("audio", blob, name); fd.append("lang", (ME && ME.lang) || "ru"); fd.append("vehicle_id", VID || "");
     const r = await api("/api/stt", {method: "POST", body: fd});
     if (my !== DICT.seq) return;
     const text = (r.text || "").trim();
+    if (!text) { dictShowError(null, t("v_didnt_hear")); return; }  // same recording can be retried; nothing was inserted
     dictReset();
-    if (text) dictInsert(text); else toast(t("v_didnt_hear"));
+    dictInsert(text);
   } catch (e) {
     if (my !== DICT.seq) return;
-    dictReset();
     if (WebSTT.serverFailed(e)) SERVER_STT = false;
-    if (e.code !== "short") toast(friendlyError(e));
+    dictShowError(e);
   }
 }
 async function dictateBrowserStart() {
@@ -1504,6 +1520,7 @@ async function dictateBrowserStart() {
 }
 function dictFinish() {
   if (!DICT.on) return;
+  if (DICT.blob) return dictationUpload(DICT.seq);  // retry after a network/STT failure: the recording is still local
   if (DICT.mode === "browser") return WebSTT.stop();
   if (DICT.rec && DICT.rec.state !== "inactive") DICT.rec.stop();
 }
