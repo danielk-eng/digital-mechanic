@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
+from .. import pii
 from ..config import Settings
 
 
@@ -52,6 +53,8 @@ REQUEST_PRIMARY: contextvars.ContextVar[str | None] = contextvars.ContextVar("re
 # Absolute time (time.time()) by which the current user turn must have its LLM answers (Agent.handle sets it): no call
 # starts or waits past it, the agent then answers from the manual pages without the model -- never a hung chat.
 REQUEST_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("request_deadline", default=None)
+# Depersonalization before the text leaves the server (per company; None = the stand setting PII_MASKING, on by default)
+REQUEST_PII: contextvars.ContextVar[bool | None] = contextvars.ContextVar("request_pii", default=None)
 
 
 class Llm:
@@ -256,8 +259,19 @@ class Llm:
 
     def chat(self, step: str, messages: list[dict], tools: list[dict] | None = None, max_tokens: int = 1800,
              temperature: float = 0.1, model: str | None = None, on_text=None) -> tuple[Any, int]:
-        """Return (assistant message, tokens used)."""
+        """Return (assistant message, tokens used).
+
+        152-FZ: with masking on (default) the provider gets the messages with names, phones, plates, VINs, document numbers
+        replaced by «[ФИО_1]»-style placeholders (pii.Masker, local regex, a few ms); the answer, every streamed chunk and the
+        tool-call arguments get the real values back here, so neither the model provider nor its logs see them."""
         t = time.time()
+        on = REQUEST_PII.get()
+        mk = pii.Masker() if (self.s.pii_masking if on is None else on) else None
+        if mk is not None:
+            messages = mk.mask_messages(messages)
+            if on_text is not None:
+                _cb = on_text
+                on_text = lambda txt: _cb(mk.unmask_partial(txt))  # noqa: E731 -- never half a placeholder on screen
         order = self.order()
         if not order:
             raise LlmUnavailable("no api key")
@@ -286,6 +300,13 @@ class Llm:
                     msg = r.choices[0].message
                     if getattr(msg, "content", None):
                         msg.content = re.sub(r"(?s)^\s*<think>.*?</think>\s*", "", msg.content)  # never show reasoning
+                    if mk is not None:
+                        if getattr(msg, "content", None):
+                            msg.content = mk.unmask(msg.content)
+                        for tc in getattr(msg, "tool_calls", None) or []:
+                            fn = getattr(tc, "function", None)
+                            if fn is not None and getattr(fn, "arguments", None):
+                                fn.arguments = mk.unmask(fn.arguments)
                     return msg, tok
                 except LlmUnavailable:
                     break

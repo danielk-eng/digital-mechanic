@@ -18,6 +18,9 @@ async function health() {
   $("#health").innerHTML = k("ML-заглушка", s.ml.ok, `${s.ml.ms} мс`) + k("ТОиР-заглушка", s.toir.ok, `${s.toir.ms} мс`) +
     k("Языковая модель", s.llm.ok, `${esc(s.llm.model)}, вызовов ${s.llm.usage.calls}`) + k("Распознавание речи", true, `${esc(s.stt.order)}: ${Object.entries(s.stt.engines).filter(e => e[1]).map(e => e[0]).join(", ")}`) +
     k("Индекс руководств", true, `${s.index.pages} + ${s.index.extra_pages} стр.`) +
+    (s.pii ? `<div class="kpi" id="pii_kpi" style="cursor:default"><div class="l">Обезличивание</div><div class="n" style="font-size:1.25rem"><span class="pill ${s.pii.on ? "ready" : "attention"}">${s.pii.on ? "вкл" : "выкл"}</span></div>` +
+      `<div class="s">ФИО, телефоны, госномера, VIN заменяются до отправки в модель; замен ${s.pii.entities}, ср. ${s.pii.avg_ms} мс` +
+      `${s.pii.companies_off.length ? `; выключено: ${s.pii.companies_off.map(esc).join(", ")}` : ""}</div></div>` : "") +
     (h.errors_24h.length ? `<div class="kpi" style="cursor:default"><div class="l">Ошибки за сутки</div><div class="s">${h.errors_24h.map(e => `${esc(e.action)}: ${e.n}`).join(", ")}</div></div>` : "");
 }
 async function logs() {
@@ -138,11 +141,12 @@ async function companies() {
   $("#tab-companies").innerHTML = `<div class="panel"><div class="pad"><div class="mcp-form"><div><label class="label" for="c_name">Новая компания</label><input id="c_name" class="input" autocomplete="off"></div>` +
     `<div><label class="label" for="c_prim">Языковая модель</label><select id="c_prim" class="input">${r.llm_primary.map(o => `<option value="${o}">${esc(PRIM[o] || o)}</option>`).join("")}</select></div>` +
     `<button class="btn primary" id="c_add">Создать</button></div></div></div>` +
-    `<div class="panel"><table class="tbl"><thead><tr><th>Компания</th><th>Главный механик</th><th class="hide-m">Машин / людей</th><th class="hide-m">Расход LLM</th><th>Модель</th></tr></thead><tbody>` +
+    `<div class="panel"><table class="tbl"><thead><tr><th>Компания</th><th>Главный механик</th><th class="hide-m">Машин / людей</th><th class="hide-m">Расход LLM</th><th>Модель</th><th class="hide-m">Обезличивание</th></tr></thead><tbody>` +
     r.companies.map(c => `<tr class="click" data-c="${esc(c.id)}"><td><b>${esc(c.name)}</b><div class="sub mono">${esc(c.id)}</div>${c.active ? "" : `<span class="pill attention">выключена</span>`}</td>` +
       `<td>${c.chiefs.length ? c.chiefs.map(x => `${esc(x.name)} <span class="sub mono">${esc(x.login || "")}</span>`).join("<br>") : `<span class="muted">нет</span>`}</td>` +
       `<td class="hide-m num">${c.vehicles.length} / ${c.staff}</td><td class="hide-m small">${c.usage.calls} запросов, ${c.usage.tokens} ток.<div class="sub">${c.usage.cost_rub} ₽, ср. ${c.usage.avg_seconds} с</div></td>` +
-      `<td class="small">${esc(PRIM[c.llm_primary || ""] || c.llm_primary)}</td></tr>`).join("") + `</tbody></table></div>`;
+      `<td class="small">${esc(PRIM[c.llm_primary || ""] || c.llm_primary)}</td>` +
+      `<td class="hide-m small"><span class="pill ${c.pii_masking === 0 ? "attention" : "ready"}">${c.pii_masking === 0 ? "выкл" : "вкл"}</span></td></tr>`).join("") + `</tbody></table></div>`;
   $("#c_add").onclick = async () => { const name = $("#c_name").value.trim(); if (!name) return;
     try { await api("/api/eng/companies", {json: {name, llm_primary: $("#c_prim").value}}); companies(); } catch (e) { alert(e.message); } };
   $$("#tab-companies tr[data-c]").forEach(tr => tr.onclick = () => companyCard(r, tr.dataset.c, vOwner));
@@ -152,6 +156,8 @@ function companyCard(r, id, vOwner) {
   side(c.name, `<div class="field"><label class="label" for="cc_name">Название</label><input id="cc_name" class="input" value="${esc(c.name)}"></div>` +
     `<div class="field"><label class="label" for="cc_prim">Языковая модель для компании</label><select id="cc_prim" class="input">${r.llm_primary.map(o => `<option value="${o}" ${o === (c.llm_primary || "") ? "selected" : ""}>${esc(PRIM[o] || o)}</option>`).join("")}</select></div>` +
     `<label class="switch"><span>Компания активна</span><input type="checkbox" id="cc_act" ${c.active ? "checked" : ""}></label>` +
+    `<label class="switch"><span>Обезличивание перед моделью (152-ФЗ)</span><input type="checkbox" id="cc_pii" ${c.pii_masking === 0 ? "" : "checked"}></label>` +
+    `<p class="small muted" style="margin:-4px 0 12px">ФИО, телефоны, госномера, VIN, паспорт, СНИЛС, ИНН заменяются метками на нашем сервере; в ответе подставляются обратно.</p>` +
     `<div class="field"><span class="label">Машины компании (отметка переносит машину сюда)</span><div class="vpick">${r.all_vehicles.map(v => `<label><input type="checkbox" value="${esc(v)}" ${c.vehicles.includes(v) ? "checked disabled" : ""}> <span class="mono">${esc(v)}</span>${c.vehicles.includes(v) ? "" : ` <span class="sub">${esc(vOwner[v] || "")}</span>`}</label>`).join("")}</div></div>` +
     `<div class="card-actions"><button class="btn primary" id="cc_save">Сохранить</button>${id === "neurodvs" ? "" : `<button class="btn danger" id="cc_del">Удалить компанию</button>`}</div>` +
     `<div class="section-label">Главный механик</div>` + (c.chiefs.length ? `<div class="small">${c.chiefs.map(x => `<div style="margin:6px 0">${esc(x.name)}, код <b class="mono">${esc(x.login || "")}</b>` +
@@ -163,7 +169,7 @@ function companyCard(r, id, vOwner) {
     `<div class="field"><label class="label" for="ch_style">Как помощник с ним говорит</label><textarea id="ch_style" class="input" rows="3" style="padding:12px 16px"></textarea></div>` +
     `<div class="card-actions"><button class="btn primary" id="ch_go">Создать главного механика</button></div><div id="ch_out"></div>`);
   $("#cc_save").onclick = async () => {
-    try { await api(`/api/eng/companies/${id}`, {json: {name: $("#cc_name").value.trim(), llm_primary: $("#cc_prim").value, active: $("#cc_act").checked,
+    try { await api(`/api/eng/companies/${id}`, {json: {name: $("#cc_name").value.trim(), llm_primary: $("#cc_prim").value, active: $("#cc_act").checked, pii_masking: $("#cc_pii").checked,
       vehicles: $$(".vpick input:checked:not(:disabled)").map(x => x.value)}}); $("#layer").innerHTML = ""; companies(); } catch (e) { alert(e.message); }
   };
   const del = $("#cc_del"); if (del) del.onclick = async () => {

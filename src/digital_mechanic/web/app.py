@@ -27,7 +27,7 @@ from pydantic import BaseModel
 
 from .. import media as umedia, pii, privacy_laws, voice
 from ..translate import Translator
-from ..agent.llm import REQUEST_COUNTRY, REQUEST_PRIMARY
+from ..agent.llm import REQUEST_COUNTRY, REQUEST_PII, REQUEST_PRIMARY
 from .. import tenancy
 from ..replica import Replica
 from ..agent import profile as uprofile, style as ustyle, memory as umemory
@@ -223,8 +223,10 @@ async def _restore_session(request, call_next):
     REQUEST_COUNTRY.set((me or {}).get("country"))  # LLM provider by the person's country (152-FZ: RU -> Cloud.ru)
     co = tenancy.company_of(me) if me else None
     tenancy.SCOPE.set(tenancy.scope_for(STORE, AGENT.fleet.all_ids(), co) if me else None)
-    crow = STORE.one("SELECT llm_primary FROM companies WHERE id=?", (co,)) if co else None
+    crow = STORE.one("SELECT llm_primary, pii_masking FROM companies WHERE id=?", (co,)) if co else None
     REQUEST_PRIMARY.set((crow or {}).get("llm_primary") or None)  # the engineer may switch the provider per company
+    pm = (crow or {}).get("pii_masking")
+    REQUEST_PII.set(None if pm is None else bool(pm))  # depersonalization before the LLM, per company (default: on)
     response = await call_next(request)
     if REPLICA.on and request.url.path.startswith(("/api/", "/q/")):
         await asyncio.to_thread(REPLICA.push)  # only uploads when the mirrored tables changed (incl. a user restored from cookie)
@@ -405,7 +407,7 @@ def edit_style(body: StyleIn, uid: str | None = Cookie(None)) -> dict:
     if body.reset:
         p.pop("style", None)
     if body.text is not None:
-        ustyle.set_text(p, u, pii.mask(body.text), "user")
+        ustyle.set_text(p, u, pii.mask(body.text, keep_names=True), "user")
     if body.memory is not None:
         p["memory"] = bool(body.memory)
     STORE.upsert_user(u["id"], profile=uprofile.dump(p))
@@ -1443,6 +1445,8 @@ def eng_health(uid: str | None = Cookie(None)) -> dict:
     out["stt"] = {"ok": True, "engines": _models_view()["stt_engines"], "order": S.stt_order}
     out["index"] = {"ok": True, "pages": len(AGENT.index.pages), "extra_pages": len(AGENT.extra.pages) if AGENT.extra else 0}
     out["translate"] = {"ok": True, **TR.stats()}
+    out["pii"] = {"ok": True, "on": S.pii_masking, **pii.STATS.as_dict(),
+                  "companies_off": [r["name"] for r in STORE.q("SELECT name FROM companies WHERE pii_masking=0")]}
     errs = STORE.q("SELECT action, COUNT(*) AS n FROM audit WHERE ok=0 AND ts>? GROUP BY action ORDER BY n DESC LIMIT 8", (time.time() - 86400,))
     return {"services": out, "errors_24h": errs, "shared_state": {"on": REPLICA.on, **REPLICA.stats}}
 
@@ -1597,7 +1601,7 @@ def admin_create_user(body: NewUserIn, uid: str | None = Cookie(None)) -> dict:
     bad = [v for v in body.vehicles if v not in AGENT.fleet.ids()]
     if bad:
         raise HTTPException(400, f"unknown vehicles: {', '.join(bad)}")
-    name = pii.mask(body.name.strip()[:60]) or "—"
+    name = pii.mask(body.name.strip()[:60], keep_names=True) or "—"
     new = "u" + uuid.uuid4().hex[:10]
     login = f"{re.sub(r'[^a-z0-9]', '', name.lower().translate(str.maketrans('абвгдеёжзийклмнопрстуфхцчшщъыьэюя', 'abvgdeejziiklmnoprstufhccss_y_eua'))) or 'user'}{secrets_suffix()}"
     pin = _new_pin()
@@ -1736,6 +1740,7 @@ class CompanyIn(BaseModel):
     name: str
     llm_primary: str = ""
     note: str = ""
+    pii_masking: bool = True
 
 
 class CompanyPatch(BaseModel):
@@ -1743,6 +1748,7 @@ class CompanyPatch(BaseModel):
     llm_primary: str | None = None
     active: bool | None = None
     note: str | None = None
+    pii_masking: bool | None = None  # depersonalize text before the external LLM (152-FZ); off only on the customer's written request
     vehicles: list[str] | None = None  # trucks of this company (moved from wherever they were)
     delete: bool = False  # remove the company with its people; its trucks go back to the seed company
 
@@ -1825,7 +1831,8 @@ def eng_company_create(body: CompanyIn, uid: str | None = Cookie(None)) -> dict:
     if not name or body.llm_primary not in LLM_PRIMARY_OPTS:
         raise HTTPException(400, "name / llm_primary")
     cid = "c" + uuid.uuid4().hex[:8]
-    STORE.x("INSERT INTO companies(id, name, created, llm_primary, note) VALUES (?,?,?,?,?)", (cid, name, time.time(), body.llm_primary, body.note[:300]))
+    STORE.x("INSERT INTO companies(id, name, created, llm_primary, note, pii_masking) VALUES (?,?,?,?,?,?)",
+            (cid, name, time.time(), body.llm_primary, body.note[:300], int(body.pii_masking)))
     STORE.audit(user_id=me_["id"], role=me_["role"], action="company_create", input=f"{cid} {name}", ok=1)
     return {"company": _company_view(STORE.one("SELECT * FROM companies WHERE id=?", (cid,)))}
 
@@ -1855,6 +1862,8 @@ def eng_company_edit(cid: str, body: CompanyPatch, uid: str | None = Cookie(None
         STORE.x("UPDATE companies SET active=? WHERE id=?", (int(body.active), cid))
     if body.note is not None:
         STORE.x("UPDATE companies SET note=? WHERE id=?", (body.note[:300], cid))
+    if body.pii_masking is not None:
+        STORE.x("UPDATE companies SET pii_masking=? WHERE id=?", (int(body.pii_masking), cid))
     if body.vehicles is not None:
         bad = [v for v in body.vehicles if v not in AGENT.fleet.all_ids()]
         if bad:
@@ -1894,7 +1903,7 @@ def eng_company_chief(cid: str, body: ChiefIn, uid: str | None = Cookie(None)) -
     pin = body.pin.strip() or _new_pin()
     if not re.fullmatch(r"\d{4,8}", pin):
         raise HTTPException(400, "PIN: 4-8 digits")
-    name = pii.mask(body.name.strip()[:60]) or "—"
+    name = pii.mask(body.name.strip()[:60], keep_names=True) or "—"
     new = "u" + uuid.uuid4().hex[:10]
     login = f"{re.sub(r'[^a-z0-9]', '', name.lower().translate(str.maketrans('абвгдеёжзийклмнопрстуфхцчшщъыьэюя', 'abvgdeejziiklmnoprstufhccss_y_eua'))) or 'chief'}{secrets_suffix()}"
     u = STORE.upsert_user(new, name=name, role="manager", experience="expert", title=body.title[:80], vehicles="[]", lang="ru", country="RU", login=login,
@@ -1902,7 +1911,7 @@ def eng_company_chief(cid: str, body: ChiefIn, uid: str | None = Cookie(None)) -
                           company_id=cid, email=_email_or_none(body.email))
     if body.style or body.formality in ("ty", "vy"):
         p = uprofile.load(u)
-        ustyle.set_text(p, u, pii.mask(body.style) if body.style.strip() else ustyle.seed_text(u, body.formality or None), "engineer")
+        ustyle.set_text(p, u, pii.mask(body.style, keep_names=True) if body.style.strip() else ustyle.seed_text(u, body.formality or None), "engineer")
         STORE.upsert_user(new, profile=uprofile.dump(p))
     STORE.audit(user_id=me_["id"], role=me_["role"], action="company_chief_create", input=f"{cid} {login}", ok=1)
     return {"user": _user_row(STORE.user(new)), "login": login, "pin": pin, "invite": f"/?login={login}"}

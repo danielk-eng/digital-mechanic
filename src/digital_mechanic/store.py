@@ -78,6 +78,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS company_vehicles(vehicle_id TEXT PRIMARY KEY, company_id TEXT);
             CREATE TABLE IF NOT EXISTS login_tokens(hash TEXT PRIMARY KEY, user_id TEXT, created REAL, expires REAL, used REAL, revoked INTEGER DEFAULT 0, issued_by TEXT, fails INTEGER DEFAULT 0, locked_until REAL DEFAULT 0);
         """)
+        if "pii_masking" not in {r[1] for r in self._con.execute("PRAGMA table_info(companies)")}:  # per-company depersonalization
+            self._con.execute("ALTER TABLE companies ADD COLUMN pii_masking INTEGER DEFAULT 1")
         tcols = {r[1] for r in self._con.execute("PRAGMA table_info(tickets)")}
         for col in ("attachments", "review"):  # ticket package (answer, pages, photos, summary) and chief's approval
             if col not in tcols:

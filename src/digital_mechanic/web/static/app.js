@@ -1148,6 +1148,7 @@ function settingsSheet() {
     `<div class="field"><span class="label">${t("theme")}</span>${segHtml("s_theme", [["dark", t("theme_dark")], ["light", t("theme_light")], ["contrast", t("theme_contrast")]], A11Y.theme())}</div>` +
     `<label class="switch"><span>${t("voice_speaks")}</span><input type="checkbox" id="s_vtts" ${A11Y.voiceSpeaks() ? "checked" : ""}></label>` +
     `<label class="switch"><span>${t("captions")}</span><input type="checkbox" id="s_cc" ${A11Y.captions() ? "checked" : ""}></label>` +
+    `<label class="switch"><span>${t("tap_sounds")}</span><input type="checkbox" id="s_snd" ${A11Y.sounds() ? "checked" : ""}></label>` +
     `<div class="sep"></div><div class="field"><span class="label">${t("style_title")}</span><div id="s_style">${t("loading")}</div></div>` +
     `<div class="sep"></div><div class="field"><span class="label">${t("my_profile")}</span><div id="s_prof" class="small muted">${t("loading")}</div></div>` +
     (ME.login || ME.chief || /^demo-/.test(ME.id || "") ? `<div class="sep"></div><div class="field"><span class="label" id="s_qr_t"></span><div id="s_qr"></div></div>` : "") +
@@ -1167,6 +1168,7 @@ function settingsSheet() {
     bindSeg(sh, "s_theme", v => A11Y.setTheme(v));
     sh.querySelector("#s_vtts").onchange = e => A11Y.setVoiceSpeaks(e.target.checked);
     sh.querySelector("#s_cc").onchange = e => A11Y.setCaptions(e.target.checked);
+    sh.querySelector("#s_snd").onchange = e => { A11Y.setSounds(e.target.checked); A11Y.sound("tap"); };
     sh.querySelector("#s_logout").onclick = async () => { await api("/api/logout", {method: "POST"}); location.reload(); };
     sh.querySelector("#s_delete").onclick = async () => { if (confirm(t("delete_confirm"))) { await api("/api/me", {method: "DELETE"}); location.reload(); } };
   });

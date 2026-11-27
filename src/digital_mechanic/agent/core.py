@@ -964,7 +964,7 @@ class Agent:
             t = self.briefing.route(c, user, raw, turn)  # deterministic: last scanned truck, insights, ticket + assignment
             if t is not None:
                 return t
-        masked = pii.mask(raw) if self.pii_masking else raw
+        masked = raw  # depersonalized reversibly in Llm.chat right before it leaves the server (pii.Masker): the answer keeps the names
         if event == "expand":
             return self._expand(c, user, raw, turn)
         m = re.fullmatch(r"(?:код\s*(?:ошибки\s*)?)?(F\d{2})\.?", raw, re.I)
