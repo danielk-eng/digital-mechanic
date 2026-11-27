@@ -261,7 +261,14 @@ mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 2px}
 .orb[data-state=idle]{background:var(--surface-3);color:var(--text-2)}
 .voice .said{font-size:1.05rem;color:var(--text-2);text-align:center;min-height:1.5em;max-width:560px}
 .voice .reply{font-size:1.2rem;line-height:1.45;font-weight:500;text-align:center;max-width:600px;max-height:40vh;overflow:auto}
+.voice .reply.long{text-align:start;font-size:1.1rem;font-weight:400;line-height:1.5;padding:4px 2px;align-self:stretch}
 .voice .hint{font-size:.85rem;color:var(--text-3);text-align:center}
+/* a phone: a long spoken answer gets the room, the orb steps back (audit 23:17, 390×844: the reply was cut under the hint) */
+@media (max-width:600px){.voice{padding-left:20px;padding-right:20px}.voice .stage{gap:24px}
+  .voice .stage:has(.reply.long){justify-content:flex-start;gap:16px;padding-top:4px}
+  .voice .stage:has(.reply.long) .orb{width:104px;height:104px}
+  .voice .stage:has(.reply.long) .said{font-size:.95rem}
+  .voice .reply.long{max-height:none;flex:1;min-height:0}}
 .voice .vbottom{display:flex;gap:12px;width:100%;max-width:420px}
 .voice .vbottom .btn{flex:1;min-height:56px;font-size:1rem}
 
@@ -412,6 +419,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
   .mgr-bar h1{flex:1 1 100%;font-size:1rem}
   .mgr-bar #whoami{flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 }
+}
 /* 26.11 18:40: manager on a phone — nothing wider than the screen (table 40 px and filter selects 8 px over at 390 px made the
    whole page pan and pushed the vehicle sheet off the left edge); KPI numbers on one line across a row even when a label wraps */
 @media (max-width:720px){
@@ -427,3 +435,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
   .kpi .l{min-height:2.5em;align-items:flex-start;line-height:1.25}
   .kpi .n{font-size:1.75rem;margin-top:2px}
 }
+/* 26.11 23:50 (390×844): the name squeezed to «Ал…» before the buttons — it moves into the logout tooltip; fleet table 12 px and
+   tickets 5 px wider than the panel cut «высокий» and «Ждёт согласования» at the right edge */
+@media (max-width:420px){
+  .mgr-bar #whoami{display:none}
+  table.tbl{font-size:.8rem}
+  .tbl th,.tbl td{padding:10px 4px}
+  .tbl .pill{padding-left:7px;padding-right:7px}
