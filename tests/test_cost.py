@@ -54,3 +54,13 @@ def test_agent_journal_steps_and_errors():
                        {"tool": "uncited_guard", "removed": ["x"]}])
     assert j["steps"][1].startswith("2. искал в руководстве двигателя: «давление масла» → 2 фрагм.")
     assert "ОШИБКА" in j["steps"][2] and j["errors"] == ["llm: timeout"] and "удалено: 1" in j["steps"][3]
+
+
+def test_cached_tokens_from_provider_usage():
+    from types import SimpleNamespace as N
+    from digital_mechanic.agent.llm import cached_tokens
+    assert cached_tokens(None) == 0
+    assert cached_tokens(N(prompt_tokens=100, prompt_tokens_details=N(cached_tokens=64))) == 64
+    assert cached_tokens(N(prompt_tokens=100, prompt_tokens_details={"cached_tokens": 32})) == 32
+    assert cached_tokens(N(prompt_tokens=100, prompt_cache_hit_tokens=128)) == 128
+    assert cached_tokens(N(prompt_tokens=100, prompt_tokens_details=None)) == 0

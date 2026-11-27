@@ -32,6 +32,21 @@ class _Attempt:
         self.error: BaseException | None = None
 
 
+def cached_tokens(u: Any) -> int:
+    """Prompt tokens served from the provider's prefix cache (billed at the cached-input price), when the provider reports it:
+    OpenAI-style usage.prompt_tokens_details.cached_tokens or DeepSeek's usage.prompt_cache_hit_tokens; else 0."""
+    if u is None:
+        return 0
+    det = getattr(u, "prompt_tokens_details", None)
+    v = (det.get("cached_tokens") if isinstance(det, dict) else getattr(det, "cached_tokens", None)) if det is not None else None
+    if v is None:
+        v = getattr(u, "prompt_cache_hit_tokens", None)
+    try:
+        return int(v or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 @dataclass
 class Usage:
     calls: int = 0
@@ -252,12 +267,14 @@ class Llm:
     def _account(self, step: str, r: Any, dt: float, prov: str = "") -> int:
         u = getattr(r, "usage", None)
         pt, ct = (u.prompt_tokens or 0, u.completion_tokens or 0) if u else (0, 0)
+        cached = cached_tokens(u)
         with self._lock:
             self.usage.calls += 1
             self.usage.prompt_tokens += pt
             self.usage.completion_tokens += ct
             self.usage.seconds += dt
-            self.usage.per_step.append({"step": step, "provider": prov, "prompt_tokens": pt, "completion_tokens": ct, "seconds": round(dt, 2)})
+            self.usage.per_step.append({"step": step, "provider": prov, "prompt_tokens": pt, "completion_tokens": ct,
+                                   "cached_tokens": cached, "seconds": round(dt, 2)})
         return pt + ct
 
     def chat(self, step: str, messages: list[dict], tools: list[dict] | None = None, max_tokens: int = 1800,
