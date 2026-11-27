@@ -533,12 +533,23 @@ async function diagnose() {
 // «Подробнее» streams (NDJSON from /api/chat/stream): on Vercel the /api/progress poll hits other instances and sees nothing,
 // the stream carries the steps and live lines of the instance that writes the answer. Any stream problem -> plain /api/chat.
 const EXPAND_STAGES = [[0, "📖 Перечитываю страницы руководства"], [3, "🧩 Собираю шаги и нормы с тех же страниц"], [7, "✍️ Пишу подробный ответ"], [14, "🔢 Сверяю цифры с руководством"]];
+// Watchdog: the server ends a turn by 60 s, but a request can hang on the way (Vercel 27.11 02:35: a voice question waited 385 s,
+// the server never saw it). No answer headers in 25 s, nothing new for 45 s or 80 s in all -> drop it, ask the plain way once.
+const STREAM_WAIT = {head: 25000, idle: 45000, total: 80000};
 async function chatStream(payload, onLine) {
-  const r = await fetch("/api/chat/stream", {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)});
+  const ac = new AbortController(), t0 = Date.now(); let last = Date.now(), head = false;
+  const dog = setInterval(() => { const n = Date.now(); if ((!head && n - t0 > STREAM_WAIT.head) || n - last > STREAM_WAIT.idle || n - t0 > STREAM_WAIT.total) ac.abort(); }, 1000);
+  try { return await chatStreamRead(payload, onLine, ac, () => { head = true; last = Date.now(); }); }
+  catch (e) { if (ac.signal.aborted) { const x = new Error("stream timeout"); x.stream = true; x.timeout = true; throw x; } throw e; }
+  finally { clearInterval(dog); }
+}
+async function chatStreamRead(payload, onLine, ac, alive) {
+  const r = await fetch("/api/chat/stream", {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload), signal: ac.signal});
+  alive();
   if (!r.ok || !r.body) { const e = new Error("stream " + r.status); e.status = r.status; e.stream = true; throw e; }
   const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "", fin = null;
   for (;;) {
-    const {value, done} = await rd.read(); if (done) break;
+    const {value, done} = await rd.read(); if (done) break; alive();
     buf += dec.decode(value, {stream: true}); let i;
     while ((i = buf.indexOf("\n")) >= 0) {
       const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (!line) continue;
@@ -592,7 +603,7 @@ async function ask(text, event = null, sources = null) {
         });
       } catch (e) { if (!e.stream) throw e; r = null; }  // the stream itself failed (proxy, old server): ask the plain way
     }
-    if (!r) r = await api("/api/chat", {json: payload});
+    if (!r) r = await api("/api/chat", {json: payload, signal: AbortSignal.timeout ? AbortSignal.timeout(90000) : undefined});
     if (r && r.draft_open === false) LAST_DRAFT = null;
     th.remove(); return renderTurn(r, event === "expand");
   }
@@ -836,11 +847,15 @@ function getExtract(doc, page, q, question) {
   return EXTRACTS.get(k);
 }
 function prefetchExtracts(btns) {
+  if (VOICE.on) return;  // hands-free dialog: nobody taps a chip, keep the line free for the next question
   const seen = new Set(), pick = [];
   for (const b of btns) { const k = b.dataset.doc + "#" + b.dataset.page; if (!b.dataset.doc || seen.has(k)) continue; seen.add(k); pick.push(b); if (pick.length >= 2) break; }
   if (!pick.length) return;
   const question = LAST_Q;
-  setTimeout(() => pick.forEach(b => getExtract(b.dataset.doc, +b.dataset.page, b.dataset.q || "", question).catch(() => {})), 800);
+  // one at a time, never while a question is being answered (same instance, same free model)
+  const next = () => { if (VOICE.on) return; if (BUSY) return setTimeout(next, 1500); const b = pick.shift(); if (!b) return;
+    getExtract(b.dataset.doc, +b.dataset.page, b.dataset.q || "", question).catch(() => {}).finally(next); };
+  setTimeout(next, 1200);
 }
 async function openCitation(doc, page, q) {
   Player.stop(); page = +page;

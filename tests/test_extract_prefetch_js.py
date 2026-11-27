@@ -14,14 +14,17 @@ def test_prefetch_two_distinct_pages_and_reuse_on_open():
     src = JS.read_text(encoding="utf-8")
     fn = src[src.index("const EXTRACTS = new Map()"):src.index("async function openCitation")]
     prog = """
-let LAST_Q = "почему стучит"; const calls = [];
+let LAST_Q = "почему стучит", BUSY = false; const VOICE = {on: false}; const calls = [];
 function api(path, o) { calls.push(o.json); return o.json.page === 99 ? Promise.reject(new Error("x")) : Promise.resolve({ok: true, text: "t" + o.json.page}); }
-global.setTimeout = f => f();
+const realST = setTimeout; global.setTimeout = f => f();
 """ + fn + """
 const b = (doc, page, q) => ({dataset: {doc, page: String(page), q}});
+VOICE.on = true; prefetchExtracts([b("d", 50, "v")]); if (calls.length) throw new Error("prefetch in voice mode"); VOICE.on = false;
 prefetchExtracts([b("d", 52, "a"), b("d", 52, "b"), b("d", 53, "c"), b("d", 54, "e")]);
-if (calls.length !== 2 || calls[0].page !== 52 || calls[1].page !== 53 || calls[1].question !== "почему стучит") throw new Error(JSON.stringify(calls));
-getExtract("d", 53, "c", LAST_Q).then(x => {
+if (calls.length !== 1 || calls[0].page !== 52) throw new Error("one at a time " + JSON.stringify(calls));
+new Promise(r => setImmediate(r)).then(() => {
+if (calls.length !== 2 || calls[1].page !== 53 || calls[1].question !== "почему стучит") throw new Error(JSON.stringify(calls));
+return getExtract("d", 53, "c", LAST_Q); }).then(x => {
   if (calls.length !== 2 || x.text !== "t53") throw new Error("not reused");
   return getExtract("d", 99, "z", LAST_Q).catch(() => getExtract("d", 99, "z", LAST_Q)).catch(() => {});
 }).then(() => { if (calls.length !== 4) throw new Error("failed request must not stay cached " + calls.length); process.stdout.write("OK"); });
@@ -48,3 +51,19 @@ def test_chip_hint_keeps_the_clause_right_before_the_chip():
             "Пониженное давление масла в системе смазки\nЗасорение заборника масляного насоса — Промыть заборчик масляного насоса")
     head, rows, i = table_row_group(page, out.stdout)
     assert head == "Двигатель стучит" and "Ранний впрыск" in rows[i]
+
+
+@pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
+def test_stream_watchdog_drops_a_hung_request():
+    """Vercel 27.11 02:35: a voice question's stream got no answer for 385 s (the server never saw the request). The client
+    drops a stream with no headers in time and falls back to the plain request (e.stream)."""
+    src = JS.read_text(encoding="utf-8")
+    fn = src[src.index("const STREAM_WAIT"):src.index("// Ticket draft (10–20 s")]
+    prog = fn + """
+STREAM_WAIT.head = 50;
+global.fetch = (u, o) => new Promise((ok, bad) => o.signal.addEventListener("abort", () => bad(new Error("aborted"))));
+const t0 = Date.now();
+chatStream({}, () => {}).then(() => process.stdout.write("NO"), e => process.stdout.write(e.stream && e.timeout && Date.now() - t0 < 3000 ? "OK" : "BAD " + e.message));
+"""
+    out = subprocess.run(["node", "-e", prog], capture_output=True, text=True, timeout=20)
+    assert out.stdout == "OK", out.stdout + out.stderr
