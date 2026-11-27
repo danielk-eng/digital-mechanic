@@ -379,9 +379,19 @@ function renderCard(c) {
     }
   }
 }
+// One request per (vehicle, code) a minute: the history replay drew 13 check cards and fired 13 identical /api/proven calls
+// (local probe 27.11 12:50, M333YK47) on top of the vehicle, history and suggest requests.
+const PROVEN = new Map();
+function provenFor(vid, code) {
+  const k = vid + "|" + code, hit = PROVEN.get(k);
+  if (hit && Date.now() - hit.t < 60000) return hit.p;
+  const p = api(`/api/proven?vehicle_id=${encodeURIComponent(vid)}&code=${encodeURIComponent(code)}`);
+  PROVEN.set(k, {t: Date.now(), p}); p.catch(() => PROVEN.delete(k));
+  return p;
+}
 async function loadProven(box, code) {
   try {
-    const r = await api(`/api/proven?vehicle_id=${encodeURIComponent(VID)}&code=${encodeURIComponent(code)}`);
+    const r = await provenFor(VID, code);
     if (!r.fixes.length) return;
     const ver = f => f.verified === true ? `<span class="ok-text">${t("fix_verified")}</span>` : f.verified === false ? `<span class="warn-text">${t("fix_not_verified")}</span>` : "";
     box.insertAdjacentHTML("beforeend", `<details class="more proven"><summary>${icon("chevron-right", 16)}${t("proven_fixes")}: ${r.fixes.length}</summary>` +
