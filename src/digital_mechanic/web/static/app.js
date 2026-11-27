@@ -135,9 +135,22 @@ function collapseCites(h) {
   ms.forEach((m, i) => { if (drop.has(i)) { out += h.slice(pos, m.index); pos = m.index + m[0].length; } });
   return out + h.slice(pos);
 }
+// The free model sometimes returns the whole detailed answer as one line: «… [S1]. **Что проверить** 1. … [S1]. 2. … [S1]. 3. …»
+// (Vercel 26.11 22:30: «Подробнее» rendered as one wall of text). Put bold headings and a 1-2-3 run back on their own lines.
+function unflatten(text) {
+  return String(text || "").split("\n").map(line => {
+    line = line.replace(/([.!?:;\]])\s+(\*\*[^*\n]{3,48}\*\*)/g, "$1\n$2");
+    return line.split("\n").map(l => {
+      if (!/(^|[\s*])1[.)]\s+\S/.test(l) || !/[.;:!?\]]\s+2[.)]\s+\S/.test(l)) return l;
+      let n = 2;
+      l = l.replace(/([.;:!?\]])\s+(\d{1,2})[.)]\s+(?=\S)/g, (m, p, d) => (+d === n ? (n++, `${p}\n${d}. `) : m));
+      return n > 3 ? l.replace(/(\S)\s+1[.)]\s+(?=\S)/, "$1\n1. ") : l.replace(/\n(\d{1,2})\. /g, " $1. ");
+    }).join("\n");
+  }).join("\n");
+}
 function md(text, sources) {
   const src = Object.fromEntries((sources || []).map(s => [s.label, s]));
-  const lines = esc(text || "").replace(/\r/g, "").replace(/[ \t]+([.,;:!?)])/g, "$1").replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?\s?/gu, "").split("\n");
+  const lines = esc(unflatten(text)).replace(/\r/g, "").replace(/[ \t]+([.,;:!?)])/g, "$1").replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]\uFE0F?\s?/gu, "").split("\n");
   let out = "", list = null, para = [];
   const flushP = () => { if (para.length) { out += `<p>${inline(para.join("<br>"), src)}</p>`; para = []; } };
   const flushL = () => { if (list) { out += `<${list.tag}>${list.items.map(i => `<li>${inline(i, src)}</li>`).join("")}</${list.tag}>`; list = null; } };
