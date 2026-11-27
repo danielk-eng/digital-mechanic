@@ -309,7 +309,7 @@ def calculator_page() -> HTMLResponse:
     a, cx, ix, m = r["assumptions"], r["complex_repair"], r["indexing"], r["measured"]
     body = f"""<h1>Цифровой механик — калькулятор экономики</h1>
 <p class="muted">Все суммы в рублях без НДС. Курс ЦБ РФ на 26.11.2026: {rub(r['usd_rub'], 4)} ₽ за 1 $. Токены — замер на стенде {e(m['measured_at'])} CST,
-модель {e(m['model'])}, {m['runs']} прогона сценария, медиана {m['tokens_per_scenario_median']:,} токенов. <a href="/static/calculator.xlsx" download>Скачать заполненный шаблон (xlsx)</a></p>
+модель {e(m['model'])}, {m['runs']} прогона сценария, медиана {m['tokens_per_scenario_median']:,} токенов. <a href="/static/calculator.xlsx" download>Скачать заполненный шаблон (xlsx)</a> · Код: <a href="https://github.com/danielk-eng/digital-mechanic">github.com/danielk-eng/digital-mechanic</a></p>
 <h2>Один запрос = один сценарий</h2>
 <p>От результата диагностики до ответа механику или заявки: {e(m['scenario'])}. Суммируются все шаги модели: выбор инструмента и ответ (один вызов агента делает и то и другое), повторные вызовы, «Подробнее», выжимки цитат, черновик заявки. Эмбеддинги запроса — 0: поиск BM25 на сервере, модели эмбеддингов нет. Диагностика, сбой записи, норма и подтверждение заявки — 0 токенов, решает код.</p>
 <div class="scroll"><table><tr><th>Шаг</th><th>Вызовов</th><th>Токенов на входе (1 вызов)</th><th>на выходе</th><th>Основная, бесплатно</th><th>Основная, платный аналог</th><th>Резерв GigaChat-4, бесплатно</th><th>Резерв, платный аналог</th></tr>{rows}</table></div>
