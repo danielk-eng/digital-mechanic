@@ -85,6 +85,8 @@ class Llm:
     def _provider(self, name: str) -> tuple[str, str, str]:
         if name == "cloudru":
             return self.s.cloudru_base_url, self.s.cloudru_api_key, self.s.cloudru_model
+        if name == "quality":
+            return self.s.llm_quality_url, self.s.api_key() or "local", self.s.llm_quality_model
         return self.s.llm_base_url, self.s.api_key(), self.s.llm_model
 
     def order(self, country: str | None = None) -> list[str]:
@@ -278,6 +280,8 @@ class Llm:
             raise LlmUnavailable("no api key")
         if model and model != self.s.cloudru_model:  # explicit model (e.g. vision) lives at TokenRouter
             order = [p for p in order if p == "tokenrouter"] or order
+        elif self.s.llm_quality_url and step in {x.strip() for x in self.s.llm_quality_steps.split(",") if x.strip()}:
+            order = ["quality"] + order  # Spark: «Подробнее» on the 27B server, the primary stays free for questions
         dl = REQUEST_DEADLINE.get()
         left = (lambda: dl - time.time()) if dl else (lambda: self.s.llm_timeout_s)
         if left() < 3:

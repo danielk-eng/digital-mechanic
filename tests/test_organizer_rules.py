@@ -3,6 +3,7 @@ import gzip
 import json
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 from conftest import msg, tool_call
 from digital_mechanic import policy
@@ -245,3 +246,28 @@ def test_model_cannot_promise_held_ticket():
     t, hit = answer_post.ticket_claims("Проверить свечу [S1].\nЗаявку на дефектовку по этим работам можно оформить — черновик уже готов.", "Сначала осмотр узла на месте.")
     assert hit and "можно оформить" not in t and "готов" not in t and t.endswith("Сначала осмотр узла на месте.") and "[S1]" in t
     assert answer_post.ticket_claims("Проверить свечу [S1].", "x") == ("Проверить свечу [S1].", False)
+
+
+def test_quality_server_routes_only_expand():
+    from digital_mechanic.agent.llm import Llm
+    from digital_mechanic.config import Settings
+
+    calls = []
+
+    class Cli:
+        def __init__(self, name):
+            self.name = name
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kw):
+            calls.append((self.name, kw["model"]))
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok", tool_calls=None))],
+                                   usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1))
+
+    s = Settings(llm_api_key="k", llm_stream=False, llm_hedge_s=0, pii_masking=False, cloudru_api_key="",
+                 llm_quality_url="http://llm-quality:8080/v1", llm_quality_model="q27b")
+    l = Llm(s)
+    l._clients = {"quality": Cli("quality"), "tokenrouter": Cli("tokenrouter")}
+    l.chat("expand", [{"role": "user", "content": "x"}])
+    l.chat("agent_r0", [{"role": "user", "content": "x"}])
+    assert calls == [("quality", "q27b"), ("tokenrouter", s.llm_model)]

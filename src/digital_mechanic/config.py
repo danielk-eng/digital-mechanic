@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     # Bake-off 26.11 (audit/MODEL_BAKEOFF.md): GigaChat-4-708B (Cloud.ru, free) styles better but answers in 26-36 s vs 11 s,
     # so the current model stays primary and Cloud.ru is the fallback. "auto": Cloud.ru first for cloudru_countries (strict 152-FZ mode).
     llm_primary: str = "tokenrouter"
+    # second local server for long background answers (DGX Spark: Qwen3.8-27B for «Подробнее», docs/LOCAL_GPU.md);
+    # empty = every step goes to the primary. Failures fall back to the normal provider order.
+    llm_quality_url: str = ""
+    llm_quality_model: str = "local-llm"
+    llm_quality_steps: str = "expand,session_summary"
     cloudru_stt: bool = True  # STT on Cloud.ru: GigaASR (ru), whisper-large-v3 (other languages)
 
     # Voice

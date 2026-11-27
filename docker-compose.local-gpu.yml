@@ -2,7 +2,7 @@
 #   cp local-gpu.env.example .env
 #   docker compose -f docker-compose.yml -f docker-compose.local-gpu.yml --profile gpu3090 up -d        # RTX 3090: Qwen3.8-27B
 #   docker compose -f docker-compose.yml -f docker-compose.local-gpu.yml --profile gpu3090-fast up -d   # RTX 3090: Qwen3-30B-A3B (swap)
-#   docker compose -f docker-compose.yml -f docker-compose.local-gpu.yml --profile spark up -d     # DGX Spark (arm64)
+#   docker compose -f docker-compose.yml -f docker-compose.local-gpu.yml --profile spark up -d     # DGX Spark (arm64): 35B-A3B + 27B «Подробнее»
 # Both LLM services answer as host "llm" (OpenAI-compatible /v1) and speech as host "speech", so the app config is the same.
 services:
   # RTX 3090, profile gpu3090 (primary, V 27.11): Qwen3.8-27B UD-Q4_K_M (15.4 GiB) dense + vision, thinking off,
@@ -39,16 +39,17 @@ services:
     networks: {default: {aliases: [llm]}}
     restart: unless-stopped
 
-  # DGX Spark, primary: vLLM (upstream arm64 image; native NVFP4 path on GB10 from v0.30), Qwen3-30B-A3B-Instruct-2507-FP8
+  # DGX Spark, primary (V 27.11): Qwen3.6-35B-A3B FP8 (~90 tok/s NVFP4+MTP measured, replaces 30B-A3B); vLLM upstream arm64 image
   llm-spark:
     profiles: [spark]
     image: ${SPARK_VLLM_IMAGE:-vllm/vllm-openai:v0.32.0}
     entrypoint: ["vllm", "serve"]
     command: >
-      ${SPARK_MODEL:-Qwen/Qwen3-30B-A3B-Instruct-2507-FP8}
+      ${SPARK_MODEL:-Qwen/Qwen3.6-35B-A3B-FP8}
       --served-model-name local-llm --max-model-len ${LOCAL_MAX_LEN:-16384}
       --gpu-memory-utilization ${SPARK_GPU_UTIL:-0.35} --max-num-seqs ${LOCAL_SLOTS_SPARK:-8}
-      --enable-auto-tool-choice --tool-call-parser ${SPARK_TOOL_PARSER:-hermes}
+      --enable-auto-tool-choice --tool-call-parser ${SPARK_TOOL_PARSER:-qwen3_coder}
+      --default-chat-template-kwargs '{"enable_thinking": false}' --reasoning-parser qwen3
       --host 0.0.0.0 --port 8080 --api-key ${LOCAL_LLM_KEY:-local}
     environment: {HF_HOME: /models/hf}
     volumes: ["${MODELS_DIR:-./var/models}:/models"]
@@ -58,9 +59,8 @@ services:
     networks: {default: {aliases: [llm]}}
     restart: unless-stopped
 
-  # DGX Spark, second server "llm-quality": Qwen3.8-27B NVFP4 (QAD) + MTP, thinking off, for «Подробнее» / reports.
-  # Until the app routes the expand step here (code change after WORKER.lock), point the whole app at it with
-  # LOCAL_LLM_URL=http://llm-quality:8080/v1 to evaluate it.
+  # DGX Spark, second server "llm-quality": Qwen3.8-27B NVFP4 (QAD) + MTP, thinking off. The app sends the background
+  # «Подробнее» (step expand) and shift summaries here (LLM_QUALITY_URL); questions stay on the fast 35B-A3B.
   llm-spark-quality:
     profiles: [spark]
     image: ${SPARK_VLLM_IMAGE:-vllm/vllm-openai:v0.32.0}
@@ -107,7 +107,8 @@ services:
       LLM_BASE_URL: ${LOCAL_LLM_URL:-http://llm:8080/v1}
       LLM_MODEL: local-llm
       LLM_API_KEY: ${LOCAL_LLM_KEY:-local}
-      LLM_PRIMARY: ${LLM_PRIMARY:-tokenrouter}
+      LLM_PRIMARY: ${LLM_PRIMARY:-local}
+      LLM_QUALITY_URL: ${LLM_QUALITY_URL:-}    # spark: http://llm-quality:8080/v1 -> «Подробнее» on Qwen3.8-27B
       LLM_HEDGE_S: "0"            # no duplicate requests on our own GPU
       LLM_HEDGE_TTFT_S: "60"      # min 0.5 in code; 60 s = effectively off
       LLM_TURN_BUDGET_S: ${LLM_TURN_BUDGET_S:-90}
