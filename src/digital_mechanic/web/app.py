@@ -1123,7 +1123,9 @@ def tts(body: TtsIn, uid: str | None = Cookie(None)):
     try:
         wav = voice.silero_tts(re.sub(r"\[(S|X)\d+\]", "", body.text), S)
     except Exception:
-        raise HTTPException(404, "server TTS disabled; use browser speech")
+        if not (S.speech_url or S.silero_enabled):
+            raise HTTPException(404, "server TTS disabled; use browser speech")
+        raise HTTPException(502, "this text could not be spoken; browser speech for this message")  # keep server voice for the next ones
     return Response(wav, media_type="audio/wav")
 
 

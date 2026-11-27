@@ -211,16 +211,65 @@ def transcribe(audio: bytes, mime: str, lang: str, s: Settings, local_first: boo
     raise SttUnavailable("; ".join(errors))
 
 
+TTS_CHUNK = 220  # Silero gives up on ~400+ chars once numbers and units are spelled out («180–200 Н·м» -> words)
+TTS_MAX = 1200   # whole message as the client sends it (was cut at 900)
+
+
+def tts_chunks(text: str, limit: int = TTS_CHUNK) -> list[str]:
+    """Sentence-sized pieces (<= limit chars) for the synthesiser; a long sentence is split at , ; : — or spaces.
+    Pieces with nothing speakable (only Latin/punctuation, e.g. «F08») are glued to a neighbour, never sent alone."""
+    text = re.sub(r"\s+", " ", text or "").strip()[:TTS_MAX]
+    out: list[str] = []
+    for sent in re.findall(r"[^.!?…]+[.!?…]*", text):
+        sent = sent.strip()
+        while len(sent) > limit:
+            cut = max(sent.rfind(sep, 0, limit) for sep in (", ", "; ", ": ", " — ", " "))
+            cut = cut if cut > limit // 3 else limit
+            out.append(sent[:cut + 1].strip()); sent = sent[cut + 1:].strip()
+        if sent:
+            out.append(sent)
+    merged: list[str] = []
+    for c in out:  # pack short neighbours together; keep unspeakable bits attached to real words
+        if merged and (len(merged[-1]) + 1 + len(c) <= limit or not re.search(r"[а-яё0-9]", c.lower())):
+            merged[-1] += " " + c
+        else:
+            merged.append(c)
+    return [c for c in merged if re.search(r"[а-яё0-9]", c.lower())]
+
+
+def _wav_join(parts: list[bytes]) -> bytes:
+    import wave
+
+    frames, params = [], None
+    for b in parts:
+        with wave.open(io.BytesIO(b)) as w:
+            params = params or w.getparams()
+            frames.append(w.readframes(w.getnframes()))
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setparams(params)
+        w.writeframes(b"".join(frames))
+    return buf.getvalue()
+
+
 def silero_tts(text: str, s: Settings) -> bytes:
-    """Russian TTS with Silero v4 (CPU). Returns WAV bytes."""
+    """Russian TTS with Silero (speech service or in-process CPU), sentence by sentence (long number-heavy
+    messages made the model fail as a whole). Returns one WAV; raises SttUnavailable when nothing was spoken."""
     global _silero
+    chunks = tts_chunks(text)
+    if not chunks:
+        raise SttUnavailable("nothing to speak")
     if s.speech_url:
+        parts = []
         try:
-            r = httpx.post(f"{s.speech_url.rstrip('/')}/tts", json={"text": text[:900]}, timeout=60)
-            if r.status_code == 200:
-                return r.content
+            for c in chunks:
+                r = httpx.post(f"{s.speech_url.rstrip('/')}/tts", json={"text": c}, timeout=60)
+                if r.status_code == 200:
+                    parts.append(r.content)
         except httpx.HTTPError:
             pass
+        if parts:
+            return _wav_join(parts)
     if not s.silero_enabled:
         raise SttUnavailable("silero disabled")
     import torch  # type: ignore
@@ -229,9 +278,16 @@ def silero_tts(text: str, s: Settings) -> bytes:
         _silero, _ = torch.hub.load("snakers4/silero-models", "silero_tts", language="ru", speaker=ru_tts.TTS_MODEL, trust_repo=True)  # MIT
     import wave
 
-    audio = _silero.apply_tts(text=ru_tts.prepare(text[:900]), speaker=ru_tts.DEFAULT_SPEAKER, sample_rate=24000)
+    audio = []
+    for c in chunks:
+        try:
+            audio.append(_silero.apply_tts(text=ru_tts.prepare(c), speaker=ru_tts.DEFAULT_SPEAKER, sample_rate=24000))
+        except Exception:
+            continue
+    if not audio:
+        raise SttUnavailable("silero could not speak the text")
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000)
-        w.writeframes((audio.clamp(-1, 1) * 32767).short().numpy().tobytes())
+        w.writeframes(b"".join((a.clamp(-1, 1) * 32767).short().numpy().tobytes() for a in audio))
     return buf.getvalue()

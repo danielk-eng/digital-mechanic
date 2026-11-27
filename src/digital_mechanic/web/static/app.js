@@ -86,7 +86,7 @@ const Player = {
           a.ontimeupdate = () => { if (a.duration) captionFollow(p, a.currentTime / a.duration); };
           a.onended = done; a.onerror = done; await a.play().catch(done); return;
         }
-        SERVER_TTS = false;
+        if (r.status === 404) SERVER_TTS = false;  // no server voice on this stand; 502 = only this text failed
       } catch (_) { SERVER_TTS = false; }
     }
     if (!window.speechSynthesis) return done();
