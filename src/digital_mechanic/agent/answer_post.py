@@ -71,11 +71,24 @@ def strip_offers(text: str) -> tuple[str, list[str]]:
     return "\n".join(lines).rstrip(), offers
 
 
+# «код F08 по 236-3902150-Б РЭ, стр. PDF 52 относится к…» (expanded answer, Vercel 01:20): the internal document code and
+# «стр. PDF» are index jargon; the page chip next to the label shows the page. Keep the sentence, drop the reference.
+_CODE = r"\d{3}-\d{6,8}(?:-[А-ЯA-Z]\d?)?(?:\s*(?:РЭ|РК|ИЭ|РС))?"
+_PG = r",\s*стр\.?\s*(?:PDF\s*)?\d+"
+_DOC_REF = re.compile(rf"\s*(?:(?:по|в|из)\s+{_CODE}(?:{_PG})?|{_CODE}{_PG}),?(?=[\s.;:)])")
+
+
+def strip_doc_refs(text: str) -> str:
+    t = _DOC_REF.sub("", text)
+    return re.sub(r"\bстр\.\s*PDF\s*", "стр. ", t)
+
+
 def clean(text: str) -> tuple[str, set[str]]:
     """-> (text without the «Источник» block and trailing offers, intents named by the stripped offers)."""
     if not text:
         return text, set()
     t = strip_sources(text)
+    t = strip_doc_refs(t)
     t, offers = strip_offers(t)
     t = re.sub(r"\n{3,}", "\n\n", t).strip()
     intents = {name for o in offers for name, rx in INTENTS if rx.search(o)}

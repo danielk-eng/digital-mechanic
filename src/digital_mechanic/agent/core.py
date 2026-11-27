@@ -603,7 +603,7 @@ class Agent:
         labels = [l for l in cited_labels(answer) if l in c.frags]
         # Reuse the fragments already retrieved for this answer (no new search) and a slim prompt: only the
         # grounding rules, no tool list / vehicle history -> fewer input tokens and a bounded output length.
-        frags = "\n\n".join(f"[{l}] {c.frags[l]['document']}, стр. PDF {c.frags[l]['page']}\n{snippet(c.frags[l]['text'], answer, 1800)}" for l in labels[:6])
+        frags = "\n\n".join(f"[{l}] {c.frags[l]['document']}, стр. {c.frags[l]['page']}\n{snippet(c.frags[l]['text'], answer, 1800)}" for l in labels[:6])
         lang = LANGS[answer_lang(user)]["llm"]
         system = EXPAND_SYSTEM.format(lang_name=lang, experience_rule=EXPERIENCE.get(user.get("experience") or "experienced", EXPERIENCE["experienced"]))
         messages = [{"role": "system", "content": system},
