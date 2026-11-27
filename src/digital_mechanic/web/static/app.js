@@ -459,6 +459,12 @@ async function selectVehicle(vid) {
   }
   if (r.draft && !r.messages.some(m => (m.meta.cards || []).some(c => c.kind === "ticket_draft"))) renderCard(r.draft);
   if (!r.messages.length && r.repair) renderCard({...r.repair, kind: "repair"});
+  // day-2 briefing: the session belongs to the truck — another mechanic sees where the repair stopped and past repairs
+  const rk = r.resume ? `resume:${vid}:${r.resume.repair_id || "h"}:${r.resume.step ?? ""}` : "";
+  if (r.resume && (r.resume.kind === "repair" || !r.messages.length) && !sessionStorage.getItem(rk)) {
+    addMsg("bot", md(r.resume.text), {cls: "resume", speak: r.resume.text.replace(/\*\*/g, "")});
+    try { sessionStorage.setItem(rk, "1"); } catch (_) {}
+  }
   window.scrollTo({top: 0});
 }
 function drawVehicle(r, lv) {

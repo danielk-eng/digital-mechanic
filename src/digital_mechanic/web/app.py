@@ -280,6 +280,54 @@ def manager_page() -> str:
     return (STATIC / "manager.html").read_text(encoding="utf-8")
 
 
+@app.get("/api/cost")
+def cost_api() -> dict:
+    """Public (no login): the filled calculator as JSON (organizers: the calculator by a link without sign-in)."""
+    from ..cost import calc
+
+    return calc.report()
+
+
+@app.get("/calculator", response_class=HTMLResponse)
+def calculator_page() -> HTMLResponse:
+    """Public page of the filled calculator + the xlsx (no login, no personal data)."""
+    from html import escape as e
+
+    from ..cost import calc
+
+    r = calc.report()
+    rub = lambda x, d=2: (f"{x:,.{d}f}".replace(",", " ").replace(".", ","))  # noqa: E731
+    rows = "".join(f"<tr><td>{e(x['name'])}</td><td>{rub(x['calls'], 2)}</td><td>{x['in']:,}</td><td>{x['out']:,}</td>"
+                   f"<td>{rub(x['primary_free'], 2)}</td><td>{rub(x['primary_paid'], 3)}</td><td>{rub(x['fallback_free'], 2)}</td><td>{rub(x['fallback_paid'], 2)}</td></tr>".replace(",", " ")
+                   for x in r["rows"])
+    t = r["total"]
+    rows += (f"<tr class='tot'><td>Итого на 1 запрос (сценарий)</td><td>{rub(t['calls'])}</td><td>{int(t['in']):,}</td><td>{int(t['out']):,}</td>".replace(",", " ")
+             + f"<td>{rub(t['primary_free'])}</td><td>{rub(t['primary_paid'], 3)}</td><td>{rub(t['fallback_free'])}</td><td>{rub(t['fallback_paid'])}</td></tr>")
+    fl = "".join(f"<tr><td>{f['vehicles']}</td><td>{rub(f['checks_month'], 1)}</td><td>{rub(f['models_primary_free'], 0)}</td><td>{rub(f['models_primary_paid'], 0)}</td>"
+                 f"<td>{rub(f['models_fallback_paid'], 0)}</td><td>{rub(f['server'], 0)}</td><td>{rub(f['support'], 0)} ({f['support_hours']} ч)</td>"
+                 f"<td><b>{rub(f['total_primary_free'], 0)}</b></td><td>{rub(f['total_primary_paid'], 0)}</td><td>{rub(f['total_fallback_paid'], 0)}</td></tr>" for f in r["fleets"])
+    a, cx, ix, m = r["assumptions"], r["complex_repair"], r["indexing"], r["measured"]
+    body = f"""<h1>Цифровой механик — калькулятор экономики</h1>
+<p class="muted">Все суммы в рублях без НДС. Курс ЦБ РФ на 26.11.2026: {rub(r['usd_rub'], 4)} ₽ за 1 $. Токены — замер на стенде {e(m['measured_at'])} CST,
+модель {e(m['model'])}, {m['runs']} прогона сценария, медиана {m['tokens_per_scenario_median']:,} токенов. <a href="/static/calculator.xlsx" download>Скачать заполненный шаблон (xlsx)</a></p>
+<h2>Один запрос = один сценарий</h2>
+<p>От результата диагностики до ответа механику или заявки: {e(m['scenario'])}. Суммируются все шаги модели: выбор инструмента и ответ (один вызов агента делает и то и другое), повторные вызовы, «Подробнее», выжимки цитат, черновик заявки. Эмбеддинги запроса — 0: поиск BM25 на сервере, модели эмбеддингов нет. Диагностика, сбой записи, норма и подтверждение заявки — 0 токенов, решает код.</p>
+<div class="scroll"><table><tr><th>Шаг</th><th>Вызовов</th><th>Токенов на входе (1 вызов)</th><th>на выходе</th><th>Основная, бесплатно</th><th>Основная, платный аналог</th><th>Резерв GigaChat-4, бесплатно</th><th>Резерв, платный аналог</th></tr>{rows}</table></div>
+<p class="small muted">Основная: {e(calc.PRICES['primary_free']['name'])}; платный аналог — {e(calc.PRICES['primary_paid']['name'])}. Резерв: {e(calc.PRICES['fallback_free']['name'])}; платный аналог — {e(calc.PRICES['fallback_paid']['name'])}.</p>
+<h2>Сложный ремонт</h2><p>До ~50 обменов в одной процедуре (брифинг 27.11): ≈ {int(cx['in'] + cx['out']):,} токенов, основная бесплатно 0 ₽, платный аналог ≈ {rub(cx['primary_paid'])} ₽, резерв платно ≈ {rub(cx['fallback_paid'])} ₽.</p>
+<h2>Разовая индексация руководств (отдельная строка)</h2><p>6 руководств на 4 типа двигателей, 1 743 страницы, ≈ {ix['tokens']:,} токенов. Наш поиск — BM25 на сервере: 0 ₽. Если заменить на эмбеддинги bge-m3 (Cloud.ru, 0,50 ₽ за 1 млн): ≈ {rub(ix['bge_m3_rub'])} ₽ один раз.</p>
+<h2>Пересчёт на парк, в месяц</h2>
+<p>Допущения: проверка каждой машины раз в {a['check_every_days']} дней; {rub(a['questions_per_check'], 1)} вопроса механика на проверку (2–3); черновик заявки — в {int(a['ticket_share'] * 100)} % проверок (доля отклонений в данных хакатона: 69 из 195); сервер Cloud.ru 2 vCPU / 4 ГБ ({rub(a['server_rub_month'], 0)} ₽, для 800 машин — два); сопровождение {rub(a['support_rate_rub_h'], 0)} ₽/ч: обновление руководств, мониторинг, разбор «пробелов в базе». Круглосуточная нагрузка не считается: сессии с перерывами.</p>
+<div class="scroll"><table><tr><th>Машин</th><th>Проверок</th><th>Модели, бесплатно</th><th>Модели, платный аналог основной</th><th>Модели, платный аналог резерва</th><th>Сервер</th><th>Сопровождение</th><th>Итого (бесплатная модель)</th><th>Итого (платный аналог)</th><th>Итого (резерв платно)</th></tr>{fl}</table></div>
+<p class="small muted">Разработка — разовая; сопровождение — регулярное. Методика и исходники: docs/ЭКОНОМИКА.md, src/digital_mechanic/cost/calc.py, замер — scripts/cost_measure.py.</p>"""
+    css = ("body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:24px;max-width:1100px;margin:auto;color:#111;background:#fff}h1{font-size:24px}h2{font-size:19px;margin-top:28px}"
+           "table{border-collapse:collapse;width:100%;font-size:14px}td,th{border:1px solid #d3d8df;padding:6px 8px;text-align:right;vertical-align:top}td:first-child,th:first-child{text-align:left}"
+           "th{background:#f0f2f5}.tot td{font-weight:600;background:#f5f6f8}.muted{color:#555}.small{font-size:13px}.scroll{overflow-x:auto}a{color:#0b57d0}")
+    return HTMLResponse(f"<!doctype html><html lang='ru'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                        f"<title>Калькулятор — Цифровой механик</title><meta name='description' content='Стоимость одного сценария и пересчёт на парк'><style>{css}</style></head><body><main>{body}</main></body></html>",
+                        headers={"Cache-Control": "public, max-age=300"})
+
+
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy(country: str = "", uid: str | None = Cookie(None)) -> str:
     """Country-specific: the law, where data is stored, localization and how speech is recognised."""
@@ -504,7 +552,7 @@ def vehicle(vid: str, uid: str | None = Cookie(None)) -> dict:
     return {"vehicle": v.model_dump(), "sessions": [s.model_dump(mode="json") for s in AGENT.fleet.sessions(vid)],
             "tickets": STORE.tickets(vid), "repair": AGENT.repair_card(vid), "manuals": AGENT.manuals_for(v.engine_model),
             "draft": AGENT.draft_card(c) if c.draft else None, "messages": msgs,
-            "check": c.check.model_dump(mode="json") if c.check else None}
+            "check": c.check.model_dump(mode="json") if c.check else None, "resume": AGENT.resume_note(vid, u)}
 
 
 @app.get("/api/fleet")
@@ -1392,7 +1440,49 @@ def eng_trace(aid: int, uid: str | None = Cookie(None)) -> dict:
         except json.JSONDecodeError:
             pass
     r["user_id"] = (r["user_id"] or "")[:8]
+    r["journal"] = agent_journal(r.get("tools") if isinstance(r.get("tools"), list) else [])
     return r
+
+
+JOURNAL_RU = {
+    "check_result": "посмотрел результат проверки ML", "search_manual": "искал в руководстве двигателя", "search_extra_docs": "искал в руководстве автомобиля",
+    "prepare_ticket": "готовил черновик заявки", "start_repair": "начал пошаговый ремонт", "update_repair": "отметил шаг ремонта",
+    "vehicle_history": "открыл историю машины", "policy": "применил правила (код, не модель)", "uncited_guard": "убрал числа без источника",
+    "number_guard": "проверил числа по страницам", "kb_gap": "записал «пробел в базе» главному", "repeat_guard": "не дал повторить тот же ответ",
+    "toir.create_ticket": "отправил заявку в ТОиР", "expand": "готовил развёрнутый ответ", "llm": "вызов модели",
+}
+
+
+def agent_journal(tools: list) -> dict:
+    """Engineer's agent journal for one request: a readable reasoning summary (what the agent did, in order, and what
+    it got), and the errors. The model's hidden reasoning is not stored (LLM_THINKING=off); the summary is built from
+    the actual tool calls, so it can not invent steps."""
+    steps, errors = [], []
+    for i, t in enumerate(tools, 1):
+        if not isinstance(t, dict):
+            continue
+        name = str(t.get("tool", "?"))
+        line = f"{i}. {JOURNAL_RU.get(name, name)}"
+        args = t.get("args") or {}
+        if args.get("query"):
+            line += f": «{str(args['query'])[:80]}»"
+        if t.get("hits"):
+            line += f" → {len(t['hits'])} фрагм. ({', '.join(t['hits'][:3])}{'…' if len(t['hits']) > 3 else ''})"
+        elif name == "search_manual" and t.get("ok") and "hits" in t:
+            line += " → ничего не найдено"
+        if t.get("decision"):
+            line += f" → решение: {t['decision']}"
+        if t.get("removed"):
+            line += f" → удалено: {len(t['removed'])}"
+        if t.get("ticket_id"):
+            line += f" → {t['ticket_id']}"
+        if t.get("auto"):
+            line += " (автоматически)"
+        if t.get("error"):
+            line += " → ОШИБКА"
+            errors.append(f"{name}: {t['error']}")
+        steps.append(line)
+    return {"steps": steps, "errors": errors}
 
 
 @app.get("/api/eng/models")

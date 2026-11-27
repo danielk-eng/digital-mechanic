@@ -219,3 +219,19 @@ def test_no_data_answer_concrete_action_and_gap_for_chief(make_agent):
     assert g and g[0]["payload"]["gap"] == "no_data" and g[0]["payload"]["engine"] == "ЯМЗ-236М2" and "Нет данных" in g[0]["summary"]
     from digital_mechanic.agent.core import NO_DATA_TEXT
     assert "специалист" not in NO_DATA_TEXT and "дефектовку" in NO_DATA_TEXT
+
+
+def test_multiday_repair_resumed_by_another_mechanic(make_agent):
+    """Day-2 (g): the repair belongs to the vehicle; the next mechanic sees the step where work stopped."""
+    a = make_agent([])
+    a.store.upsert_user("m1", name="Иванов А.", role="mechanic")
+    steps = [{"text": "Снять крышку головки", "document": "236.01.01 РК", "page": 269, "done": True},
+             {"text": "Проверить зазоры щупом", "document": "236.01.01 РК", "page": 269, "done": False},
+             {"text": "Отрегулировать зазоры", "document": "236.01.01 РК", "page": 276, "done": False}]
+    r = a.store.start_repair("m1", "E549YT198", None, "TKT-0042", "Регулировка клапанов", steps)
+    r["current"] = 1
+    a.store.save_repair(r)
+    note = a.resume_note("E549YT198", {"id": "m2"})
+    assert note["kind"] == "repair" and note["step"] == 1
+    assert "шаге 2 из 3" in note["text"] and "Иванов А." in note["text"] and "стр. 269" in note["text"]
+    assert "Вы начали" in a.resume_note("E549YT198", {"id": "m1"})["text"]

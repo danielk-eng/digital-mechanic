@@ -8,3 +8,4 @@ omegaconf
 faster-whisper==1.1.1
 numpy
 tqdm
+silero-stress==1.5

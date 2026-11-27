@@ -46,7 +46,10 @@ function side(title, html) {
 async function trace(id) {
   const r = await api(`/api/eng/trace/${id}`);
   side(`Запрос #${id}`, `<p class="small muted">${time(r.ts)}, ${esc(r.user_name || r.user_id)} (${esc(r.role)}), ${esc(r.action)}, ${r.latency_ms ?? "—"} мс, токенов ${r.tokens ?? 0}, ${r.ok ? "успешно" : "ошибка"}</p>` +
-    `<div class="section-label">Вход</div><pre class="trace">${esc(r.input)}</pre><div class="section-label">Ответ</div><pre class="trace">${esc(r.output)}</pre>` +
+    `<div class="section-label">Вход</div><pre class="trace">${esc(r.input)}</pre>` +
+    `<div class="section-label">Ход работы агента</div><pre class="trace">${esc(((r.journal || {}).steps || []).join("\n") || "без вызовов модели: решил код")}</pre>` +
+    (((r.journal || {}).errors || []).length ? `<div class="section-label err">Ошибки</div><pre class="trace">${esc(r.journal.errors.join("\n"))}</pre>` : "") +
+    `<div class="section-label">Ответ</div><pre class="trace">${esc(r.output)}</pre>` +
     `<div class="section-label">Вызовы инструментов (${(r.tools || []).length})</div><pre class="trace">${esc(JSON.stringify(r.tools, null, 1))}</pre>` +
     `<div class="section-label">Источники</div><pre class="trace">${esc((r.sources || []).join("\n"))}</pre>`);
 }
@@ -188,10 +191,23 @@ function companyCard(r, id, vOwner) {
     } catch (e) { $("#ch_out").innerHTML = `<p class="err">${esc(e.message)}</p>`; }
   };
 }
+async function cost() {
+  const r = await api("/api/cost");
+  const f = (x, d = 2) => Number(x).toLocaleString("ru-RU", {minimumFractionDigits: d, maximumFractionDigits: d});
+  const t = r.total;
+  $("#tab-cost").innerHTML = `<div class="panel"><div class="pad"><p class="small muted">Один запрос = сценарий от результата диагностики до ответа или заявки; все шаги модели суммированы. ` +
+    `Замер ${esc(r.measured.measured_at)}, ${esc(r.measured.model)}. Без НДС. <a href="/calculator" target="_blank" rel="noopener">Открытая страница калькулятора</a> · <a href="/static/calculator.xlsx" download>xlsx</a></p>` +
+    `<table class="tbl"><thead><tr><th>Шаг</th><th class="num">Вызовов</th><th class="num hide-m">Вход / выход, ток.</th><th class="num">Бесплатно</th><th class="num">Платный аналог</th><th class="num hide-m">Резерв платно</th></tr></thead><tbody>` +
+    r.rows.map(x => `<tr><td>${esc(x.name)}</td><td class="num">${f(x.calls, 1)}</td><td class="num hide-m">${x.in} / ${x.out}</td><td class="num">${f(x.primary_free)} ₽</td><td class="num">${f(x.primary_paid, 3)} ₽</td><td class="num hide-m">${f(x.fallback_paid)} ₽</td></tr>`).join("") +
+    `<tr><td><b>Итого на сценарий</b></td><td class="num">${f(t.calls, 1)}</td><td class="num hide-m">${Math.round(t.in)} / ${Math.round(t.out)}</td><td class="num"><b>${f(t.primary_free)} ₽</b></td><td class="num">${f(t.primary_paid, 3)} ₽</td><td class="num hide-m">${f(t.fallback_paid)} ₽</td></tr></tbody></table>` +
+    `<h3 style="margin-top:20px">Парк, в месяц</h3><table class="tbl"><thead><tr><th>Машин</th><th class="num">Проверок</th><th class="num">Модели (платный аналог)</th><th class="num hide-m">Сервер</th><th class="num hide-m">Сопровождение</th><th class="num">Итого</th></tr></thead><tbody>` +
+    r.fleets.map(x => `<tr><td>${x.vehicles}</td><td class="num">${f(x.checks_month, 0)}</td><td class="num">${f(x.models_primary_paid, 0)} ₽</td><td class="num hide-m">${f(x.server, 0)} ₽</td><td class="num hide-m">${f(x.support, 0)} ₽</td><td class="num"><b>${f(x.total_primary_free, 0)} ₽</b><div class="sub">платно ${f(x.total_primary_paid, 0)} ₽</div></td></tr>`).join("") +
+    `</tbody></table><p class="small muted">Допущения: проверка раз в ${r.assumptions.check_every_days} дней, ${String(r.assumptions.questions_per_check).replace(".", ",")} вопроса на проверку, заявка в ${Math.round(r.assumptions.ticket_share * 100)} % проверок. Эмбеддинги запроса — 0 (BM25 на сервере). Индексация руководств — разово, 0 ₽ (bge-m3 был бы ≈ ${f(r.indexing.bge_m3_rub)} ₽).</p></div></div>`;
+}
 function tab(name) {
   $$("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === name));
   $$("section[id^=tab-]").forEach(s => s.classList.toggle("hidden", s.id !== "tab-" + name));
-  ({logs, mcp, models, companies}[name] || (() => {}))();
+  ({logs, mcp, models, companies, cost}[name] || (() => {}))();
 }
 $$("#tabs button").forEach(b => b.onclick = () => tab(b.dataset.tab));
 $("#esend").onclick = () => ask(); $("#emic").onclick = micToggle; $("#etxt").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(); } };

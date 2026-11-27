@@ -8,6 +8,8 @@ works in the browser (Web Speech API) when the server has no STT configured.
 
 from __future__ import annotations
 
+from . import ru_tts
+
 import io
 import re
 import tempfile
@@ -224,10 +226,10 @@ def silero_tts(text: str, s: Settings) -> bytes:
     import torch  # type: ignore
 
     if _silero is None:
-        _silero, _ = torch.hub.load("snakers4/silero-models", "silero_tts", language="ru", speaker="v4_ru", trust_repo=True)
+        _silero, _ = torch.hub.load("snakers4/silero-models", "silero_tts", language="ru", speaker=ru_tts.TTS_MODEL, trust_repo=True)  # MIT
     import wave
 
-    audio = _silero.apply_tts(text=text[:900], speaker="xenia", sample_rate=24000)
+    audio = _silero.apply_tts(text=ru_tts.prepare(text[:900]), speaker=ru_tts.DEFAULT_SPEAKER, sample_rate=24000)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000)

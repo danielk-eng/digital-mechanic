@@ -5,6 +5,7 @@ POST /tts  (json: {"text"})                  -> audio/wav
 GET  /health
 Models are cached in /models (bind mount), so restarts do not re-download.
 """
+import ru_tts
 import io, os, tempfile, threading, time, wave
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -43,7 +44,8 @@ def silero():
         import torch
         torch.hub.set_dir(f"{ROOT}/torch")
         torch.set_num_threads(max(2, (os.cpu_count() or 4) // 2))
-        _t, _ = torch.hub.load("snakers4/silero-models", "silero_tts", language="ru", speaker="v4_ru", trust_repo=True)
+        # v5_cis_base_nostress: MIT (v4_ru is CC BY-NC-SA, not for commercial use); numbers and stress by ru_tts.prepare
+        _t, _ = torch.hub.load("snakers4/silero-models", "silero_tts", language="ru", speaker=ru_tts.TTS_MODEL, trust_repo=True)
     return _t
 
 
@@ -81,7 +83,7 @@ async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), prompt: str
 
 class TtsIn(BaseModel):
     text: str
-    speaker: str = "xenia"
+    speaker: str = ru_tts.DEFAULT_SPEAKER
 
 
 @app.post("/tts")
@@ -89,7 +91,8 @@ def tts(body: TtsIn):
     if not TTS_ON:
         raise HTTPException(404, "tts disabled")
     with _tl:
-        audio = silero().apply_tts(text=body.text[:900], speaker=body.speaker, sample_rate=24000)
+        spk = body.speaker if body.speaker.startswith("ru_") else ru_tts.DEFAULT_SPEAKER  # old clients sent «xenia» (v4_ru)
+        audio = silero().apply_tts(text=ru_tts.prepare(body.text[:900]), speaker=spk, sample_rate=24000)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000)

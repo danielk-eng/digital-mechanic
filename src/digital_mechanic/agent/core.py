@@ -574,7 +574,10 @@ class Agent:
             r = self.store.repair_open(v.vehicle_id)
             if r:
                 cur = r["steps"][r["current"]] if r["current"] < len(r["steps"]) else None
-                lines.append(f"ИДЁТ РЕМОНТ «{r['title']}»: шаг {r['current'] + 1} из {len(r['steps'])}" + (f" — {cur['text']} ({cur['document']}, стр. {cur['page']})" if cur else ""))
+                who = (self.store.user(r["user_id"]) or {}).get("name") or "другой механик"
+                lines.append(f"ИДЁТ РЕМОНТ «{r['title']}»: шаг {r['current'] + 1} из {len(r['steps'])}" + (f" — {cur['text']} ({cur['document']}, стр. {cur['page']})" if cur else "")
+                             + f"; начал {who}, последняя отметка {datetime.fromtimestamp(r.get('updated') or r['started']).strftime('%d.%m %H:%M')}. "
+                             "Если механик вернулся к машине — скажи, на каком шаге остановились и кто делал.")
         if c.contra:
             lines.append(contradictions.context_block(c.contra))
         if c.draft:
@@ -996,6 +999,38 @@ class Agent:
             except Exception:
                 pass
 
+    def resume_note(self, vehicle_id: str, user: dict | None = None) -> dict | None:
+        """Day-2 briefing: a repair is interrupted (end of shift, no part) and resumed a day or two later, often by
+        another mechanic. The session belongs to the VEHICLE: say where they stopped and recall past repairs of this
+        truck (any age, «через полгода» too). Deterministic, no LLM."""
+        lines, kind = [], None
+        r = self.store.repair_open(vehicle_id)
+        if r and r.get("steps"):
+            n, cur = len(r["steps"]), min(r["current"], len(r["steps"]) - 1)
+            st = r["steps"][cur]
+            who = (self.store.user(r["user_id"]) or {}).get("name") or "другой механик"
+            me = (user or {}).get("id") == r["user_id"]
+            done = sum(1 for x in r["steps"] if x.get("done"))
+            when = datetime.fromtimestamp(r.get("updated") or r["started"]).strftime("%d.%m %H:%M")
+            lines.append(f"**Ремонт продолжается:** «{r['title']}». Остановились на шаге {cur + 1} из {n} (выполнено {done}): {st['text']} "
+                         f"({st['document']}, стр. {st['page']}). " + ("Вы начали его" if me else f"Начал {who}") + f", последняя отметка {when}.")
+            kind = "repair"
+        try:
+            past = [e for e in self.briefing._events(vehicle_id) if e.get("date")] if getattr(self, "briefing", None) else []
+        except Exception:
+            past = []
+        past.sort(key=lambda e: e["date"], reverse=True)
+        if past:
+            def one(e):
+                d = e["date"][8:10] + "." + e["date"][5:7] + "." + e["date"][:4]
+                unit = self.fleet.fault_types.get(e.get("unit") or "", e.get("unit") or "")
+                return f"{d} — {e['ticket_id']}" + (f", {unit}" if unit else "") + (f", {e['mechanic']}" if e.get("mechanic") else "")
+            lines.append("**Ремонты этой машины:** " + "; ".join(one(e) for e in past[:3]) + ".")
+            kind = kind or "history"
+        if not lines:
+            return None
+        return {"kind": kind, "text": "\n".join(lines), "repair_id": r["id"] if r else None, "step": (r["current"] if r else None)}
+
     def answer_actions(self, c: Conv, turn: Turn, intents: set[str]) -> list[dict]:
         """Buttons under an answer, from the conversation state (+ what the LLM tried to offer in words).
         kind=send: post `text` as the mechanic's message; open: page viewer; handoff: handoff sheet."""
@@ -1281,6 +1316,11 @@ class Agent:
             log["hits"] = [f"{f['label']}:{f['document']} стр.{f['pdf_page']}" for f in res["fragments"]]
         if "error" in res:
             log["error"] = res["error"][:200]
+        # short result for the engineer's agent journal: scalar fields only, no manual text
+        log["result"] = {k: (v[:120] if isinstance(v, str) else v) for k, v in res.items()
+                         if k not in ("fragments", "error") and isinstance(v, (str, int, float, bool)) and v is not None}
+        if not log["result"]:
+            del log["result"]
         turn.tools.append(log)
         return res
 

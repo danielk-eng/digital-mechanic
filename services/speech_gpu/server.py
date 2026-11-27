@@ -10,6 +10,7 @@ Engines (all licences allow commercial use, docs/LOCAL_GPU.md):
   others  faster-whisper large-v3-turbo (MIT), e.g. hi, vi; also the fallback for audio > GIGAAM_MAX_S
 TTS: Silero v5_cis_base_nostress (MIT; the v4/v5 *_ru models are CC BY-NC and are not used here).
 """
+import ru_tts
 import io, os, subprocess, tempfile, threading, time, wave
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -142,7 +143,8 @@ def tts(body: TtsIn):
         raise HTTPException(404, "tts disabled")
     sp = body.speaker if body.speaker.startswith(("ru_", "kaz_", "uzb_")) else TTS_SPEAKER
     with _lock:
-        audio = _tts().apply_tts(text=body.text[:900], speaker=sp, sample_rate=24000)
+        text = ru_tts.prepare(body.text[:900]) if sp.startswith("ru_") else body.text[:900]  # digits + stress for Russian
+        audio = _tts().apply_tts(text=text, speaker=sp, sample_rate=24000)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(24000)
