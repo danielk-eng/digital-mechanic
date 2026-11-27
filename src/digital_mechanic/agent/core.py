@@ -9,6 +9,7 @@ repair), with deterministic guards around everything that has consequences.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import threading
@@ -323,6 +324,16 @@ class Agent:
                 self._extracts[key] = out
                 return out
             body = pg.text
+        pk = hashlib.sha1(json.dumps([*key, body], ensure_ascii=False).encode()).hexdigest()  # survives a restart; a re-index changes body
+        try:
+            self.store.x("CREATE TABLE IF NOT EXISTS extract_cache(k TEXT PRIMARY KEY, out TEXT, ts REAL)")
+            row = self.store.one("SELECT out FROM extract_cache WHERE k=?", (pk,))
+            if row:
+                out = json.loads(row["out"])
+                self._extracts[key] = out
+                return out
+        except Exception:
+            pass
         try:
             msg, _ = self.llm.chat("section_extract", [
                 {"role": "system", "content": "Ты помогаешь механику. Перескажи раздел руководства коротко (2–4 предложения или 3–5 пунктов) "
@@ -345,6 +356,11 @@ class Agent:
         text = _drop_absence_claims(text)
         out = {"text": text, "ok": bool(text), "dropped_numbers": bad}
         self._extracts[key] = out
+        if text:
+            try:
+                self.store.x("INSERT OR REPLACE INTO extract_cache(k, out, ts) VALUES (?,?,?)", (pk, json.dumps(out, ensure_ascii=False), time.time()))
+            except Exception:
+                pass
         return out
 
     # ------------------------------------------------------------------ state

@@ -33,3 +33,22 @@ def test_long_answer_hint_uses_the_clause_before_the_chip():
 def test_table_headings_when_no_row_matches():
     from digital_mechanic.agent.core import table_headings
     assert table_headings(PAGE) == [("Продолжение с предыдущей страницы", 1), ("Двигатель стучит", 2), ("Пониженное давление масла в системе смазки", 2)]
+
+
+def test_llm_extract_survives_restart(make_agent, index):
+    """The LLM-written extract is kept in SQLite: after a restart (deb) the same citation opens at once, no LLM call."""
+    from digital_mechanic.agent.core import _TABLE_HEAD_RE
+    a = make_agent([msg_("Проверьте тепловые зазоры клапанов на холодном двигателе.")])
+    pg = next(p for p in index.pages if len(p.text) > 800 and not _TABLE_HEAD_RE.search(p.text) and a.sections.find(p.doc_id, p.page, p.text[200:260]))
+    hint = pg.text[200:260]
+    x = a.section_extract(pg.doc_id, pg.page, hint, "как проверить зазоры")
+    assert x["ok"] and len(a.llm.calls) == 1
+    b = make_agent([])
+    b.store = a.store
+    y = b.section_extract(pg.doc_id, pg.page, hint, "как проверить зазоры")
+    assert y == x and b.llm.calls == []
+
+
+def msg_(content):
+    from types import SimpleNamespace
+    return SimpleNamespace(content=content, tool_calls=None)

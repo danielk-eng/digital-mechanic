@@ -116,7 +116,7 @@ function inline(h, src) {
     const labs = grp.match(/\b(?:S|X)\d+\b/g); if (!labs) return m;
     if (!labs.some(l => src[l])) return "\u0000";
     const ctx = whole.slice(Math.max(0, off - 240), off).replace(/<[^>]+>/g, "").split(/\n|[.!?]\s|•/).filter(x => x.trim().length > 6).pop() || "";
-    return labs.map(l => src[l] ? `<button class="cite ${src[l].extra ? "x" : ""}" data-doc="${esc(src[l].doc_id)}" data-page="${src[l].page}" data-q="${esc(ctx.trim().slice(0, 200))}" title="${esc(src[l].document)}">${t("page_short")} ${src[l].page}</button>` : "").join("");
+    return labs.map(l => src[l] ? `<button class="cite ${src[l].extra ? "x" : ""}" data-doc="${esc(src[l].doc_id)}" data-page="${src[l].page}" data-q="${esc(ctx.trim().slice(-200))}" title="${esc(src[l].document)}">${t("page_short")} ${src[l].page}</button>` : "").join("");
   }).replace(/[ \t]*\u0000/g, "");
   return collapseCites(h);
 }
@@ -237,6 +237,7 @@ function friendlyError(e) {
 }
 
 function renderTurn(turn, expanded = false) {
+  const citesBefore = new Set(document.querySelectorAll("#chat .cite"));
   (turn.cards || []).forEach(renderCard);
   if (turn.preface) { /* already part of text */ }
   if (turn.text) {
@@ -253,6 +254,7 @@ function renderTurn(turn, expanded = false) {
     bindAnswerActions(d, turn.actions);
   }
   loadChips();
+  prefetchExtracts([...document.querySelectorAll("#chat .cite")].filter(b => !citesBefore.has(b)));
   return turn;
 }
 function turnMenu(turn) {
@@ -820,6 +822,26 @@ const figcaps = h => h.replace(/(^|\n)\n((?:Рис\.|Рисунок)\s*\d[\s\S]*
 const TABLE_HEAD = /^(?:Вероятн\S* |Возможн\S* )?(?:Причин|Неисправн)[^\n]{0,40} — (?:Способ|Метод)/m;
 const tableRows = h => h.split("\n").map(l => { const k = l.indexOf(" — "); return k > 0 ? `<span class="trow"><span class="tc">${l.slice(0, k)}</span><span class="tr">${l.slice(k + 3)}</span></span>` : `<span class="tsub">${l}</span>`; }).join("");
 const pageBody = (raw, q) => TABLE_HEAD.test(raw || "") ? tableRows(hl(esc(raw), q)) : figcaps(hl(esc(reflow(raw)), q));
+// The extract is an LLM call (10–16 s on the free model): the first page chips of a new answer are fetched in the background
+// while the mechanic reads, so a tap shows it at once. Cached in the client (Vercel instances do not share memory).
+const EXTRACTS = new Map();
+function getExtract(doc, page, q, question) {
+  const k = [doc, +page, (q || "").slice(0, 200), (question || "").slice(0, 300)].join("\u0001");
+  if (!EXTRACTS.has(k)) {
+    if (EXTRACTS.size > 40) EXTRACTS.delete(EXTRACTS.keys().next().value);
+    const p = api("/api/extract", {json: {doc_id: doc, page: +page, q, question}});
+    p.catch(() => EXTRACTS.delete(k));
+    EXTRACTS.set(k, p);
+  }
+  return EXTRACTS.get(k);
+}
+function prefetchExtracts(btns) {
+  const seen = new Set(), pick = [];
+  for (const b of btns) { const k = b.dataset.doc + "#" + b.dataset.page; if (!b.dataset.doc || seen.has(k)) continue; seen.add(k); pick.push(b); if (pick.length >= 2) break; }
+  if (!pick.length) return;
+  const question = LAST_Q;
+  setTimeout(() => pick.forEach(b => getExtract(b.dataset.doc, +b.dataset.page, b.dataset.q || "", question).catch(() => {})), 800);
+}
 async function openCitation(doc, page, q) {
   Player.stop(); page = +page;
   $("#viewer").classList.remove("hidden"); document.body.style.overflow = "hidden";
@@ -843,7 +865,7 @@ async function openCitation(doc, page, q) {
     $("#mPrev").onclick = () => showPage(VIEW.pages[VIEW.pages.indexOf(VIEW.cur) - 1], true);
     $("#mNext").onclick = () => showPage(VIEW.pages[VIEW.pages.indexOf(VIEW.cur) + 1], true);
     await showPage(page, false);
-    api("/api/extract", {json: {doc_id: doc, page, q, question: LAST_Q}}).then(x => {
+    getExtract(doc, page, q, LAST_Q).then(x => {
       const box = $("#mExtract"); if (!box) return;
       box.innerHTML = `<div class="h">${t("extract")}, ${t("page_short")} ${page}</div>` + (x.ok ? md(x.text) : `<p class="muted">${t("extract_na")}</p>`);
     }).catch(() => { const box = $("#mExtract"); if (box) box.innerHTML = `<div class="h">${t("extract")}</div><p class="muted">${t("extract_na")}</p>`; });
