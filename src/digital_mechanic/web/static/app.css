@@ -421,7 +421,6 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
   .mgr-bar h1{flex:1 1 100%;font-size:1rem}
   .mgr-bar #whoami{flex:1 1 0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 }
-}
 /* 26.11 18:40: manager on a phone — nothing wider than the screen (table 40 px and filter selects 8 px over at 390 px made the
    whole page pan and pushed the vehicle sheet off the left edge); KPI numbers on one line across a row even when a label wraps */
 @media (max-width:720px){
@@ -444,6 +443,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
   table.tbl{font-size:.8rem}
   .tbl th,.tbl td{padding:10px 4px}
   .tbl .pill{padding-left:7px;padding-right:7px}
+}
 /* mechanic's final priority on confirm (organizers 26.11) */
 .urg-label{display:flex;flex-direction:column;gap:6px;margin:10px 0 4px}
 .urg-pick{min-height:44px;border-radius:10px;padding:8px 10px;font:inherit;background:var(--surface-2);color:var(--text);border:1px solid var(--border-2);max-width:100%}
