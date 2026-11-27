@@ -5,6 +5,7 @@ POST /tts  (json: {"text"})                  -> audio/wav
 GET  /health
 Models are cached in /models (bind mount), so restarts do not re-download.
 """
+import denoise
 import ru_tts
 import io, os, tempfile, threading, time, wave
 
@@ -19,6 +20,9 @@ THREADS = int(os.getenv("WHISPER_THREADS", "4"))  # more threads hurt on a busy 
 BEAM = int(os.getenv("WHISPER_BEAM", "1"))  # greedy: ~2x faster on CPU, near-equal quality on short commands
 ROOT = os.getenv("MODELS_DIR", "/models")
 TTS_ON = os.getenv("SILERO_ENABLED", "1") == "1"
+DENOISE = os.getenv("STT_DENOISE", "1") == "1"  # workshop noise: high-pass + light spectral gate before Whisper (denoise.py)
+# Silero VAD inside faster-whisper (MIT): drop non-speech; a bit stricter than default against shop noise, padded so word ends survive
+VAD = dict(threshold=float(os.getenv("STT_VAD_THRESHOLD", "0.5")), min_silence_duration_ms=400, speech_pad_ms=250)
 # Per-language fine-tunes (CT2 dirs under /models), e.g. WHISPER_MODEL_UZ=/models/uz/abduqayum-ct2.
 LANG_MODELS = {k[len("WHISPER_MODEL_"):].lower(): v for k, v in os.environ.items() if k.startswith("WHISPER_MODEL_") and v}
 
@@ -75,10 +79,20 @@ async def stt(audio: UploadFile = File(...), lang: str = Form("ru"), prompt: str
         f.write(data); f.flush()
         name = model_for(lang)
         # fine-tunes were trained without a prompt; a prompt makes them echo it
-        segs, info = whisper(lang).transcribe(f.name, language=lang or None, initial_prompt=(prompt if name == MODEL else None) or None,
-                                          vad_filter=True, beam_size=BEAM, condition_on_previous_text=False)
+        src, pre = f.name, {"denoise": False}
+        if DENOISE:
+            try:
+                t1 = time.time()
+                x, pre = denoise.clean(denoise.decode(data))
+                pre["denoise_ms"] = int((time.time() - t1) * 1000)
+                src = x if pre.get("denoise") else f.name
+            except Exception as e:  # undecodable: Whisper decodes it itself
+                pre = {"denoise": False, "error": type(e).__name__}
+        segs, info = whisper(lang).transcribe(src, language=lang or None, initial_prompt=(prompt if name == MODEL else None) or None,
+                                          vad_filter=True, vad_parameters=VAD, beam_size=BEAM, condition_on_previous_text=False)
         text = " ".join(s.text.strip() for s in segs).strip()
-    return {"text": text, "ms": int((time.time() - t0) * 1000), "model": os.path.basename(name), "duration": round(info.duration, 2)}
+    return {"text": text, "ms": int((time.time() - t0) * 1000), "model": os.path.basename(name), "duration": round(info.duration, 2),
+            "speech_s": round(getattr(info, "duration_after_vad", info.duration) or 0, 2), **pre}
 
 
 class TtsIn(BaseModel):
