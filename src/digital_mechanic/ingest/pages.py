@@ -431,6 +431,77 @@ def reflow_defect_map(page_xml: str) -> str | None:
     return "\n".join(x for x in out if x.strip())
 
 
+def reflow_defect_map_pos(page_xml: str) -> str | None:
+    """Defect map variant with an «Обозначение» size column and position groups («Поз. 1,3,4,5,6») instead of row numbers
+    (ЯМЗ-536 РК с. 243, crankshaft): one defect -> several size grades (Н, Ш1…Ш5, К1…К5), each with its own nominal / allowed /
+    conclusion. The «Поз.» block is vertically centred on its defect, like the row numbers of reflow_defect_map."""
+    lines = _words(page_xml)
+    hi = next((i for i, ws in enumerate(lines) if {"Номинальные", "Допустимые"} <= {w[4] for w in ws}), None)
+    if hi is None or not any(w[4] == "№" for ws in lines[max(0, hi - 6):hi] for w in ws):
+        return None
+    x_nom = next(w[0] for w in lines[hi] if w[4] == "Номинальные")
+    x_all = next(w[0] for w in lines[hi] if w[4] == "Допустимые")
+    concl = [w[0] for ws in lines[max(0, hi - 6):hi + 1] for w in ws if w[4] in ("Заключение", "Метод")]
+    x_def = next((w[0] for ws in lines[max(0, hi - 6):hi + 1] for w in ws if w[4] in ("Возможный", "Способ", "Средства")), None)
+    if not concl or x_def is None:
+        return None
+    x_con, x_d = min(concl) - 8, x_def - 18  # defect column starts a little left of its centred header
+    body, tail = [], []
+    for ws in lines[hi + 1:]:
+        (tail if tail or _FOOT_RE.match(_join_words(ws)) else body).append(ws)
+    pos_w = [(w[1], w[4]) for ws in body for w in ws if w[2] < x_d]
+    if not pos_w or pos_w[0][1] != "Поз.":
+        return None
+    blocks = []  # [y_first, y_last, label]
+    for y, tx in pos_w:
+        if tx == "Поз." or not blocks:
+            blocks.append([y, y, ""])
+        else:
+            blocks[-1][1] = y; blocks[-1][2] += tx
+    rest = [[w for w in ws if w[2] >= x_d] for ws in body]
+    rest = [ws for ws in rest if ws]
+    if len(blocks) < 1 or not rest:
+        return None
+    groups, k = [], 0
+    for n, (y0, y1, label) in enumerate(blocks):
+        if k >= len(rest):
+            return None
+        start = rest[k][0][1]
+        end = 2 * ((y0 + y1) / 2) - start + 4 if n < len(blocks) - 1 else float("inf")
+        cur = []
+        while k < len(rest) and rest[k][0][1] <= end:
+            cur.append(rest[k]); k += 1
+        groups.append((label.strip(",") , cur))
+    if k < len(rest):
+        return None
+    out = [_join_words(ws) for ws in lines[:hi - 4] if ws]  # title, part, material
+    out.append("Поз. — Возможный дефект, способ установления — Обозначение: номинальный / допустимый размер, мм — Заключение")
+    for label, cur in groups:
+        d, grades = [], []
+        for ws in cur:
+            dw = [w for w in ws if w[0] < x_nom - 12 and w[0] < 245]
+            sw = [w for w in ws if w not in dw]
+            if dw:
+                d.append(_join_words(dw))
+            if sw:
+                des = [w for w in sw if w[0] < x_nom + 15 and re.fullmatch(r"[НШК]\d?", w[4])]
+                nm = [w for w in sw if w not in des and w[0] < x_all - 12]
+                al = [w for w in sw if x_all - 12 <= w[0] < x_con]
+                cn = [w for w in sw if w[0] >= x_con]
+                nm_t = re.sub(r"\s*-\s*", "-", _join_words(nm)) if nm else ""
+                g = (_join_words(des) + ": " if des else "")
+                if nm_t.lower().startswith("не допуска"):
+                    g += nm_t[0].lower() + nm_t[1:]
+                else:
+                    g += "; ".join(x for x in (f"номинальный {nm_t}" if nm_t else "", f"допустимый {_join_words(al)}" if al else "") if x)
+                if cn:
+                    g += (" — " if g else "") + _join_words(cn)
+                grades.append(g)
+        out.append(f"Поз. {label}. {_join_cell(d)}" + (" — " + "; ".join(grades) if grades else ""))
+    out.extend(_join_words(ws) for ws in tail)
+    return "\n".join(x for x in out if x.strip())
+
+
 # ---------------------------------------------------------------- numbered fault index (ЯМЗ-536 РЭ «Раздел | Внешнее проявление неисправности»)
 # pdftotext prints the section numbers as one column and the (multi-line) titles after them. The number is vertically centred
 # on its title, so every title line goes to the nearest number.
@@ -489,7 +560,7 @@ def extract_pdf(pdf: Path) -> list[str]:
             out, g = [], None
             for t, b in zip(pages, boxes):
                 tab, g = reflow_table(b, g)
-                dm = None if tab else (reflow_defect_map(b) or reflow_numbered_index(b))
+                dm = None if tab else (reflow_defect_map(b) or reflow_defect_map_pos(b) or reflow_numbered_index(b))
                 out.append(_pick(t, tab) if tab else _pick(t, dm) if dm else _pick(t, reflow_side_captions(b)))
             pages = out
         return pages
