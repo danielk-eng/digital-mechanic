@@ -2,12 +2,22 @@ const _dec = x => typeof x === "number" ? x.toFixed(2).replace(".", ",") : Strin
 // Vehicle diagnostic timeline and the "before arrival" summary, shared by the mechanic and manager pages.
 const _esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
 const _ic = (n, s = 16) => (typeof icon === "function" ? icon(n, s) : "");
-// "2026-11-19" / "2026-10-29T15:20" -> "19 ноя 2026" / "29 окт 2026, 15:20" (string parts, no time-zone shift)
-const _MON = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"];
+// "2026-11-19" / "2026-10-29T15:20" -> "19 ноя 2026" / "29 окт 2026, 15:20" (string parts, no time-zone shift),
+// month names in the interface language (own tables: phone ICU data for uz/kk/tg/ky/be is often missing)
+const _MONS = {
+  ru: "янв фев мар апр мая июн июл авг сен окт ноя дек", uz: "yan fev mar apr may iyn iyl avg sen okt noy dek",
+  tg: "янв фев мар апр май июн июл авг сен окт ноя дек", ky: "янв фев мар апр май июн июл авг сен окт ноя дек",
+  kk: "қаң ақп нау сәу мам мау шіл там қыр қаз қар жел", be: "сту лют сак кра тра чэр ліп жні вер кас ліс сне",
+  hi: "जन॰ फ़र॰ मार्च अप्रैल मई जून जुल॰ अग॰ सित॰ अक्टू॰ नव॰ दिस॰", bn: "জানু ফেব মার্চ এপ্রি মে জুন জুল আগ সেপ অক্টো নভে ডিসে"};
+const _MON = _MONS.ru.split(" ");
+const _ulang = () => (typeof ME !== "undefined" && ME && ME.lang) || "ru";
+const _tt = (k, d) => { const x = typeof t === "function" ? t(k) : k; return x && x !== k ? x : d; };  // page's own translator if any
 function fmtDate(iso, time = false) {
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}:\d{2}))?/.exec(String(iso || ""));
   if (!m) return String(iso || "");
-  return `${+m[3]} ${_MON[+m[2] - 1]} ${m[1]}` + (time && m[4] ? `, ${m[4]}` : "");
+  const L = _ulang(), tm = time && m[4] ? `, ${m[4]}` : "";
+  if (L === "vi") return `${+m[3]} thg ${+m[2]}, ${m[1]}` + tm;
+  return `${+m[3]} ${(_MONS[L] || _MONS.ru).split(" ")[+m[2] - 1]} ${m[1]}` + tm;
 }
 
 function tlSpark(trend) {
@@ -25,8 +35,8 @@ function tlSpark(trend) {
 function renderTimeline(tl) {
   const ic = s => s === "anomaly" ? _ic("triangle-alert") : s === "normal" ? _ic("circle-check") : _ic("rotate-ccw");
   let h = `<div class="spark">${tlSpark(tl.trend)}</div><div class="tl-sum small muted">` +
-    (tl.days_since_last_check != null ? `<span>Последняя проверка ${_esc(fmtDate(tl.last_check))}, ${tl.days_since_last_check} дн. назад</span>` : "") +
-    (tl.recurring.length ? `<span class="warn-text">Повторяется: ${tl.recurring.map(r => `${_esc(r.component || r.anomaly_type)} ×${r.count}`).join(", ")}</span>` : "") +
+    (tl.days_since_last_check != null ? `<span>${_esc(_tt("last_check", "Последняя проверка"))} ${_esc(fmtDate(tl.last_check))}, ${tl.days_since_last_check} ${_esc(_tt("days_ago", "дн. назад"))}</span>` : "") +
+    (tl.recurring.length ? `<span class="warn-text">${_esc(_tt("recurring", "Повторяется"))}: ${tl.recurring.map(r => `${_esc(r.component || r.anomaly_type)} ×${r.count}`).join(", ")}</span>` : "") +
     (tl.mileage_note ? `<span>${_esc(tl.mileage_note)}</span>` : "") + `</div><div class="tl">`;
   for (const e of tl.entries) {
     const cls = e.status === "anomaly" ? "err" : e.status === "normal" ? "ok-text" : "";
