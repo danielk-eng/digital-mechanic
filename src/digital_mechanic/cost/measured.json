@@ -1,0 +1,60 @@
+{
+ "measured_at": "2026-11-27 04:47",
+ "model": "deepseek/deepseek-v4.1-flash-1017-free",
+ "runs": 3,
+ "scenario": "диагностика → объяснение → 2 вопроса → «Подробнее» → 2 выжимки цитат → черновик заявки → подтверждение",
+ "tokens_per_scenario_median": 38966,
+ "lines": {
+  "explain": {
+   "calls_per_scenario": 1.33,
+   "steps": [
+    "agent_r0",
+    "agent_r1"
+   ],
+   "in_per_call": 8173,
+   "out_per_call": 252
+  },
+  "answer": {
+   "calls_per_scenario": 4.0,
+   "steps": [
+    "facts",
+    "render_selftaught"
+   ],
+   "in_per_call": 1892,
+   "out_per_call": 157
+  },
+  "expand": {
+   "calls_per_scenario": 1.0,
+   "steps": [
+    "expand"
+   ],
+   "in_per_call": 1322,
+   "out_per_call": 441
+  },
+  "extract": {
+   "calls_per_scenario": 1.33,
+   "steps": [
+    "section_extract"
+   ],
+   "in_per_call": 1442,
+   "out_per_call": 265
+  },
+  "ticket": {
+   "calls_per_scenario": 1.33,
+   "steps": [
+    "agent_r0",
+    "agent_r1"
+   ],
+   "in_per_call": 6838,
+   "out_per_call": 343
+  },
+  "retry": {
+   "calls_per_scenario": 1.0,
+   "steps": [
+    "agent_fix_numbers"
+   ],
+   "in_per_call": 7658,
+   "out_per_call": 240
+  }
+ }
+}
