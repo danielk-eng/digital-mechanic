@@ -1278,8 +1278,11 @@ class Agent:
         basis = "; ".join(basis) if isinstance(basis, list) else str(basis)
         m = len(parts)
         pw = "запчасть" if m % 10 == 1 and m % 100 != 11 else "запчасти" if m % 10 in (2, 3, 4) and m % 100 not in (12, 13, 14) else "запчастей"
-        out = [f"Черновик заявки на дефектовку готов: {n} {works}" + (f" и {m} {pw}" if parts else "") + " по руководству " + " ".join(f"[{l}]" for l in labs),  # no dot after the chips: it would move before them and leave the chips on a line of their own
-               f"Приоритет — {URG_RU.get(u, u)}." + (f" Основание: {basis.rstrip('.')}." if basis else "")]
+        # The page chips get a short line of their own (at 390 px they wrapped under a long first line, a lone «с. 53» there)
+        out = [f"Черновик заявки на дефектовку готов: {n} {works}" + (f" и {m} {pw}" if parts else "") + "."]
+        if labs:
+            out.append("Взято из руководства: " + " ".join(f"[{l}]" for l in labs))  # no dot after the chips
+        out += [f"Приоритет — {URG_RU.get(u, u)}." + (f" Основание: {basis.rstrip('.')}." if basis else "")]
         if d.get("requires_inspection"):
             out.append("Результат проверки под сомнением — перед отправкой " + ("подтверди" if ty else "подтвердите") + " неисправность осмотром.")
         out.append("Проверь карточку и подтверди отправку в ТОиР — без подтверждения ничего не уходит." if ty else

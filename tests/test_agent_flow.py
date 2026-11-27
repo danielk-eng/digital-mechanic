@@ -1,3 +1,4 @@
+import re
 from conftest import msg, tool_call
 
 
@@ -48,6 +49,9 @@ def test_agent_picks_tools_and_ticket_goes_through_gate(make_agent):
     # no third LLM round to retell the card: the text is built from the verified draft, with its page label
     assert len(a.llm.calls) == 2 and turn.text.startswith("Черновик заявки на дефектовку готов: 1 работа")
     assert "Приоритет —" in turn.text and "Основание:" in turn.text and "[S" in turn.text and turn.sources
+    # page chips on a short line of their own (390 px: they wrapped under the long first line)
+    assert turn.text.splitlines()[0].endswith(".") and "[S" not in turn.text.splitlines()[0]
+    assert re.match(r"Взято из руководства: (\[S\d+\] ?)+$", turn.text.splitlines()[1])
     assert a.toir.sent == []  # nothing sent before confirmation
     turn2 = a.handle(c, {"lang": "ru"}, "Подтверждаю")
     assert "TKT-" in turn2.text and len(a.toir.sent) == 1
