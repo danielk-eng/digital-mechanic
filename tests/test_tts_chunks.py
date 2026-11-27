@@ -52,7 +52,7 @@ def test_unicode_tts_chunks_are_speakable():
     assert voice.tts_chunks("क्लच बदल दिया गया। दबाव जाँचें।") == ["क्लच बदल दिया गया। दबाव जाँचें।"]
 
 
-def test_nvidia_tts_multipart_and_language(monkeypatch):
+def test_nvidia_magpie_tts_multipart_language_voice_and_rate(monkeypatch):
     sent = {}
 
     class R:
@@ -64,19 +64,53 @@ def test_nvidia_tts_multipart_and_language(monkeypatch):
         sent["auth"] = headers["Authorization"]
         sent["language"] = files["language"][1]
         sent["voice"] = files["voice"][1]
+        sent["rate"] = files["sample_rate_hz"][1]
         return R()
 
     monkeypatch.setattr(voice.httpx, "post", post)
     s = SimpleNamespace(nvidia_api_key="test-key", nvidia_tts_enabled=True,
                         nvidia_tts_chatterbox_function_id="fn-id", nvidia_tts_magpie_function_id="mag-id",
                         nvidia_tts_timeout_s=1)
-    wav = voice.nvidia_tts("Проверь затяжку 100 Н·м.", "ru", s)
-    assert wav.startswith(b"RIFF")
-    assert sent["url"].startswith("https://fn-id.invocation.api.nvcf.nvidia.com/")
+    assert voice.nvidia_tts("दबाव जाँचें।", "hi", s).startswith(b"RIFF")
+    assert sent["url"].startswith("https://mag-id.invocation.api.nvcf.nvidia.com/")
     assert sent["auth"] == "Bearer test-key"
-    assert sent["language"] == "ru-RU"
-    assert sent["voice"] == "Chatterbox-Multilingual.ru-RU.Male"
+    assert sent["language"] == "hi-IN"
+    assert sent["voice"] == "Magpie-Multilingual.HI-IN.Leo"
+    assert sent["rate"] == "44100"
+    assert voice.nvidia_tts("Kiểm tra áp suất.", "vi", s).startswith(b"RIFF")
+    assert sent["language"] == "vi-VN" and sent["voice"] == "Magpie-Multilingual.VI-VN.Long"
     assert "ru" in voice.server_tts_langs(s) and voice.tts_configured(s)
+
+
+def test_nvidia_chatterbox_uses_grpc_and_wraps_pcm(monkeypatch):
+    sent = {}
+    pcm = b"\x01\x00" * 240
+
+    class Fut:
+        def result(self, timeout):
+            sent["timeout"] = timeout
+            return SimpleNamespace(audio=pcm)
+
+    class Service:
+        def synthesize(self, **kw):
+            sent.update(kw)
+            return Fut()
+
+    def riva(key, fid):
+        sent["key"] = key; sent["fid"] = fid
+        return Service(), SimpleNamespace(LINEAR_PCM=1)
+
+    monkeypatch.setattr(voice, "_riva_service", riva)
+    s = SimpleNamespace(nvidia_api_key="test-key", nvidia_tts_enabled=True,
+                        nvidia_tts_chatterbox_function_id="fn-id", nvidia_tts_magpie_function_id="mag-id",
+                        nvidia_tts_timeout_s=7)
+    wav = voice.nvidia_tts("Проверь затяжку 100 Н·м.", "ru", s)
+    assert sent["fid"] == "fn-id" and sent["key"] == "test-key"
+    assert sent["voice_name"] == "Chatterbox-Multilingual.ru-RU.Male"
+    assert sent["language_code"] == "ru-RU" and sent["sample_rate_hz"] == 22050 and sent["future"] is True
+    assert sent["timeout"] == 7
+    with wave.open(io.BytesIO(wav)) as w:
+        assert w.getframerate() == 22050 and w.readframes(w.getnframes()) == pcm
 
 
 def test_cloudru_realtime_tts_wraps_pcm(monkeypatch):

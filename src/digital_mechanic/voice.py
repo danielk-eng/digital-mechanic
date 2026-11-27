@@ -393,9 +393,12 @@ def cloudru_tts(text: str, lang: str, s: Settings) -> bytes:
 # Hosted NVIDIA Build speech endpoints. Chatterbox is the only NVIDIA-hosted multilingual model with Russian;
 # Magpie covers Vietnamese (and other languages), but not Russian. A missing voice parameter means the endpoint default.
 NVIDIA_TTS_PROFILES = {
-    "ru": {"provider": "chatterbox", "language": "ru-RU", "voice": "Chatterbox-Multilingual.ru-RU.Male"},
-    "hi": {"provider": "chatterbox", "language": "hi-IN"},
-    "vi": {"provider": "magpie", "language": "vi-VN"},
+    # Chatterbox is the only NVIDIA voice with Russian, but the hosted function exposes gRPC only.
+    "ru": {"provider": "chatterbox", "language": "ru-RU", "voice": "Chatterbox-Multilingual.ru-RU.Male", "rate": 22050},
+    # Magpie has no Russian, but covers Hindi and Vietnamese through the documented HTTP endpoint. Explicit voices
+    # and the documented 44.1 kHz rate matter: the hosted function rejects a missing/default voice or 24 kHz quickly.
+    "hi": {"provider": "magpie", "language": "hi-IN", "voice": "Magpie-Multilingual.HI-IN.Leo", "rate": 44100},
+    "vi": {"provider": "magpie", "language": "vi-VN", "voice": "Magpie-Multilingual.VI-VN.Long", "rate": 44100},
 }
 
 
@@ -410,8 +413,38 @@ def _nvidia_tts_url(function_id: str) -> str:
     return f"https://{function_id}.invocation.api.nvcf.nvidia.com/v1/audio/synthesize"
 
 
+def _riva_service(key: str, function_id: str):
+    """Optional Riva gRPC client. Imported lazily so local/browser-only installs need not carry grpcio."""
+    try:
+        import riva.client  # type: ignore
+        from riva.client.proto.riva_audio_pb2 import AudioEncoding  # type: ignore
+    except Exception:
+        raise SttUnavailable("nvidia riva client not installed") from None
+    auth = riva.client.Auth(uri="grpc.nvcf.nvidia.com:443", use_ssl=True,
+                            metadata_args=[["function-id", function_id], ["authorization", f"Bearer {key}"]],
+                            options=[("grpc.max_receive_message_length", 32 * 1024 * 1024)])
+    return riva.client.SpeechSynthesisService(auth), AudioEncoding
+
+
+def _chatterbox_grpc_chunk(text: str, profile: dict, key: str, function_id: str, timeout_s: float, service=None, audio_encoding=None) -> bytes:
+    """One Chatterbox chunk over the hosted Riva gRPC API; the response is raw PCM, so wrap it as WAV."""
+    if service is None or audio_encoding is None:
+        service, audio_encoding = _riva_service(key, function_id)
+    rate = int(profile.get("rate") or 22050)
+    try:
+        future = service.synthesize(text=text, voice_name=profile.get("voice"), language_code=profile["language"],
+                                    encoding=audio_encoding.LINEAR_PCM, sample_rate_hz=rate, future=True)
+        resp = future.result(timeout=max(5.0, float(timeout_s)))
+    except Exception as e:
+        raise SttUnavailable(f"nvidia chatterbox grpc {type(e).__name__}") from None
+    pcm = getattr(resp, "audio", b"")
+    if not pcm:
+        raise SttUnavailable("nvidia chatterbox empty")
+    return _pcm16_wav(pcm, rate)
+
+
 def nvidia_tts(text: str, lang: str, s: Settings) -> bytes:
-    """NVIDIA hosted TTS as one WAV. ru/hi use Chatterbox; vi uses Magpie Multilingual. Raises SttUnavailable."""
+    """NVIDIA hosted TTS as one WAV. ru uses Chatterbox gRPC; hi/vi use Magpie Multilingual HTTP."""
     profile = NVIDIA_TTS_PROFILES.get(lang)
     key = _nvidia_key(s)
     if not profile or not key or not getattr(s, "nvidia_tts_enabled", True):
@@ -424,16 +457,22 @@ def nvidia_tts(text: str, lang: str, s: Settings) -> bytes:
            else getattr(s, "nvidia_tts_magpie_function_id", ""))
     if not fid:
         raise SttUnavailable(f"no nvidia {profile['provider']} endpoint")
+    timeout_s = getattr(s, "nvidia_tts_timeout_s", 60.0)
+    if profile["provider"] == "chatterbox":
+        service, audio_encoding = _riva_service(key, fid)  # one channel for all chunks of this answer
+        parts = [_chatterbox_grpc_chunk(c, profile, key, fid, timeout_s, service, audio_encoding) for c in chunks]
+        return _wav_join(parts) if len(parts) > 1 else parts[0]
     url = _nvidia_tts_url(fid)
     parts = []
     for chunk in chunks:
-        fields = {"text": chunk, "language": profile["language"], "encoding": "LINEAR_PCM", "sample_rate_hz": "24000"}
+        fields = {"text": chunk, "language": profile["language"], "encoding": "LINEAR_PCM",
+                  "sample_rate_hz": str(int(profile.get("rate") or 44100))}
         if profile.get("voice"):
             fields["voice"] = profile["voice"]
         try:
             r = httpx.post(url, headers={"Authorization": f"Bearer {key}"},
-                           files={k: (None, v) for k, v in fields.items()}, timeout=getattr(s, "nvidia_tts_timeout_s", 60.0))
-            r = _nvcf_wait(r, key, getattr(s, "nvidia_tts_timeout_s", 60.0))
+                           files={k: (None, v) for k, v in fields.items()}, timeout=timeout_s)
+            r = _nvcf_wait(r, key, timeout_s)
         except httpx.HTTPError as e:
             raise SttUnavailable(f"nvidia tts network: {type(e).__name__}") from None
         if r.status_code != 200:

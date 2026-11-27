@@ -98,7 +98,7 @@ FastAPI (web/app.py) ── журнал, согласие, маскирован
 | `agent/` | LLM-клиент, промпты, инструменты, проверка ответа |
 | `store.py`, `pii.py` | SQLite (пользователи, проверки, заявки, ремонты, переписка, аудит), маскирование ПДн |
 | `i18n.py`, `web/static/i18n.json` | ru, uz, tg, kk, hi, vi, bn, ky, be |
-| `voice.py`, `services/speech/` | STT: Cloud.ru GigaASR/whisper-large-v3 → локальный faster-whisper → NVIDIA Parakeet (ru) → Deepgram → браузер; TTS: Cloud.ru SaluteSpeech (ru) → NVIDIA Chatterbox/Magpie (ru/hi/vi) → Silero/браузер |
+| `voice.py`, `services/speech/` | STT: Cloud.ru GigaASR/whisper-large-v3 → локальный faster-whisper → NVIDIA Parakeet (ru) → Deepgram → браузер; TTS: Cloud.ru SaluteSpeech (ru) → NVIDIA Chatterbox gRPC (ru) / Magpie HTTP (hi/vi) → Silero/браузер |
 | `retrieval/sections.py`, `retrieval/synonyms.py` | Разделы руководств для цитат; нормализация жаргона и опечаток |
 | `agent/facts.py`, `agent/suggest.py`, `agent/handoff.py`, `proven.py`, `inspection.py` | Важное из руководства, подсказки, резюме/передача, проверенные решения, акт осмотра |
 
@@ -125,7 +125,7 @@ FastAPI (web/app.py) ── журнал, согласие, маскирован
 `SPEECH_URL=http://speech:9000`), NVIDIA Parakeet для русского, Deepgram nova-3 (`mip_opt_out`) и браузерный Web Speech.
 Порядок учитывает страну пользователя и требования локализации данных. Замеры — `docs/STT_ЗАМЕРЫ.md`.
 Ответы озвучиваются сервером: русская речь — Cloud.ru Realtime `GigaChat/SaluteSpeech` (`Bab-Freespeech`), резерв —
-NVIDIA Chatterbox (ru/hi) и Magpie (vi), затем локальный Silero или браузер. Режим «руки свободны» читает ответ и снова
+NVIDIA Chatterbox gRPC (ru) и Magpie HTTP (hi/vi), затем локальный Silero или браузер. Режим «руки свободны» читает ответ и снова
 включает микрофон; субтитры речи — отдельная accessibility-настройка и по умолчанию выключены, чтобы не дублировать ответ.
 Язык интерфейса выбирается при входе, язык ответов можно задать отдельно в настройках; руководства русские, поэтому
 исходные цитаты и названия документов остаются доступны на русском.
@@ -146,7 +146,7 @@ SQLite `var/app.db` (WAL) и `var/app.log.jsonl`: кто, когда, по ка�
 
 ## Тесты
 ```bash
-PYTHONPATH=src python -m pytest -q     # 391 тест: контракт с заглушками, политика, поиск и разделы, проверка цифр, агент, голос, веб
+PYTHONPATH=src python -m pytest -q     # 392 теста: контракт с заглушками, политика, поиск и разделы, проверка цифр, агент, голос, веб
 python scripts/smoke.py <URL>           # вход → машины → диагностика → чат → подсказки → история на любом стенде
 ```
 
@@ -155,7 +155,7 @@ python scripts/smoke.py <URL>           # вход → машины → диаг
 `docs/ЭКОНОМИКА.md` — стоимость эксплуатации, `docs/152-ФЗ.md` — персональные данные, `docs/ВИДЕО_ПЛАН.md` — сценарий видео.
 
 ## Сторонние компоненты
-FastAPI, Uvicorn, Pydantic, httpx, openai-python, pypdf, PyYAML, snowballstemmer (BSD/MIT/Apache-2.0); poppler-utils
+FastAPI, Uvicorn, Pydantic, httpx, openai-python, pypdf, PyYAML, snowballstemmer, nvidia-riva-client (BSD/MIT/Apache-2.0); poppler-utils
 (GPL, вызывается как внешняя программа для текста и картинок страниц); опционально faster-whisper (MIT), Silero TTS
 (лицензия CC BY-NC-SA — только для некоммерческого демо), Opik (Apache-2.0). Внешние API: TokenRouter и Cloud.ru (LLM), Cloud.ru (STT/TTS), NVIDIA Build (перевод/STT/TTS), Deepgram (резервный STT).
 Интерфейс: шрифт Inter (SIL OFL 1.1, локально в `web/static/fonts/`), иконки Lucide (ISC, подмножество в `web/static/icons.js`).
