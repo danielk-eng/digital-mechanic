@@ -68,3 +68,14 @@ def test_fault_code_inside_question_searches_by_group_name(make_agent):
     title = a.fleet.fault_types["F08"]
     assert f"«{title}»" in first and "ФРАГМЕНТЫ РУКОВОДСТВА" in first
     assert title.split()[0].lower() in a.progress[c.cid][0].lower()
+
+
+def test_head_bolt_torque_reaches_head_procedure(index):
+    """Audit q16 27.11: «болтов головки блока … ЗМЗ-409» on a ЯМЗ-536 truck ranked the cover-bolt table (РЭ p. 272) and
+    the model said «момента нет»; the head-bolt procedure (p. 271: 100 Н·м + 180° + 90°) must be in the top 3."""
+    from digital_mechanic.retrieval.expand import expand
+    for q in ("Какой момент затяжки болтов головки блока двигателя ЗМЗ-409?", "момент затяжки болтов ГБЦ"):
+        qs, sym = expand(q)
+        assert not sym and any("крепеж головки цилиндров" in x for x in qs)
+        hits = index.search_multi("ЯМЗ-536", qs, k=3)
+        assert any(h.page.doc_id == "YAMZ536-RE" and h.page.page == 271 for h in hits), q
