@@ -317,7 +317,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .tbl .sub{font-size:.8rem;color:var(--text-2)}
 .tbl td.num{font-variant-numeric:tabular-nums}
 @media (max-width:720px){.tbl .hide-m{display:none}}
-.side{position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);z-index:40;background:var(--surface);border-left:1px solid var(--border);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;animation:slide .2s ease-out}
+.side{position:fixed;top:0;right:0;bottom:0;width:min(560px,100%);z-index:40;background:var(--surface);border-left:1px solid var(--border);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;animation:slide .2s ease-out}
 @keyframes slide{from{transform:translateX(24px);opacity:0}}
 .side .vhd{display:flex;align-items:center;gap:8px;height:var(--bar);padding:0 8px 0 20px;border-bottom:1px solid var(--border)}
 .side .vhd b{flex:1;font-weight:600}
