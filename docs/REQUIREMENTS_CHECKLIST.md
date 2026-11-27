@@ -57,7 +57,7 @@
 | Пункт | Решение | Статус |
 |---|---|---|
 | Приоритет: RAG + рекомендации ремонта + заполнение заявки | Основная работа ушла сюда | ✅ |
-| Голосовой ввод — самый ценный доп.; TTS не обязателен | `/api/stt`: Cloud.ru GigaASR/whisper-large-v3 → локальный faster-whisper → NVIDIA Parakeet (ru) → Deepgram → браузер; запись в composer с отменой и retry. TTS: Cloud.ru SaluteSpeech (ru; kk/uz/ky — после подтверждения multilingual-доступа) → NVIDIA Chatterbox gRPC (ru) / Magpie HTTP (hi/vi) → локальный Silero CIS MIT (ru/kk/uz/ky/tg)/браузер | ✅ |
+| Голосовой ввод — самый ценный доп.; TTS не обязателен | `/api/stt`: Cloud.ru GigaASR/whisper-large-v3 → локальный faster-whisper → NVIDIA Parakeet (ru) → Deepgram → браузер; запись в composer с отменой и retry. TTS: Cloud.ru SaluteSpeech (ru/kk/uz/ky; uz/ky — с проверкой качества носителем) → NVIDIA Chatterbox gRPC (ru) / Magpie HTTP (hi/vi) → локальный Silero CIS MIT (ru/kk/uz/ky/tg)/браузер | ✅ |
 | Языки: русский обязательно, СНГ + хинди по желанию, английский не нужен | ru, uz, tg, kk, hi, vi, bn, ky — интерфейс и ответы агента; серверная озвучка ru/hi/vi, локальная серверная озвучка ru/kk/uz/ky/tg, остальное — браузерная; белорусский исключён продуктовым решением | ✅ (tg STT — ограничение доступных моделей; живая проверка за V) |
 | Вход: текст, голос, изображения | Фото узла/госномера → vision-описание в контекст агента | ✅ |
 | Низкая уверенность (напр. 0,56) — предупредить, осмотреть узел, новая запись не нужна, заявка после осмотра | `verify_then_ticket`: флаги сомнения, кнопки «Осмотр подтвердил — отправить» / «Не подтвердилось» | ✅ |
