@@ -15,6 +15,7 @@ function ttsVoice(lang) {
 const LANG_NAMES = {ru: "Русский", uz: "Oʻzbekcha", tg: "Тоҷикӣ", kk: "Қазақша", hi: "हिन्दी", vi: "Tiếng Việt"};
 const t = k => (I18N[(ME && ME.lang) || $("#l_lang")?.value || "ru"] || I18N.ru || {})[k] || (I18N.ru || {})[k] || k;
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const TT = (k, dflt) => { const L = (ME && ME.lang) || $("#l_lang")?.value || "ru"; return (I18N[L] || {})[k] || dflt; };  // per-language string or the given (Russian) text
 const ALANG = () => (ME && ME.answer_lang) || (ME && ME.lang) || "ru";
 
 async function api(path, opts = {}) {
@@ -1290,7 +1291,7 @@ async function demoAccounts() {
   const pre = new URLSearchParams(location.search).get("login"); if (pre) $("#l_code").value = pre;
   try {
     const r = await api("/api/demo/accounts");
-    box.innerHTML = r.accounts.map(a => `<button type="button" class="acc" data-k="${esc(a.key)}" data-p="${esc(a.pin)}"><b>${esc(a.name)}</b><span>${esc(a.title)}</span><span class="pin">${t("demo_pin")} ${esc(a.pin)}</span></button>`).join("");
+    box.innerHTML = r.accounts.map(a => `<button type="button" class="acc" data-k="${esc(a.key)}" data-p="${esc(a.pin)}"><b>${esc(a.name)}</b><span>${esc(TT("title_" + a.key, a.title))}</span><span class="pin">${t("demo_pin")} ${esc(a.pin)}</span></button>`).join("");
     box.querySelectorAll(".acc").forEach(b => b.onclick = () => { $("#l_code").value = b.dataset.k; $("#l_pin").value = b.dataset.p; box.querySelectorAll(".acc").forEach(x => x.classList.toggle("on", x === b)); });
   } catch (_) { box.closest(".field").remove(); }
 }
@@ -1306,5 +1307,5 @@ async function start() {
   hydrateIcons();
   I18N = await (await fetch("/static/i18n.json")).json();
   try { const ss = await api("/api/session"); SERVER_TTS = ss.server_tts !== false; SERVER_STT = WebSTT.server = ss.server_stt !== false; ME = ss.user; if (!ME) throw new Error("login"); start(); }
-  catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = () => { COUNTRIES = null; $("#l_country").innerHTML = ""; applyI18n(); }; $("#l_country").onchange = loginCountry; applyI18n(); demoAccounts(); $("#login").classList.remove("hidden"); }
+  catch (e) { langOptions($("#l_lang"), (navigator.language || "ru").slice(0, 2)); $("#l_lang").onchange = () => { COUNTRIES = null; $("#l_country").innerHTML = ""; applyI18n(); demoAccounts(); }; $("#l_country").onchange = loginCountry; applyI18n(); demoAccounts(); $("#login").classList.remove("hidden"); }
 })();
