@@ -550,14 +550,15 @@ class Agent:
                              "другого двигателя, не подменяй его похожим типом. Скажи о расхождении и рекомендуй повторить проверку или дефектовку.")
             elif ch.status == CheckStatus.anomaly and ch.confidence is not None and ch.confidence < policy.RERECORD_CONFIDENCE:
                 lines.append(f"НИЗКАЯ УВЕРЕННОСТЬ {policy._ru(ch.confidence)} < порога {policy._ru(policy.RERECORD_CONFIDENCE)}: рекомендуй повторить запись; "
-                             "заявку не оформлять. Можно назвать, что проверить по руководству, как гипотезу.")
+                             "заявку не оформлять. Можно назвать, что проверить по руководству, с пометкой «Гипотеза»; не пиши «выводов не делаю» и «чем грозит» — "
+                             "вывода нет, есть предположение до повторной записи.")
             elif ch.status == CheckStatus.anomaly:
                 u, why = policy.urgency(ch)
                 lines.append(f"Приоритет (рассчитан системой): {u.value} — {'; '.join(why)}.")
                 flags = policy.doubt_flags(ch)
                 if flags:
                     lines.append("СОМНЕНИЯ: " + "; ".join(flags) + ". Предупреди механика. Сначала осмотр узла на месте по руководству (заявку на осмотр не оформлять); "
-                                 "заявка на ремонт — только если механик сознательно подтвердит неисправность после осмотра.")
+                                 "заявка на ремонт — только если механик сознательно подтвердит неисправность после осмотра. Не пиши, что заявку можно оформить или что черновик готов.")
         else:
             lines.append("Проверка ещё не запрошена.")
         if v:
@@ -956,6 +957,11 @@ class Agent:
                     turn.text, removed = answer_post.guard_uncited(turn.text)
                     if removed:
                         turn.tools.append({"tool": "uncited_guard", "removed": [r[:160] for r in removed]})
+                held = self._ticket_held(c)
+                if held and not any(cd.get("kind") == "ticket_draft" for cd in turn.cards):
+                    turn.text, hit = answer_post.ticket_claims(turn.text, held)
+                    if hit:
+                        turn.tools.append({"tool": "ticket_claim_guard", "ok": True})
                 self._log_gap(c, user, text, turn)
                 labels = set(cited_labels(turn.text))
                 turn.sources = [s for s in turn.sources if s["label"] in labels]
@@ -998,6 +1004,19 @@ class Agent:
                 turn.tools.append({"tool": "kb_gap", "ok": True, "gap": kind})
             except Exception:
                 pass
+
+    def _ticket_held(self, c) -> str:
+        """Policy's own sentence when a ticket is not freely available for this check ('' when it is)."""
+        ch = c.check
+        if not ch or ch.status != CheckStatus.anomaly:
+            return ""
+        refusal = policy.ticket_refusal(ch, c.vehicle)
+        if refusal:
+            return "Заявку не оформляю: " + refusal.rstrip(".") + "."
+        if policy.doubt_flags(ch):
+            return ("Сначала осмотр узла на месте по руководству. Заявку на ремонт оформите, только если осмотр подтвердит неисправность, "
+                    "— при оформлении нужно будет подтвердить предупреждение.")
+        return ""
 
     def resume_note(self, vehicle_id: str, user: dict | None = None) -> dict | None:
         """Day-2 briefing: a repair is interrupted (end of shift, no part) and resumed a day or two later, often by
@@ -1126,6 +1145,13 @@ class Agent:
             if c.check.status == CheckStatus.normal:
                 turn.text = "Норма: значимых отклонений по звуку нет. Машину можно эксплуатировать, заявка не нужна. Следующая проверка — по графику ТО."
                 return turn
+            mm = policy.mismatch(c.check, c.vehicle)
+            if mm:  # organizers 26.11: the card wins, it is a model error -- nothing to explain about a fault this engine can not have
+                turn.text = (mm + " Что сделать: повторите запись (двигатель на холостом ходу, микрофон под двигателем, 20–30 секунд) "
+                             "и сверьте модель двигателя в карточке с табличкой на блоке. Если шум или дым есть на самом деле — проведите дефектовку "
+                             "по руководству двигателя из карточки.")
+                turn.tools.append({"tool": "policy", "ok": True, "decision": c.decision.value if c.decision else None})
+                return turn
             ch = c.check
             pre = []
             for q in (f"{ch.anomaly_title} {ch.description}", f"неисправности причины способы устранения {ch.anomaly_title}"):
@@ -1136,7 +1162,8 @@ class Agent:
             frag_txt = "\n\n".join(f"[{f['label']}] {f['document']}, стр. PDF {f['pdf_page']}\n{f['text']}" for f in pre[:7])
             brief = (user.get("detail") or "brief") == "brief"
             masked = (f"Объясни механику результат текущей проверки ({'коротко, до 6 строк' if brief else 'до 12 строк'}): вердикт; что вероятно не так; чем грозит; что и как проверить "
-                      "(допуски, порядок со страницами); в конце предложи создать заявку. Ниже — уже найденные фрагменты руководства этого двигателя; "
+                      "(допуски, порядок со страницами); в конце " + ("что делать дальше по правилу проверки, заявку не предлагай" if self._ticket_held(c) else "предложи создать заявку")
+                      + ". Ниже — уже найденные фрагменты руководства этого двигателя; "
                       "если в них нет нужного — сделай не более одного дополнительного поиска.\n\n" + frag_txt)
         if image_note:
             masked = (masked + "\n" if masked else "") + ("[Материал от механика (не ML-диагноз), описание: " + image_note + "]")

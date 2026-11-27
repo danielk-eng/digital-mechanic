@@ -67,6 +67,8 @@ def test_mismatch_card_wins_no_diagnosis_no_ticket(make_agent):
     assert "urgency" not in card  # no diagnosis -> no priority
     turn = a.handle(c, {"lang": "ru"}, "Создать заявку")
     assert turn.text.startswith("Заявку не оформляю") and a.llm.calls == []
+    ex = a.handle(c, {"lang": "ru"}, "", event="explain_diagnosis")  # no LLM, no F08 norms from any manual
+    assert "ошибка модели" in ex.text and "повторите запись" in ex.text and a.llm.calls == [] and not ex.sources
     assert "РАСХОЖДЕНИЕ С КАРТОЧКОЙ" in a._context(c)
     # the generalisation: every fault type that cannot occur on the card's fuel
     for code, fuel in policy.FAULT_FUEL.items():
@@ -235,3 +237,11 @@ def test_multiday_repair_resumed_by_another_mechanic(make_agent):
     assert note["kind"] == "repair" and note["step"] == 1
     assert "шаге 2 из 3" in note["text"] and "Иванов А." in note["text"] and "стр. 269" in note["text"]
     assert "Вы начали" in a.resume_note("E549YT198", {"id": "m1"})["text"]
+
+
+def test_model_cannot_promise_held_ticket():
+    from digital_mechanic.agent import answer_post
+
+    t, hit = answer_post.ticket_claims("Проверить свечу [S1].\nЗаявку на дефектовку по этим работам можно оформить — черновик уже готов.", "Сначала осмотр узла на месте.")
+    assert hit and "можно оформить" not in t and "готов" not in t and t.endswith("Сначала осмотр узла на месте.") and "[S1]" in t
+    assert answer_post.ticket_claims("Проверить свечу [S1].", "x") == ("Проверить свечу [S1].", False)

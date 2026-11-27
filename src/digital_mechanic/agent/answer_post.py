@@ -136,3 +136,17 @@ def no_specialist(text: str) -> str:
             return " Проведите дефектовку узла или откройте ближайший раздел руководства"
         return " — проведите дефектовку узла или откройте ближайший раздел руководства"
     return re.sub(r" {2,}", " ", _SPECIALIST.sub(rep, text)).strip()
+
+
+_TICKET_CLAIM = re.compile(r"[^.!?\n]*(?:заявк\w*[^.!?\n]{0,40}можно оформ\w*|можно оформ\w*[^.!?\n]{0,20}заявк\w*|черновик[^.!?\n]{0,20}(?:уже )?готов)[^.!?\n]*[.!?]?")
+
+
+def ticket_claims(text: str, why: str) -> tuple[str, bool]:
+    """The model must not promise a ticket the policy holds back (0,50–0,60 / warning: inspection first; < 0,50,
+    mismatch, bad: no ticket). Such sentences are replaced by the policy's own words."""
+    if not text or not _TICKET_CLAIM.search(text):
+        return text, False
+    out = _TICKET_CLAIM.sub("", text).rstrip()
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r"\n{3,}", "\n\n", out).strip()
+    return (out + "\n\n" + why).strip(), True
