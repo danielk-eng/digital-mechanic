@@ -27,6 +27,10 @@ def sentences(text: str) -> list[str]:
         return [ln.strip() for ln in text.split("\n") if len(ln.strip()) >= 25 and not TABLE_HEAD.match(ln.strip())]
     t = re.sub(r"-\n(?=[а-яё])", "", text)
     t = re.sub(r"\n\s*[-–•]\s+", "\n§", t)  # bullet items are separate statements
+    # two-column table pdftotext gave column by column (ЯМЗ-236 РЭ p. 51): a line starting with a capitalised word after a
+    # line without closing punctuation is a new cell («…заменить стартер» / «Промыть заборник…» / «Осторожно прогреть…»),
+    # not one 1500-char statement (Vercel 00:30: «Важно» showed «…заменить стартер Промыть заборник… Осторожно прогреть…»)
+    t = re.sub(r"(?<=[^\s,;:(—–-])\s*\n\s*(?=[А-ЯЁ][а-яё])", "\n§", t)
     t = re.sub(r"[ \t]*\n[ \t]*", " ", t)
     out = []
     for s in re.split(r"(?<=[.!?;])\s+(?=[А-ЯЁA-Z0-9§])|§", t):
