@@ -64,3 +64,16 @@ def test_cached_tokens_from_provider_usage():
     assert cached_tokens(N(prompt_tokens=100, prompt_tokens_details={"cached_tokens": 32})) == 32
     assert cached_tokens(N(prompt_tokens=100, prompt_cache_hit_tokens=128)) == 128
     assert cached_tokens(N(prompt_tokens=100, prompt_tokens_details=None)) == 0
+
+
+def test_scx_cached_input_price_blended_per_step():
+    from digital_mechanic.cost import calc
+    p = calc.PRICES["primary_paid"]
+    assert p["usd"] == (0.30, 1.20) and p["usd_cached"] == 0.03 and "scx.ai" in p["source"]
+    assert abs(calc.in_price(p, 0.0) - 0.30 * calc.USD_RUB) < 1e-9
+    assert abs(calc.in_price(p, 1.0) - 0.03 * calc.USD_RUB) < 1e-9
+    m = {"lines": {"explain": {"calls_per_scenario": 1, "in_per_call": 1_000_000, "out_per_call": 0, "cached_share_provider": 0.5}}}
+    row = next(r for r in calc.scenario(m, questions=0, ticket=False) if r["step"] == "explain")
+    assert row["cached_share"] == 0.5
+    assert abs(row["primary_paid"] - 0.165 * calc.USD_RUB) < 1e-6  # 0.5*0.03 + 0.5*0.30 = $0.165 per 1M
+    assert abs(row["fallback_paid"] - 78.87) < 1e-6  # no cached rate -> full price
