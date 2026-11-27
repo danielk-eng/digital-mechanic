@@ -117,7 +117,7 @@ function renderFleet() {
       const extra = [v.awaiting ? t("op_awaiting") : "", v.idle_days != null ? `${t("op_idle")} ${dec(v.idle_days)} ${t("days")}` : ""].filter(Boolean).join(", ");
       return `<tr class="click" data-v="${esc(v.vehicle_id)}"><td><b class="mono">${esc(v.vehicle_id)}</b><div class="sub">${esc(v.garage_no)}</div></td>` +
         `<td class="hide-m">${esc(v.model)}<div class="sub">${esc(v.engine_model)}${(v.mechanics || []).length ? ", " + esc(v.mechanics.join(", ")) : ""}</div></td><td>${pill(v)}${extra ? `<div class="sub" style="margin-top:4px">${extra}</div>` : ""}</td>` +
-        `<td class="hide-m">${lastTxt}<div class="sub">${esc((l.checked_at || "").slice(0, 10))}${l.anomaly_score != null ? `, ${l.anomaly_score}` : ""}</div></td><td class="hide-m">${spark(v.scores)}</td>` +
+        `<td class="hide-m">${lastTxt}<div class="sub">${esc(typeof fmtDate === "function" ? fmtDate((l.checked_at || "").slice(0, 10)) : (l.checked_at || "").slice(0, 10))}${l.anomaly_score != null ? `, ${typeof _dec === "function" ? _dec(l.anomaly_score) : l.anomaly_score}` : ""}</div></td><td class="hide-m">${spark(v.scores)}</td>` +
         `<td>${v.urgency ? `<span class="pill ${URG[v.urgency]}">${t("urg_" + v.urgency)}</span>` : ""}</td></tr>`; }).join("")
       : `<tr><td colspan="6" class="muted">${nActive() ? t("f_nothing") : t("no_vehicles")}</td></tr>`) + `</tbody></table></div>`;
   $$("#tab-fleet [data-s]").forEach(b => b.onclick = () => { F.status = b.dataset.s || undefined; applyF(); });

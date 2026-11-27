@@ -40,3 +40,8 @@ def test_manager_idle_days_use_decimal_comma():
     out = subprocess.run(["node", "-e", "global.document={documentElement:{lang:'ru'}};" + line + "; process.stdout.write(dec(15.9))"],
                          capture_output=True, text=True, check=True).stdout
     assert out == "15,9" and "${dec(idleMax)}" in src and "${dec(v.idle_days)}" in src
+
+
+def test_fleet_table_last_check_uses_short_date_and_decimal_comma():
+    src = (JS.parent / "manager.js").read_text(encoding="utf-8")
+    assert 'fmtDate((l.checked_at || "").slice(0, 10))' in src and "_dec(l.anomaly_score)" in src  # «20 ноя 2026, 0,93», was «2026-11-20, 0.93»
