@@ -1746,6 +1746,24 @@ def eng_companies(uid: str | None = Cookie(None)) -> dict:
             "all_vehicles": AGENT.fleet.all_ids()}
 
 
+@app.post("/api/eng/cleanup-test-data")
+def eng_cleanup_test_data(uid: str | None = Cookie(None)) -> dict:
+    """Load-test leftovers off the chief's dashboard (Vercel 26.11: 40 «race-222019-3» handoffs from handoff_race.py and
+    TKT-0001/TKT-0002 three times each — the embedded TOiR mock restarted numbering before 8d2a2cd). Deletes handoffs whose
+    note is a race marker and, for a ticket number seen more than once, every copy but the newest. Engineer only; the
+    deletions reach the other instances through the shared copy (replica merge deletes by row identity)."""
+    me_ = user_of(uid, roles=("engineer",))
+    race = [r["id"] for r in STORE.q("SELECT id, note FROM handoffs") if re.fullmatch(r"race-\d{6}-\d+", (r["note"] or "").strip())]
+    for hid in race:
+        STORE.x("DELETE FROM handoffs WHERE id=?", (hid,))
+    dup = STORE.q("SELECT t.id FROM tickets t WHERE EXISTS (SELECT 1 FROM tickets u WHERE u.ticket_id = t.ticket_id"
+                  " AND (u.ts > t.ts OR (u.ts = t.ts AND u.id > t.id)))")
+    for r in dup:
+        STORE.x("DELETE FROM tickets WHERE id=?", (r["id"],))
+    STORE.audit(user_id=me_["id"], role=me_["role"], action="cleanup_test_data", input=f"handoffs {len(race)}, tickets {len(dup)}", ok=1)
+    return {"handoffs_deleted": len(race), "tickets_deleted": len(dup)}
+
+
 @app.post("/api/eng/companies")
 def eng_company_create(body: CompanyIn, uid: str | None = Cookie(None)) -> dict:
     me_ = user_of(uid, roles=("engineer",))
