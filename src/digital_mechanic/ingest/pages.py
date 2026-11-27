@@ -538,12 +538,89 @@ def reflow_numbered_index(page_xml: str) -> str | None:
     return "\n".join(x for x in out if x.strip())
 
 
+_WORD_RE = re.compile(r'<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</word>', re.S)
+
+
+def _sym(t: str) -> str:
+    """Symbol-font glyphs come out as private-use U+F020–F07E (U+F02D is «−», U+F02B is «+»): back to the character."""
+    if not re.search("[\uf020-\uf07e]", t):
+        return t
+    t = re.sub("[\uf020-\uf07e]", lambda m: chr(ord(m.group()) - 0xF000), t)
+    return t.replace("-", "−")
+
+
+def _line_text(body: str) -> str:
+    """Words of one bbox line. Tolerances set one above the other («100 ⁻⁰'⁰³₋₀,₁₀», ЗМЗ-5234 РК p. 151–156) are
+    interleaved by pdftotext into «0 0 , , 10 03» with the signs as one tall Symbol glyph: the small words are split
+    into the upper and the lower row and read as «100 −0,03 −0,10». Lines without such a stack stay word by word."""
+    ws = [[float(a), float(b), float(c), float(d), html.unescape(t)] for a, b, c, d, t in _WORD_RE.findall(body)]
+    if not ws:
+        return " ".join(html.unescape(w) for w in re.findall(r"<word[^>]*>(.*?)</word>", body))
+    hs = [w[3] - w[1] for w in ws if not _SIGN2.fullmatch(w[4])]
+    hmax = max(hs) if hs else 0
+    small = [w for w in ws if w[3] - w[1] < 0.75 * hmax and not _SIGN2.fullmatch(w[4]) and not re.fullmatch(r"\d\)", w[4])]  # «1)» is a footnote
+    if len(small) >= 4:
+        mid = (min(w[1] for w in small) + max(w[3] for w in small)) / 2
+        top = [w for w in small if (w[1] + w[3]) / 2 < mid]
+        bot = [w for w in small if (w[1] + w[3]) / 2 >= mid]
+        ta, tb = min(w[0] for w in top or small), max(w[2] for w in top or small)
+        ba, bb = min(w[0] for w in bot or small), max(w[2] for w in bot or small)
+        if top and bot and min(tb, bb) - max(ta, ba) > 0.5 * min(tb - ta, bb - ba):  # the two rows sit one over the other
+            x0, x1 = min(w[0] for w in small), max(w[2] for w in small)
+            signs = [w for w in ws if re.fullmatch(r"[\uf02b\uf02d]{1,2}", w[4]) and w not in small and w[2] >= x0 - 8 and w[0] <= x1]
+            if len(signs) == 2 and all(len(w[4]) == 1 for w in signs):  # two glyphs, upper and lower
+                signs.sort(key=lambda w: w[1] + w[3])
+                sg = signs[0][4] + signs[1][4]
+            else:
+                signs = [w for w in signs if len(w[4]) == 2][:1]
+                sg = signs[0][4] if signs else ""
+            row = lambda r, k: (_sym(sg[k]) if sg else "") + "".join(w[4] for w in sorted(r, key=lambda w: w[0]))
+            stack = row(top, 0) + " " + row(bot, 1)
+            rest = sorted((w for w in ws if w not in small and w not in signs), key=lambda w: w[0])
+            before = [_sym(w[4]) for w in rest if w[0] < x0]
+            after = [_sym(w[4]) for w in rest if w[0] >= x0]
+            return " ".join(before + [stack] + after)
+    # one tolerance with a Symbol sign: «+ 0 , 019» -> «+0,019» (the glyphs touch each other)
+    out: list[list] = []
+    for w in ws:
+        glue = out and (out[-1][5] or re.fullmatch(r"[\uf02b\uf02d]", out[-1][4])) and w[0] - out[-1][2] < 1.5 and re.fullmatch(r"[\d,.]+", w[4])
+        if glue:
+            out[-1][2], out[-1][4], out[-1][5] = w[2], out[-1][4] + w[4], True
+        else:
+            out.append([*w[:5], False])
+    return " ".join(_sym(w[4][:1]) + w[4][1:] if w[5] else _sym(w[4]) for w in out)
+
+
+_TOL_FIRST = re.compile(r"(?<![\w,])([+−]\d+,\d+) (\d+(?:,\d+)?) ([+−]\d+,\d+)(?![\w,])")
+
+
+def _tol_order(line: str) -> str:
+    """The upper tolerance line sits above the nominal: «+0,050 49 +0,025» -> «49 +0,050 +0,025» (ЗМЗ-409 РК p. 124)."""
+    return _TOL_FIRST.sub(r"\2 \1 \3", line)
+
+
+_LINE_RE = re.compile(r'<line xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</line>', re.S)
+_SIGN2 = re.compile(r"[\uf02b\uf02d+\-−–]{2}")
+
+
 def _xml_lines(page_xml: str) -> list[list]:
     out = []
-    for m in re.finditer(r'<line xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</line>', page_xml, re.S):
-        t = " ".join(html.unescape(w) for w in re.findall(r"<word[^>]*>(.*?)</word>", m.group(5))).strip()
-        if t:
-            out.append([float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4)), t])
+    for blk in re.findall(r"<block[^>]*>(.*?)</block>", page_xml, re.S) or [page_xml]:
+        ls = [[float(a), float(b), float(c), float(d), body] for a, b, c, d, body in _LINE_RE.findall(blk)]
+        # a stacked tolerance: pdftotext may put one row («03», «009») on its own line inside the line of the stack
+        signed = bool(re.search("[\uf02b\uf02d]", blk))
+        if signed and len(ls) > 1:
+            for l in sorted(ls, key=lambda l: l[1] - l[3]):  # tallest first
+                if l not in ls:
+                    continue
+                inner = [o for o in ls if o is not l and o[1] >= l[1] - 2 and o[3] <= l[3] + 2 and o[2] >= l[0] - 2 and o[0] <= l[2] + 2]
+                if inner:
+                    m = [min(o[0] for o in [l] + inner), l[1], max(o[2] for o in [l] + inner), l[3], l[4] + "".join(o[4] for o in inner)]
+                    ls = [o for o in ls if o is not l and o not in inner] + [m]
+        for l in sorted(ls, key=lambda l: (l[1], l[0])) if signed else ls:
+            t = _line_text(l[4]).strip()
+            if t:
+                out.append(l[:4] + [t])
     return out
 
 
@@ -612,7 +689,7 @@ def reflow_grid(page_xml: str) -> str | None:
         wide += len(segs) > 16
         name = _join_cell(c[4])
         numeric += bool(re.fullmatch(r"[\d\s]+", name) or name.startswith("("))
-        out.append(name + (" — " + " | ".join(segs) if segs else ""))
+        out.append(_tol_order(name + (" — " + " | ".join(segs) if segs else "")))
     # a real table: most rows have values, rows are not a whole page of cells, names are words (not figure callouts)
     if filled < 3 or filled < 0.6 * len(rows) or wide or numeric > 0.2 * len(rows):
         return None
