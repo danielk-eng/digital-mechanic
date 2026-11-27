@@ -174,7 +174,7 @@ details.more summary .ic{transition:transform .15s ease-out}
 .ops li .n{width:24px;height:24px;border-radius:50%;background:var(--surface-3);color:var(--text-2);font-size:.75rem;font-weight:600;display:flex;align-items:center;justify-content:center;flex:none;margin-top:1px}
 .ops li.done{color:var(--text-2)}.ops .cite{background:var(--surface-3);color:var(--text)}.ops li.done .n{background:var(--ok);color:#fff}
 .ops li.cur{background:var(--accent-soft)}.ops li.cur .n{background:var(--accent);color:var(--on-accent)}
-.card-actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}.card-actions .btn{flex:1;white-space:normal;height:auto;min-height:48px;text-align:center;line-height:1.25}
+.card-actions{display:flex;gap:8px;margin-top:16px;flex-wrap:wrap}.card-actions .btn{flex:1 1 140px;min-width:0;white-space:normal;overflow-wrap:anywhere;height:auto;min-height:48px;text-align:center;line-height:1.25}
 pre.json{white-space:pre-wrap;font-size:.75rem;background:var(--surface-2);padding:12px;border-radius:var(--r-sm);overflow:auto;max-height:280px}
 .proven .fix{padding:12px;border-radius:var(--r);background:var(--surface-2);margin-top:8px;font-size:.9rem}
 .proven .fix ol{margin:8px 0 0;padding-left:20px}

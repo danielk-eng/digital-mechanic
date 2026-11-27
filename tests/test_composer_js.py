@@ -47,6 +47,7 @@ def test_handlers_reuse_existing_stt_and_voice_mode():
     assert "Enter" in JS and "send()" in JS
     # old single teal mic-as-voice-mode-or-send swap is gone: mic no longer is the only right button
     assert "dictate-btn" in CSS and "voice-btn" in CSS and "send-btn" in CSS
+    assert ".card-actions .btn{flex:1 1 140px;min-width:0" in CSS  # narrow phones: action buttons wrap instead of clipping
 
 
 def test_dictation_has_messenger_style_recording_controls():
