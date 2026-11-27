@@ -627,18 +627,21 @@ function prefetchExpand(turn) {
   EXPANDS.set(turn, x);
   bgPush(x.job, true);
 }
-// Background requests (the «Подробнее» above, citation extracts) go one at a time and never start while a question is being
-// answered: the free model slows down with parallel calls (Vercel 27.11 03:30: a chip question took 102 s next to two prefetches).
-const BGQ = []; let BG_RUN = false;
-function bgPush(job, front = false) { front ? BGQ.unshift(job) : BGQ.push(job); bgNext(); }
-function bgNext() {
-  if (BG_RUN) return;
-  if (VOICE.on) { BGQ.length = 0; return; }
-  if (!BGQ.length) return;
-  if (BUSY) return void setTimeout(bgNext, 1500);
-  const j = BGQ.shift(); BG_RUN = true;
+// Background requests go in two lanes — «Подробнее» (above) and the citation extracts — one at a time in each, and none starts
+// while a question is being answered: the free model slows down with parallel calls (Vercel 27.11 03:30: a chip question took
+// 102 s next to three background calls), while one lane for all left the extracts unfetched behind a 20–30 s «Подробнее» (6–8 s per tap).
+const BG = {x: {q: [], run: false}, e: {q: [], run: false}};
+const BGQ = BG.x.q;
+function bgPush(job, front = false, lane = "x") { const L = BG[lane]; front ? L.q.unshift(job) : L.q.push(job); bgNext(lane); }
+function bgNext(lane = "x") {
+  const L = BG[lane];
+  if (L.run) return;
+  if (VOICE.on) { L.q.length = 0; return; }
+  if (!L.q.length) return;
+  if (BUSY) return void setTimeout(() => bgNext(lane), 1500);
+  const j = L.q.shift(); L.run = true;
   let pr; try { pr = Promise.resolve(j()); } catch (_) { pr = Promise.resolve(); }
-  pr.catch(() => {}).finally(() => { BG_RUN = false; bgNext(); });
+  pr.catch(() => {}).finally(() => { L.run = false; bgNext(lane); });
 }
 async function expandClick(turn) {
   Player.stop();
@@ -899,8 +902,8 @@ function prefetchExtracts(btns) {
   for (const b of btns) { const k = b.dataset.doc + "#" + b.dataset.page; if (!b.dataset.doc || seen.has(k)) continue; seen.add(k); pick.push(b); if (pick.length >= 2) break; }
   if (!pick.length) return;
   const question = LAST_Q;
-  // one at a time with the other background requests, never while a question is being answered (same free model)
-  for (const b of pick) bgPush(() => getExtract(b.dataset.doc, +b.dataset.page, b.dataset.q || "", question));
+  // one at a time in the extract lane, never while a question is being answered (same free model)
+  for (const b of pick) bgPush(() => getExtract(b.dataset.doc, +b.dataset.page, b.dataset.q || "", question), false, "e");
 }
 async function openCitation(doc, page, q) {
   Player.stop(); page = +page;

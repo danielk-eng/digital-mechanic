@@ -12,7 +12,7 @@ JS = Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static/app.
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 def test_prefetch_two_distinct_pages_and_reuse_on_open():
     src = JS.read_text(encoding="utf-8")
-    fn = src[src.index("const BGQ = []"):src.index("async function expandClick")] + src[src.index("const EXTRACTS = new Map()"):src.index("async function openCitation")]
+    fn = src[src.index("const BG = {"):src.index("async function expandClick")] + src[src.index("const EXTRACTS = new Map()"):src.index("async function openCitation")]
     prog = """
 let LAST_Q = "почему стучит", BUSY = false; const VOICE = {on: false}; const calls = [];
 function api(path, o) { calls.push(o.json); return o.json.page === 99 ? Promise.reject(new Error("x")) : Promise.resolve({ok: true, text: "t" + o.json.page}); }
@@ -71,8 +71,8 @@ chatStream({}, () => {}).then(() => process.stdout.write("NO"), e => process.std
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 def test_expand_prefetch_goes_first_one_background_call_at_a_time():
-    """«Подробнее» prefetch + 2 extracts: one request at a time (free model slows with parallel calls), the expand first,
-    nothing while a question is being answered; a tap while the expand is still queued asks the usual way."""
+    """«Подробнее» prefetch + 2 extracts: one request per lane (free model slows with parallel calls), nothing while a question
+    is being answered; a tap while the expand is still queued asks the usual way."""
     src = JS.read_text(encoding="utf-8")
     fn = src[src.index("const EXPANDS = new Map()"):src.index("async function eventTurn")] + src[src.index("const EXTRACTS = new Map()"):src.index("async function openCitation")]
     prog = """
@@ -91,12 +91,12 @@ realST(() => {
   if (calls.length) throw new Error("started while busy " + calls);
   BUSY = false;
   realST(() => {
-    if (calls.join() !== "expand") throw new Error("expand first, alone: " + calls);
-    pend.shift()();
+    if ([...calls].sort().join() !== "expand,p52") throw new Error("one expand + one extract, nothing more: " + calls);
+    pend.shift()(); pend.shift()();
     realST(() => {
-      if (calls.join() !== "expand,p52") throw new Error("then extracts one by one: " + calls);
+      if ([...calls].sort().join() !== "expand,p52,p53") throw new Error("then the next extract: " + calls);
       const t2 = {text: "other [S1]", sources: turn.sources}; BUSY = true; prefetchExpand(t2); BUSY = false;
-      // the queued expand of t2 is not started yet (p52 in flight): a tap asks the usual way and drops it from the queue
+      BG.x.run = true;  // the expand lane is busy: t2's expand stays queued; a tap asks the usual way and drops it from the queue
       expandClick(t2).then(() => { if (asked.join() !== "expand") throw new Error("queued tap " + asked); process.stdout.write("OK"); });
     }, 20);
   }, 3000);
