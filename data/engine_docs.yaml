@@ -19,6 +19,7 @@ documents:
     kind: operation
     filename: yamz_536_re.pdf
     engines: ["ЯМЗ-536"]
+    grid_tables: [45]  # pages with spec/dimension tables in 3+ columns, rebuilt row by row (reflow_grid; checked by eye 26.11)
   YAMZ536-RK:
     title: "536.01.02 РК"
     full_title: "ЯМЗ-536 и модификации. Руководство по ремонту 536.01.02 РК (2013)"
@@ -31,9 +32,11 @@ documents:
     kind: repair
     filename: zmz_5234_rk.pdf
     engines: ["ЗМЗ-5234.10"]
+    grid_tables: [144, 148, 151, 152, 153, 154, 155, 156]  # pages with spec/dimension tables in 3+ columns, rebuilt row by row (reflow_grid; checked by eye 26.11)
   ZMZ409-RK:
     title: "Руководство по эксплуатации, техническому обслуживанию и ремонту"
     full_title: "Двигатели ЗМЗ-40904.10 и ЗМЗ-40905.10. Руководство по эксплуатации, техническому обслуживанию и ремонту, издание десятое (2025)"
     kind: operation_repair
     filename: zmz_409_rk.pdf
     engines: ["ЗМЗ-40904.10", "ЗМЗ-40905.10"]
+    grid_tables: [123, 124, 128, 213, 214]  # pages with spec/dimension tables in 3+ columns, rebuilt row by row (reflow_grid; checked by eye 26.11)

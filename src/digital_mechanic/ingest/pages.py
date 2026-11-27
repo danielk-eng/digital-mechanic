@@ -538,6 +538,87 @@ def reflow_numbered_index(page_xml: str) -> str | None:
     return "\n".join(x for x in out if x.strip())
 
 
+def _xml_lines(page_xml: str) -> list[list]:
+    out = []
+    for m in re.finditer(r'<line xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">(.*?)</line>', page_xml, re.S):
+        t = " ".join(html.unescape(w) for w in re.findall(r"<word[^>]*>(.*?)</word>", m.group(5))).strip()
+        if t:
+            out.append([float(m.group(1)), float(m.group(2)), float(m.group(3)), float(m.group(4)), t])
+    return out
+
+
+def _short_line_share(plain: str) -> float:
+    ls = [l for l in plain.split("\n") if l.strip()]
+    return sum(len(l.strip()) < 22 for l in ls) / len(ls) if len(ls) >= 15 else 0.0
+
+
+def _col_segments(items: list[list]) -> list[str]:
+    """Lines of one table row (or the header) grouped per column, left to right: lines whose x-ranges overlap are one
+    cell (wrapped and centred header lines «Предельно-допу- / стимый / размер, мм»), read top to bottom."""
+    cols: list[list] = []  # [x0, x1, lines]
+    for v in sorted(items, key=lambda b: b[0]):
+        for c in cols:
+            if v[0] < c[1] - 2 and v[2] > c[0] + 2:
+                c[0], c[1] = min(c[0], v[0]), max(c[1], v[2])
+                c[2].append(v)
+                break
+        else:
+            cols.append([v[0], v[2], [v]])
+    cols.sort(key=lambda c: c[0])
+    return [_join_cell([v[4] for v in sorted(c[2], key=lambda b: b[1])]) for c in cols]
+
+
+def reflow_grid(page_xml: str) -> str | None:
+    """Dimension/spec tables in 3+ columns (ЗМЗ-409 РК p. 124, ЗМЗ-5234 РК p. 151–156): pdftotext gives them
+    column by column (all names, then all sizes). Rows are rebuilt from the first column: a cell starts with a capital
+    or digit, a lowercase line just under it continues it; every other line belongs to the row whose first cell starts
+    above its middle. Output «name — value | value | …», header columns first. None when it does not look like such a table."""
+    L = _xml_lines(page_xml)
+    if len(L) < 15:
+        return None
+    ys = sorted(l[1] for l in L)
+    L = [l for l in L if not (re.fullmatch(r"\d{1,3}", l[4]) and (l[1] >= ys[-1] - 1 or l[1] <= ys[0] + 1))]  # page number
+    x0 = min(l[0] for l in L)
+    left = sorted((l for l in L if l[0] < x0 + 20), key=lambda l: l[1])
+    cells: list[list] = []
+    sub = False  # under «Диаметр шеек …:» every lowercase line («передней», «задней») is its own sub-row
+    for l in left:
+        cont = bool(cells) and (l[4][:1].islower() or l[4][:1] in "(–-") and l[1] - cells[-1][3] < 6
+        if cont and not sub and not cells[-1][4][-1].endswith(":"):
+            cells[-1][3] = l[3]
+            cells[-1][4].append(l[4])
+        else:
+            if cells and cells[-1][4][-1].endswith(":"):
+                sub = True
+            elif not l[4][:1].islower():
+                sub = False
+            cells.append([l[0], l[1], l[2], l[3], [l[4]]])
+    if len(cells) < 3:
+        return None
+    rows: list[list] = [[c, []] for c in cells]
+    head: list[list] = []
+    left_ids = {id(l) for l in left}
+    for l in L:
+        if id(l) in left_ids:
+            continue
+        yc = (l[1] + l[3]) / 2
+        ks = [i for i, c in enumerate(cells) if c[1] - 3 <= yc]
+        (rows[ks[-1]][1] if ks else head).append(l)
+    out = [" | ".join(_col_segments(head))] if head else []
+    filled = wide = numeric = 0
+    for c, vals in rows:
+        segs = _col_segments(vals)
+        filled += bool(segs)
+        wide += len(segs) > 16
+        name = _join_cell(c[4])
+        numeric += bool(re.fullmatch(r"[\d\s]+", name) or name.startswith("("))
+        out.append(name + (" — " + " | ".join(segs) if segs else ""))
+    # a real table: most rows have values, rows are not a whole page of cells, names are words (not figure callouts)
+    if filled < 3 or filled < 0.6 * len(rows) or wide or numeric > 0.2 * len(rows):
+        return None
+    return "\n".join(out)
+
+
 def _extract_bbox_pages(pdf: Path) -> list[str]:
     out = subprocess.run(["pdftotext", "-enc", "UTF-8", "-bbox-layout", str(pdf), "-"], capture_output=True, check=True).stdout.decode("utf-8", "replace")
     return re.findall(r"<page [^>]*>(.*?)</page>", out, re.S)
@@ -592,7 +673,7 @@ def _continue_heading(tab: str, prev_head: str | None) -> str:
     return "\n".join(lines[:i + 1] + [f"{prev_head} (продолжение)"] + lines[i + 1:])
 
 
-def extract_pdf(pdf: Path) -> list[str]:
+def extract_pdf(pdf: Path, grid_pages: frozenset[int] = frozenset()) -> list[str]:
     if shutil.which("pdftotext"):
         pages = _extract_pdftotext(pdf)
         try:
@@ -607,6 +688,8 @@ def extract_pdf(pdf: Path) -> list[str]:
                 if tab and was_table:
                     tab = _continue_heading(tab, head)
                 dm = None if tab else (reflow_defect_map(b) or reflow_defect_map_pos(b) or reflow_numbered_index(b))
+                if len(out) + 1 in grid_pages and not tab and not dm and _short_line_share(t) >= 0.75:
+                    dm = reflow_grid(b)
                 out.append(_pick(t, tab) if tab else _pick(t, dm) if dm else _pick(t, reflow_side_captions(b)))
                 head = _last_heading(tab) if tab and out[-1] == tab else None
             pages = out
@@ -620,7 +703,7 @@ def build_index(manuals_dir: str | Path, engine_docs_path: str | Path, out_path:
     with gzip.open(out_path, "wt", encoding="utf-8") as f:
         for doc_id, meta in cfg["documents"].items():
             pdf = Path(manuals_dir) / meta["filename"]
-            for i, text in enumerate(extract_pdf(pdf), start=1):
+            for i, text in enumerate(extract_pdf(pdf, frozenset(meta.get("grid_tables") or ())), start=1):
                 text = text.strip()
                 rec = ManualPage(meta["title"], doc_id, tuple(meta["engines"]), i, text, len(text) < MIN_TEXT_CHARS, meta["filename"], meta.get("kind", ""))
                 f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
