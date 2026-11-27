@@ -41,6 +41,7 @@ python scripts/fetch_manuals.py                        # PDF руководст�
 ```bash
 docker compose up -d --build  # официальные заглушки ML (8001) и ТОиР (8002) + приложение
 # открыть http://localhost:8000   (главный механик: http://localhost:8000/manager)
+# / выбирает mobile/desktop shell по ширине; принудительно: /m и /desktop
 ```
 ### Без Docker (Python 3.11+, Linux/macOS)
 ```bash

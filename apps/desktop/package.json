@@ -1,7 +1,7 @@
 {
   "name": "digital-mechanic",
   "productName": "Цифровой механик",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "Desktop wrapper for Цифровой механик",
   "main": "main.js",

@@ -143,6 +143,9 @@ def copy_native() -> None:
 def patch_gradle() -> None:
     path = ANDROID / "app" / "build.gradle"
     text = read(path)
+    original = text
+    text = re.sub(r"versionCode \d+", "versionCode 2", text)
+    text = re.sub(r'versionName "[^"]+"', 'versionName "1.1.0"', text)
     marker = "// MECHANIC_SIGNING"
     if marker not in text:
         text += """
@@ -163,6 +166,7 @@ if (ksFile != null && file(ksFile).exists() && ksPassFile != null && file(ksPass
     android.buildTypes.debug.signingConfig = android.signingConfigs.releaseReady
 }
 """
+    if text != original:
         write(path, text)
     # local.properties
     sdk = os.environ.get("ANDROID_SDK_ROOT") or os.environ.get("ANDROID_HOME") or "/workspace/android-sdk"

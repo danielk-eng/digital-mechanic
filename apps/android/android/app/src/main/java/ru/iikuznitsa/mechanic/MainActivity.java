@@ -28,7 +28,7 @@ import com.getcapacitor.BridgeWebViewClient;
 public class MainActivity extends BridgeActivity {
   public static final String PREFS = "mechanic";
   public static final String KEY_URL = "server_url";
-  public static final String DEFAULT_URL = "https://digital-mechanic-iikuznitsa.vercel.app";
+  public static final String DEFAULT_URL = "https://digital-mechanic-iikuznitsa.vercel.app/m";
   public static final String ACTION_EDIT_SERVER = "ru.iikuznitsa.mechanic.EDIT_SERVER";
   private static final int REQ_MEDIA = 42;
   private static final String OFFLINE = "file:///android_asset/public/index.html?offline=1";

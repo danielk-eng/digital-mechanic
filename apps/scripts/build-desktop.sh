@@ -16,10 +16,11 @@ else
 fi
 OUT="${1:-/workspace/iikuznitsa/apps-out}"
 mkdir -p "$OUT"
-# copy artifacts, skip blockmaps and yaml
-find artifacts -maxdepth 2 -type f \( -name '*.AppImage' -o -name '*.exe' -o -name '*.zip' \) -print -exec cp -f {} "$OUT/" \;
+# copy release artifacts only; win-unpacked/linux-unpacked contain loose executables, not distributables
+find artifacts -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.exe' -o -name '*.zip' \) -print -exec cp -f {} "$OUT/" \;
 # if unpacked dir exists, zip it ourselves with a stable name if builder zip is missing
-if [ ! -e "$OUT"/DigitalMechanic-win*.zip ] && [ -d artifacts/win-unpacked ]; then
-  (cd artifacts && zip -r -q "$OUT/DigitalMechanic-win-unpacked-1.0.0.zip" win-unpacked)
+VERSION=$(node -e 'console.log(require(process.argv[1]).version)' "$ROOT/desktop/package.json")
+if [ ! -e "$OUT/DigitalMechanic-win-${VERSION}.zip" ] && [ -d artifacts/win-unpacked ]; then
+  (cd artifacts && zip -r -q "$OUT/DigitalMechanic-win-unpacked-${VERSION}.zip" win-unpacked)
 fi
 echo "Desktop artifacts copied to $OUT"

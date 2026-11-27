@@ -2,7 +2,7 @@ const { app, BrowserWindow, Menu, dialog, shell, ipcMain } = require("electron")
 const path = require("path");
 const fs = require("fs");
 
-const DEFAULT_URL = "https://digital-mechanic-iikuznitsa.vercel.app";
+const DEFAULT_URL = "https://digital-mechanic-iikuznitsa.vercel.app/desktop";
 
 function normalize(raw) {
   let u = String(raw || "").trim();
