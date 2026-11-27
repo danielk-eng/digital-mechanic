@@ -77,3 +77,64 @@ def test_nvidia_tts_multipart_and_language(monkeypatch):
     assert sent["language"] == "ru-RU"
     assert sent["voice"] == "Chatterbox-Multilingual.ru-RU.Male"
     assert "ru" in voice.server_tts_langs(s) and voice.tts_configured(s)
+
+
+def test_cloudru_realtime_tts_wraps_pcm(monkeypatch):
+    import base64
+    import json
+    import sys
+    from types import SimpleNamespace as NS
+
+    sent = {}
+    pcm = b"\x01\x00" * 240
+
+    class WS:
+        def __init__(self):
+            self.messages = iter([
+                json.dumps({"type": "response.audio.delta", "delta": base64.b64encode(pcm).decode()}),
+                json.dumps({"type": "response.done"}),
+            ])
+        def send(self, payload):
+            sent["payload"] = json.loads(payload)
+        def settimeout(self, timeout):
+            sent["timeout"] = timeout
+        def recv(self):
+            return next(self.messages)
+        def close(self):
+            sent["closed"] = True
+
+    def create_connection(url, header, timeout, suppress_origin):
+        sent["url"] = url; sent["header"] = header; sent["open_timeout"] = timeout
+        assert suppress_origin is True
+        return WS()
+
+    fake = NS(create_connection=create_connection, WebSocketTimeoutException=TimeoutError)
+    monkeypatch.setitem(sys.modules, "websocket", fake)
+    s = SimpleNamespace(cloudru_api_key="key", cloudru_tts=True, cloudru_base_url="https://foundation-models.api.cloud.ru/v1",
+                        cloudru_tts_model="GigaChat/SaluteSpeech",
+                        cloudru_tts_voice="Bab-Freespeech", cloudru_tts_timeout_s=2)
+    wav = voice.cloudru_tts("Проверка связи.", "ru", s)
+    assert wav.startswith(b"RIFF")
+    with wave.open(io.BytesIO(wav)) as w:
+        assert w.getframerate() == 24000 and w.readframes(w.getnframes()) == pcm
+    assert "realtime?model=GigaChat%2FSaluteSpeech" in sent["url"]
+    assert sent["header"] == ["Authorization: Bearer key"]
+    assert sent["payload"]["response"]["audio"]["output"]["voice"] == "Bab-Freespeech"
+    assert sent["closed"] is True
+
+
+def test_cloudru_failure_falls_back_to_nvidia(monkeypatch):
+    def no_cloudru(text, lang, s):
+        raise voice.SttUnavailable("cloudru down")
+    monkeypatch.setattr(voice, "cloudru_tts", no_cloudru)
+    monkeypatch.setattr(voice, "nvidia_tts", lambda text, lang, s: _wav())
+    s = SimpleNamespace(cloudru_api_key="key", cloudru_tts=True, nvidia_api_key="nv", nvidia_tts_enabled=True,
+                        speech_url="", silero_enabled=False)
+    assert voice.tts_synthesize("Проверка связи.", "ru", s).startswith(b"RIFF")
+
+
+def test_voice_mode_has_visible_microphone_scale():
+    html = open("src/digital_mechanic/web/static/index.html", encoding="utf-8").read()
+    js = open("src/digital_mechanic/web/static/app.js", encoding="utf-8").read()
+    css = open("src/digital_mechanic/web/static/app.css", encoding="utf-8").read()
+    assert 'id="vWave"' in html and "drawVoiceWave" in js and ".vwave" in css

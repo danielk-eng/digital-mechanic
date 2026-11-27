@@ -1,6 +1,6 @@
 """Speech. STT order: local speech service (faster-whisper large-v3-turbo, audio stays on the stand) ->
 Deepgram nova-3 (cloud, ru/hi/vi, mip_opt_out) -> in-process faster-whisper -> browser Web Speech (client side).
-TTS: NVIDIA hosted multilingual voices where supported -> local speech service (Silero, ru) -> in-process Silero -> browser speech (client side).
+TTS: Cloud.ru SaluteSpeech (ru) -> NVIDIA hosted multilingual voices where supported -> local Silero/browser speech.
 
 Audio is not stored; only the masked transcript goes to the agent. Voice control in the UI also
 works in the browser (Web Speech API) when the server has no STT configured.
@@ -10,11 +10,14 @@ from __future__ import annotations
 
 from . import ru_tts
 
+import base64
 import io
+import json
 import re
 import tempfile
 import threading
 import time
+from urllib.parse import quote
 
 import httpx
 
@@ -302,6 +305,91 @@ def _wav_join(parts: list[bytes]) -> bytes:
     return buf.getvalue()
 
 
+# Cloud.ru Realtime TTS (`GigaChat/SaluteSpeech`) is the primary Russian server voice: newer, more natural
+# LLM-based SaluteSpeech voices than the local Silero fallback. The websocket returns raw PCM16 and/or base64 PCM deltas.
+def _pcm16_wav(pcm: bytes, sample_rate: int = 24000) -> bytes:
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sample_rate); w.writeframes(pcm)
+    return buf.getvalue()
+
+
+def _cloudru_realtime_chunk(text: str, s: Settings) -> bytes:
+    import websocket
+
+    key = s.cloudru_api_key
+    base = s.cloudru_base_url.rstrip('/').replace('https://', 'wss://').replace('http://', 'ws://')
+    model = getattr(s, "cloudru_tts_model", "GigaChat/SaluteSpeech")
+    url = f"{base}/realtime?model={quote(model, safe='')}"
+    sample_rate = 24000
+    payload = {
+        "type": "response.create",
+        "model": model,
+        "response": {
+            "output_modalities": ["audio"],
+            "audio": {"output": {"format": {"type": "audio/pcm", "rate": sample_rate},
+                                 "voice": getattr(s, "cloudru_tts_voice", "Bab-Freespeech"), "speed": 1.0}},
+            "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]}],
+        },
+    }
+    chunks: list[bytes] = []
+    err = ""
+    ws = None
+    try:
+        ws = websocket.create_connection(url, header=[f"Authorization: Bearer {key}"], timeout=10, suppress_origin=True)
+        ws.send(json.dumps(payload, ensure_ascii=False))
+        deadline = time.monotonic() + getattr(s, "cloudru_tts_timeout_s", 35.0)
+        done = False
+        while not done and time.monotonic() < deadline:
+            ws.settimeout(max(0.1, deadline - time.monotonic()))
+            try:
+                msg = ws.recv()
+            except websocket.WebSocketTimeoutException:
+                break
+            if isinstance(msg, bytes):
+                chunks.append(msg)
+                continue
+            try:
+                data = json.loads(msg)
+            except (TypeError, ValueError):
+                continue
+            typ = data.get("type", "")
+            if typ in ("response.audio.delta", "response.output_audio.delta", "audio.delta"):
+                b64 = data.get("delta") or data.get("audio")
+                if b64:
+                    chunks.append(base64.b64decode(b64))
+            elif typ == "error":
+                err = str((data.get("error") or {}).get("message") or "cloudru realtime error")[:160]
+                break
+            elif typ in ("response.audio.done", "response.output_audio.done", "response.done"):
+                done = True
+    except Exception as e:  # websocket/connectivity errors must fall back to NVIDIA/Silero/browser
+        raise SttUnavailable(f"cloudru tts {type(e).__name__}") from None
+    finally:
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+    if not chunks:
+        raise SttUnavailable(err or "cloudru tts empty")
+    raw = b"".join(chunks)
+    return raw if raw.startswith(b"RIFF") else _pcm16_wav(raw, sample_rate)
+
+
+def cloudru_tts(text: str, lang: str, s: Settings) -> bytes:
+    """Primary Russian server voice: Cloud.ru `GigaChat/SaluteSpeech` over the Realtime websocket."""
+    if lang != "ru" or not s.cloudru_api_key or not getattr(s, "cloudru_tts", True):
+        raise SttUnavailable("no cloudru tts")
+    chunks = tts_chunks(ru_tts.prepare(text), limit=900)  # realtime accepts conversational text; keep long answers bounded
+    if not chunks:
+        raise SttUnavailable("nothing to speak")
+    parts = [_cloudru_realtime_chunk(c, s) for c in chunks]
+    return _wav_join(parts) if len(parts) > 1 else parts[0]
+
+
 # Hosted NVIDIA Build speech endpoints. Chatterbox is the only NVIDIA-hosted multilingual model with Russian;
 # Magpie covers Vietnamese (and other languages), but not Russian. A missing voice parameter means the endpoint default.
 NVIDIA_TTS_PROFILES = {
@@ -358,6 +446,8 @@ def nvidia_tts(text: str, lang: str, s: Settings) -> bytes:
 
 def server_tts_langs(s: Settings) -> list[str]:
     out = set()
+    if getattr(s, "cloudru_api_key", "") and getattr(s, "cloudru_tts", True):
+        out.add("ru")
     if _nvidia_key(s) and getattr(s, "nvidia_tts_enabled", True):
         out.update(NVIDIA_TTS_PROFILES)
     if getattr(s, "speech_url", "") or getattr(s, "silero_enabled", False):
@@ -370,9 +460,14 @@ def tts_configured(s: Settings) -> bool:
 
 
 def tts_synthesize(text: str, lang: str, s: Settings) -> bytes:
-    """Server voice for the answer language: NVIDIA where it supports the language, Silero as the Russian fallback."""
+    """Server voice for the answer language: Cloud.ru for Russian, NVIDIA where supported, Silero/browser as fallback."""
     lang = (lang or "ru").lower().split("-")[0]
     errors = []
+    if lang == "ru" and getattr(s, "cloudru_api_key", "") and getattr(s, "cloudru_tts", True):
+        try:
+            return cloudru_tts(text, lang, s)
+        except SttUnavailable as e:
+            errors.append(str(e))
     if lang in NVIDIA_TTS_PROFILES and _nvidia_key(s) and getattr(s, "nvidia_tts_enabled", True):
         try:
             return nvidia_tts(text, lang, s)

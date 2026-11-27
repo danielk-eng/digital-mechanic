@@ -70,6 +70,10 @@ class Settings(BaseSettings):
     llm_quality_model: str = "local-llm"
     llm_quality_steps: str = "expand,session_summary"
     cloudru_stt: bool = True  # STT on Cloud.ru: GigaASR (ru), whisper-large-v3 (other languages)
+    cloudru_tts: bool = True  # TTS on Cloud.ru Realtime: GigaChat/SaluteSpeech, primary Russian server voice
+    cloudru_tts_model: str = "GigaChat/SaluteSpeech"
+    cloudru_tts_voice: str = "Bab-Freespeech"
+    cloudru_tts_timeout_s: float = 35.0
 
     # NVIDIA Build hosted endpoints: batch translation + multilingual TTS. The key is env-only and never logged.
     nvidia_api_key: str = ""

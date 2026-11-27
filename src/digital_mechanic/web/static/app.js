@@ -1069,7 +1069,7 @@ async function printTurn(turn) {
 }
 
 // ---------------------------------------------------------------- voice dialog mode: listen → VAD → STT → answer → speak → listen again; barge-in stops speech
-const VOICE = {on: false, browser: false, srSeq: 0, state: "idle", stream: null, ctx: null, an: null, rec: null, chunks: [], raf: 0, heard: false, quietMs: 0, speechMs: 0, t0: 0, last: 0, floor: 4};
+const VOICE = {on: false, browser: false, srSeq: 0, state: "idle", stream: null, ctx: null, an: null, rec: null, chunks: [], raf: 0, heard: false, quietMs: 0, speechMs: 0, t0: 0, last: 0, floor: 4, wave: []};
 const V_ICON = {listening: "mic", transcribing: "loader-circle", thinking: "loader-circle", speaking: "square", idle: "mic"};
 function vSet(state, hint = "") {
   VOICE.state = state;
@@ -1081,7 +1081,7 @@ function vSet(state, hint = "") {
 async function voiceOpen() {
   if (!VID) return toast(t("choose_vehicle"));
   Player.stop();
-  $("#voice").classList.remove("hidden"); $("#vSaid").textContent = ""; $("#vReply").textContent = ""; VOICE.on = true;
+  $("#voice").classList.remove("hidden"); $("#vSaid").textContent = ""; $("#vReply").textContent = ""; VOICE.on = true; VOICE.wave = [];
   VOICE.browser = !SERVER_STT;
   if (VOICE.browser && !WebSTT.available()) { vSet("idle", WebSTT.message(null, t)); return; }
   try {
@@ -1104,6 +1104,24 @@ function vListenBrowser(hint = "") {
     .catch(e => { if (my === VOICE.srSeq && VOICE.on) vSet("idle", WebSTT.message(e, t)); });
 }
 function rms() { const buf = new Uint8Array(VOICE.an.fftSize); VOICE.an.getByteTimeDomainData(buf); let s = 0; for (const v of buf) s += (v - 128) ** 2; return Math.sqrt(s / buf.length); }
+function drawVoiceWave(level) {
+  const cv = $("#vWave"); if (!cv) return;
+  const box = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  if (box.width && Math.abs(cv.width - box.width * dpr) > 2) { cv.width = box.width * dpr; cv.height = box.height * dpr; }
+  const g = cv.getContext("2d"), w = cv.width, h = cv.height; if (!w || !h) return;
+  const active = VOICE.state === "listening" || VOICE.state === "speaking";
+  VOICE.wave.push(active ? level : 0); while (VOICE.wave.length > 56) VOICE.wave.shift();
+  g.clearRect(0, 0, w, h);
+  const css = getComputedStyle(document.documentElement);
+  g.fillStyle = (VOICE.state === "speaking" ? css.getPropertyValue("--ok") : css.getPropertyValue("--accent")).trim() || "#4f8cff";
+  const step = w / 56, bw = Math.max(2 * dpr, step * 0.48), mid = h / 2;
+  for (let i = 0; i < 56; i++) {
+    const v = VOICE.wave[i] || 0, bh = Math.max(2.2 * dpr, Math.pow(v, 0.65) * h * 0.88), x = i * step + (step - bw) / 2;
+    g.globalAlpha = v > 0.03 ? 0.95 : 0.28;
+    g.fillRect(x, mid - bh / 2, bw, bh);
+  }
+  g.globalAlpha = 1;
+}
 // VAD = level above an ADAPTIVE noise floor AND most energy in the voice band (300–3400 Hz).
 // Engine rumble (low) and compressor hiss (high) raise the floor but do not count as speech.
 function voiceBand() {
@@ -1125,7 +1143,7 @@ function isSpeech(r, k = 2.2, min = 7) {
 function meter() {
   if (!VOICE.on) return;
   const now = performance.now(), dt = VOICE.last ? now - VOICE.last : 16; VOICE.last = now;
-  const r = rms(); $("#vOrb").style.setProperty("--lvl", Math.min(1, r / 30).toFixed(2));
+  const r = rms(), lvl = Math.min(1, r / 30); $("#vOrb").style.setProperty("--lvl", lvl.toFixed(2)); drawVoiceWave(lvl);
   if (VOICE.state === "listening" && !VOICE.browser) {  // browser recognition has its own end-of-phrase detection
     if (isSpeech(r)) { VOICE.speechMs += dt; if (VOICE.speechMs > 150) VOICE.heard = true; VOICE.quietMs = 0; } else if (VOICE.heard) VOICE.quietMs += dt;
     const long = now - VOICE.t0;

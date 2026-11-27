@@ -268,6 +268,7 @@ mark{background:var(--mark);color:inherit;border-radius:3px;padding:0 2px}
 .orb[data-state=speaking]{background:var(--ok);color:#fff;box-shadow:0 0 0 calc(var(--lvl,0) * 28px) var(--ok-soft)}
 .orb[data-state=idle]{background:var(--surface-3);color:var(--text-2)}
 .voice .said{font-size:1.05rem;color:var(--text-2);text-align:center;min-height:1.5em;max-width:560px}
+.vwave{width:min(72vw,420px);height:52px;margin-top:-18px;opacity:.95}
 .voice .reply{font-size:1.2rem;line-height:1.45;font-weight:500;text-align:center;max-width:600px;max-height:40vh;overflow:auto}
 .voice .reply.long{text-align:start;font-size:1.1rem;font-weight:400;line-height:1.5;padding:4px 2px;align-self:stretch}
 .voice .reply.draft{opacity:.6;font-weight:400}  /* lines streamed while the answer is written (hands-free) */
