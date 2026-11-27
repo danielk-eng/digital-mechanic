@@ -339,7 +339,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .arrival .r>span{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .veh-card.compact .facts-list,.veh-card.compact .arrival{display:none}
 .veh-card .toggle{margin-top:8px;color:var(--text-2);font-size:.88rem;background:none;border:0;padding:0;min-height:32px;cursor:pointer}
-.tbl td.mono,.tbl .tid{white-space:nowrap}
+.tbl td.mono,.tbl .tid,.tbl b.mono{white-space:nowrap}
+@media (max-width:380px){.tbl b.mono{white-space:normal}}  /* 360–375 px: the ticket number may wrap at «-», the status column stays inside */
 /* page viewer */
 .pageview{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px;margin-bottom:12px;scroll-margin-top:8px}
 .pageview .pv-head{font-size:.82rem;font-weight:600;color:var(--text-2);margin-bottom:12px}
@@ -427,10 +428,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
   .fgrid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
   .fgrid .input,.fdate{min-width:0;width:100%;box-sizing:border-box}
   table.tbl{font-size:.84rem}
-  .tbl th,.tbl td{padding:10px 6px}
-  .tbl .pill{padding-left:8px;padding-right:8px}
-  .tbl th:first-child,.tbl td:first-child{padding-left:12px}
-  .tbl th:last-child,.tbl td:last-child{padding-right:12px}
+  .tbl th,.tbl td{padding:10px 4px}  /* 390 px: «TKT-0011» on one line and the status column still inside the panel */
+  .tbl .pill{padding-left:6px;padding-right:6px}
+  .tbl b.mono,.tbl td.mono{font-size:.9em;letter-spacing:-.02em}
+  .tbl th:first-child,.tbl td:first-child{padding-left:10px}
+  .tbl th:last-child,.tbl td:last-child{padding-right:10px}
   .panel{max-width:100%;overflow-x:auto}
   .kpi{display:flex;flex-direction:column;padding:12px 14px}
   .kpi .l{min-height:2.5em;align-items:flex-start;line-height:1.25}
