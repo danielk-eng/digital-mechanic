@@ -166,3 +166,16 @@ def test_chat_stream_ndjson(client):
     assert lines[0].get("step") and "turn" in lines[-1] and lines[-1]["turn"].get("text")
     bad = client.post("/api/chat/stream", json={"vehicle_id": "NOPE000", "text": "x"})
     assert _j.loads(bad.text.splitlines()[-1]) == {"error": "unknown vehicle", "status": 404}
+
+
+def test_pdf_link_without_pdfs_is_a_printable_section_not_404(client, monkeypatch, tmp_path):
+    """Vercel backup has no manual PDFs: «Открыть PDF» used to 404; now a printable page of the cited section (same text as the app)."""
+    import digital_mechanic.web.app as m
+    monkeypatch.setattr(m.S, "manuals_dir", str(tmp_path / "none"))
+    client.post("/api/login/demo", json={"account": "veteran", "pin": "3001", "consent": True})
+    s = client.get("/api/section/YAMZ236-RK/41").json()
+    assert s["pdf"] is False and s["pdf_text"] is True
+    r = client.get("/manuals/YAMZ236-RK.pdf?page=41")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/html")
+    assert "421-461" in r.text and "Сохранить в PDF" in r.text and "Страница 41" in r.text
+    assert client.get("/manuals/YAMZ236-RK.pdf?page=99999").status_code == 404

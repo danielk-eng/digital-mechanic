@@ -135,6 +135,47 @@ def _same(a: str, b: str) -> bool:
 _ABSENT_RE = re.compile(r"(не|нигде не) (упомина\w*|указ\w*|привод\w*|опис\w*|рассматрива\w*|встреча\w*)|в (этом |данном )?разделе нет|отсутству\w* в разделе|нет (информации|сведений|данных)", re.I)
 
 
+_TABLE_HEAD_RE = re.compile(r"^(?:Вероятн\S* |Возможн\S* )?(?:Причин|Неисправн)[^\n]{0,40} — (?:Способ|Метод)", re.M)
+
+
+def _stems(x: str) -> set[str]:
+    return {w[:6] for w in re.findall(r"[а-яёa-z0-9]{4,}", (x or "").lower().replace("ё", "е"))}
+
+
+def table_row_group(text: str, hint: str) -> tuple[str, list[str], int] | None:
+    """Fault table page («причина — способ устранения», one row per line, symptom headings between): the symptom group
+    that holds the cited row -> (heading, rows, index of the cited row). None if the page is no such table or nothing matches.
+    The extract used to retell the neighbouring row of another symptom (p. 53: «пониженное давление масла» for the valve-clearance row)."""
+    if not text or not _TABLE_HEAD_RE.search(text):
+        return None
+    hs = _stems(hint)
+    if len(hs) < 2:
+        return None
+    groups: list[tuple[str, list[str]]] = [("", [])]
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line or _TABLE_HEAD_RE.match(line) or re.fullmatch(r"\d{1,4}", line) or line.startswith("*"):
+            continue
+        if " — " in line:
+            groups[-1][1].append(line)
+        elif groups[-1][1] or not groups[-1][0]:
+            groups.append((line, []))
+        else:  # heading wrapped onto a second line
+            groups[-1] = (groups[-1][0] + " " + line, [])
+    best, where = 0.0, None
+    for gi, (head, rows) in enumerate(groups):
+        cands = [(-1, head)] + list(enumerate(rows))  # -1: the hint names the symptom heading itself (nothing in bold)
+        for ri, r in cands:
+            sc = len(hs & _stems(r)) / len(hs) if r else 0.0
+            if sc > best + 1e-9:
+                best, where = sc, (gi, ri)
+    if not where or best < 0.5 or not groups[where[0]][1]:
+        return None
+    head, rows = groups[where[0]]
+    hit = where[1]
+    return head.rstrip("*").strip(), rows, hit
+
+
 def _drop_absence_claims(text: str) -> str:
     """The extract must not say what the section lacks («код F08 не упоминается»): drop such sentences, keep the rest
     (a bullet list keeps its lines)."""
@@ -203,6 +244,17 @@ class Agent:
         if not sec:
             return {"text": "", "ok": False}
         body = sec.text[:9000]
+        pg = self.index.get_page(doc_id, page) if hasattr(self.index, "get_page") else None
+        grp = table_row_group(getattr(pg, "text", "") or "", hint)
+        if grp:  # fault table: only the cited row's symptom group, never the neighbouring symptom
+            head, rows, i = grp
+            if lang.startswith("русск"):
+                lines = [f"**{head}** (стр. {page}):" if head else f"Таблица неисправностей, стр. {page}:"]
+                lines += [("- **" + r.replace(" — ", "** — ", 1)) if k == i else "- " + r for k, r in enumerate(rows)]
+                out = {"text": "\n".join(lines), "ok": True, "dropped_numbers": [], "table_row": True}
+                self._extracts[key] = out
+                return out
+            body = (head + "\n" if head else "") + "\n".join(rows)
         try:
             msg, _ = self.llm.chat("section_extract", [
                 {"role": "system", "content": "Ты помогаешь механику. Перескажи раздел руководства коротко (2–4 предложения или 3–5 пунктов) "

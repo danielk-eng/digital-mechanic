@@ -1129,10 +1129,11 @@ def section_json(doc_id: str, page: int, q: str = "", uid: str | None = Cookie(N
     sec = AGENT.sections.find(doc_id, page, q)
     meta = AGENT.docs.get(doc_id, {})
     pdf = not extra and (Path(S.manuals_dir) / meta.get("filename", "_")).exists()
+    pdf_text = not pdf  # backup stand: /manuals/<doc>.pdf?page=N is a printable text page of the section (no PDF published there)
     imgs = bool((pdf and shutil.which("pdftoppm")) or (extra and p.image and (Path(S.extra_images_dir) / p.image).exists()))
     d = sec.as_dict() if sec else {"pages": [{"page": page, "text": p.text}], "start_page": page, "end_page": page, "span": str(page), "title": "", "label": ""}
     d["pages"] = [{**x, "text": view_text(x.get("text", ""))} for x in d.get("pages", [])]
-    return {"document": p.document, "full_title": meta.get("full_title", p.document), "extra": extra, "pdf": pdf, "has_image": imgs, **d}
+    return {"document": p.document, "full_title": meta.get("full_title", p.document), "extra": extra, "pdf": pdf, "pdf_text": pdf_text, "has_image": imgs, **d}
 
 
 class ExtractIn(BaseModel):
@@ -1168,15 +1169,67 @@ def page_png(doc_id: str, page: int, uid: str | None = Cookie(None)):
     return FileResponse(out, media_type="image/png")
 
 
+PRINT_HTML = """<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{title}}</title><link rel="stylesheet" href="/static/app.css"><style>
+body{overflow:auto}main{max-width:760px;margin:0 auto;padding:20px 16px 48px}h1{font-size:1.25rem;margin:0 0 4px}.src{color:var(--muted);margin:0 0 12px}
+.note{background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:10px 12px;font-size:.9rem;margin:0 0 16px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 16px}.bar a,.bar button{min-height:44px;padding:0 16px;border-radius:12px;border:1px solid var(--border);
+background:var(--surface-2);color:var(--text);font:inherit;display:inline-flex;align-items:center;text-decoration:none;cursor:pointer}.bar .pr{background:var(--accent);color:#fff;border:0}
+h2{font-size:1rem;margin:20px 0 6px;color:var(--muted)}h2.on{color:var(--text)}pre{white-space:pre-wrap;word-break:break-word;font:inherit;line-height:1.5;margin:0}
+h3{font-size:.95rem;margin:14px 0 4px}.tr{margin:0 0 8px;padding-left:10px;border-left:3px solid var(--border);line-height:1.45}
+@media print{.bar,.note{display:none}body{background:#fff;color:#000}h2{color:#000}main{max-width:none;padding:0}}</style></head>
+<body><main>{{body}}</main><script src="/static/print.js"></script></body></html>"""
+
+
+def _reflow(t: str) -> str:
+    """PDF text layer has hard line breaks: join a line with the next when the sentence clearly continues (same rule as app.js)."""
+    t = re.sub(r"([а-яё])-\n(?=[а-яё])", r"\1", t)
+    return re.sub(r"([^\n.:;!?])\n(?=[a-zа-яё(«])", r"\1 ", t)
+
+
+def _print_body(t: str) -> str:
+    """Fault tables row by row (cause in bold — remedy, symptom headings), other pages as reflowed text."""
+    from ..agent.core import _TABLE_HEAD_RE
+    if not _TABLE_HEAD_RE.search(t):
+        return f"<pre>{html.escape(_reflow(t))}</pre>"
+    out = []
+    for line in t.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if " — " in line:
+            a, b = line.split(" — ", 1)
+            out.append(f"<p class='tr'><b>{html.escape(a)}</b> — {html.escape(b)}</p>")
+        else:
+            out.append(f"<h3>{html.escape(line)}</h3>")
+    return "".join(out)
+
+
 @app.get("/manuals/{doc_id}.pdf")
-def manual_pdf(doc_id: str, uid: str | None = Cookie(None)):
+def manual_pdf(doc_id: str, page: int = 0, uid: str | None = Cookie(None)):
     user_of(uid)
     meta = AGENT.docs.get(doc_id)
-    if not meta or not (Path(S.manuals_dir) / meta["filename"]).exists():
-        raise HTTPException(404)
-    # inline: open in the browser's viewer, never as a download (mobile used to offer «Скачать»)
-    return FileResponse(Path(S.manuals_dir) / meta["filename"], media_type="application/pdf", filename=f"{doc_id}.pdf",
-                        content_disposition_type="inline", headers={"Cache-Control": "private, max-age=3600"})
+    if meta and (Path(S.manuals_dir) / meta["filename"]).exists():
+        # inline: open in the browser's viewer, never as a download (mobile used to offer «Скачать»)
+        return FileResponse(Path(S.manuals_dir) / meta["filename"], media_type="application/pdf", filename=f"{doc_id}.pdf",
+                            content_disposition_type="inline", headers={"Cache-Control": "private, max-age=3600"})
+    # backup stand (Vercel): the manual PDFs are not published there (no redistribution right), only the indexed page text
+    # the app already shows -> a printable page of the cited section («Сохранить в PDF» = the browser's print dialog), never a bare 404
+    try:
+        p, extra = _page(doc_id, page)
+    except HTTPException:
+        return HTMLResponse(PRINT_HTML.replace("{{title}}", "Страница не найдена").replace("{{body}}",
+                            "<h1>Страница не найдена</h1><p class='note'>Такой страницы нет в руководствах этого стенда.</p><div class='bar'><a href='/'>← В приложение</a></div>"), status_code=404)
+    sec = AGENT.sections.find(doc_id, page, "")
+    pages = (sec.as_dict().get("pages") if sec else None) or [{"page": page, "text": p.text}]
+    title = (meta or {}).get("full_title", p.document)
+    e = html.escape
+    body = (f"<h1>{e(title)}</h1><p class='src'>с. {e(str(pages[0]['page']))}" + (f"–{e(str(pages[-1]['page']))}" if len(pages) > 1 else "") + "</p>"
+            "<div class='bar'><button class='pr' id='pr'>Сохранить в PDF / печать</button><a href='/'>← В приложение</a></div>"
+            "<p class='note'>Оригинальный PDF открывается на основном стенде. Здесь — текст этих страниц из руководства (тот же, что в приложении); "
+            "кнопка выше сохраняет его в PDF.</p>"
+            + "".join(f"<h2 id='p{x['page']}' class='{'on' if x['page'] == page else ''}'>Страница {x['page']}</h2>{_print_body(view_text(x.get('text', '')))}" for x in pages))
+    return HTMLResponse(PRINT_HTML.replace("{{title}}", e(f"{title}, с. {page}")).replace("{{body}}", body), headers={"Cache-Control": "private, max-age=600"})
 
 
 # ---------------------------------------------------------------- audit / ops

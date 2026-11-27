@@ -167,7 +167,7 @@ async function pageViewer(doc, page) {
       `<section class="pageview"><div class="pagetext">${pageHtml(p.text)}</div>${p.has_image ? `<img class="pageimg" src="/page/${encodeURIComponent(doc)}/${n}.png" alt="">` : ""}</section>` +
       `<div class="pnav"><button class="btn ghost sm" data-pg="${prev ?? ""}" ${prev == null ? "disabled" : ""}>${icon("chevron-left", 18)}${t("page_short")} ${prev ?? "—"}</button>` +
       `<button class="btn ghost sm" data-pg="${next ?? ""}" ${next == null ? "disabled" : ""}>${t("page_short")} ${next ?? "—"}${icon("chevron-right", 18)}</button></div>` +
-      (s && s.pdf ? `<p class="pdflink"><a target="_blank" rel="noopener" href="/manuals/${encodeURIComponent(doc)}.pdf#page=${n}">${icon("external-link", 14)}${t("open_pdf")}</a></p>` : "") + `</div></div>`;
+      (s && (s.pdf || s.pdf_text) ? `<p class="pdflink"><a target="_blank" rel="noopener" href="/manuals/${encodeURIComponent(doc)}.pdf?page=${n}#page=${n}">${icon("external-link", 14)}${t(s.pdf ? "open_pdf" : "open_pdf_text")}</a></p>` : "") + `</div></div>`;
     v.querySelector("#pvClose").onclick = () => v.remove();
     v.querySelectorAll("[data-pg]").forEach(b => { if (b.dataset.pg) b.onclick = () => show(+b.dataset.pg); });
   };

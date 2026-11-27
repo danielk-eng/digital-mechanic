@@ -63,3 +63,28 @@ def test_ticket_and_handoff_made_on_one_instance_show_on_another(tmp_path):
     assert rb.pull(True)
     assert [t["ticket_id"] for t in b.tickets()] == ["TKT-0001"]
     assert len(b.handoffs()) == 1
+
+
+def test_concurrent_handoffs_from_two_instances_both_survive(tmp_path):
+    """Both instances pulled the same state, then each sent a handoff (same autoincrement id 1) and pushed: none is lost."""
+    cli = fake_blob()
+    a, b, c = Store(tmp_path / "a.db"), Store(tmp_path / "b.db"), Store(tmp_path / "c.db")
+    ra, rb, rc = (Replica(s, token="vercel_blob_rw_STORE1_x") for s in (a, b, c))
+    ra.http = rb.http = rc.http = cli
+    a.x("INSERT INTO companies(id,name,created) VALUES('c1','Автопарк',0)"); assert ra.push()
+    rb.pull(True); ra.pull(True)
+    a.add_handoff("u1", "M333YK47", "chief", "с экземпляра A", "", {})
+    b.add_handoff("u2", "O819CY198", "chief", "с экземпляра B", "", {})
+    b.add_ticket("u2", {"vehicle_id": "O819CY198", "session_id": "S-1", "urgency": "high", "anomaly_type": "fuel"}, "TKT-0002")
+    assert ra.push() and rb.push()
+    rc.pull(True)
+    notes = sorted(h["note"] for h in c.handoffs())
+    assert notes == ["с экземпляра A", "с экземпляра B"]
+    assert len({h["id"] for h in c.handoffs()}) == 2
+    assert [t["ticket_id"] for t in c.tickets()] == ["TKT-0002"]
+    assert c.one("SELECT name FROM companies WHERE id='c1'")
+    # a delete on one instance is not undone by the other's next push
+    ra.pull(True); a.x("DELETE FROM login_tokens"); a.x("INSERT INTO login_tokens(hash,user_id,created,expires) VALUES('h9','u1',0,9e9)"); assert ra.push()
+    rb.pull(True); b.x("DELETE FROM login_tokens WHERE hash='h9'"); assert rb.push()
+    a.x("UPDATE companies SET note='x'"); assert ra.push()
+    rc.pull(True); assert not c.one("SELECT hash FROM login_tokens WHERE hash='h9'")
