@@ -431,6 +431,40 @@ def reflow_defect_map(page_xml: str) -> str | None:
     return "\n".join(x for x in out if x.strip())
 
 
+# ---------------------------------------------------------------- numbered fault index (ЯМЗ-536 РЭ «Раздел | Внешнее проявление неисправности»)
+# pdftotext prints the section numbers as one column and the (multi-line) titles after them. The number is vertically centred
+# on its title, so every title line goes to the nearest number.
+def reflow_numbered_index(page_xml: str) -> str | None:
+    lines = _words(page_xml)
+    hi = next((i for i, ws in enumerate(lines) if {"Раздел", "Внешнее"} <= {w[4] for w in ws}), None)
+    if hi is None:
+        return None
+    x_t = next(w[2] for w in lines[hi] if w[4] == "Раздел") + 1  # titles start right of the «Раздел» header
+    nums, tl = [], []
+    for ws in lines[hi + 1:]:
+        for w in ws:
+            if w[2] < x_t and re.fullmatch(r"\d{1,2}", w[4]):
+                nums.append(((w[1] + w[3]) / 2, w[4]))
+        t = [w for w in ws if w[0] >= x_t]
+        if t:
+            tl.append(((min(w[1] for w in t) + max(w[3] for w in t)) / 2, t))
+    if len(nums) < 5:
+        return None
+    rows = {n: [] for _, n in nums}
+    tail = []
+    for y, t in tl:
+        dy, n = min((abs(y - ny), n) for ny, n in nums)
+        (rows[n] if dy <= 12 else tail).append(_join_words(t))
+    if any(not v for v in rows.values()):
+        return None
+    out = [_join_words(ws) for ws in lines[:hi]]
+    out.append("Раздел — Внешнее проявление неисправности")
+    out += [f"{n}. " + re.sub(r"(?<=[А-ЯЁ])- (?=[А-ЯЁ])", "", _join_cell(rows[n])) for _, n in nums]  # «НОМИ- НАЛЬНОЙ»
+    rest = [_join_words([w for w in ws if not (w[2] < x_t and re.fullmatch(r"\d{1,2}", w[4]))]) for ws in lines[hi + 1:]]
+    out += [r for r in tail + rest if re.fullmatch(r"\d{1,3}", r.strip()) and r not in out][:1]  # page number
+    return "\n".join(x for x in out if x.strip())
+
+
 def _extract_bbox_pages(pdf: Path) -> list[str]:
     out = subprocess.run(["pdftotext", "-enc", "UTF-8", "-bbox-layout", str(pdf), "-"], capture_output=True, check=True).stdout.decode("utf-8", "replace")
     return re.findall(r"<page [^>]*>(.*?)</page>", out, re.S)
@@ -455,7 +489,7 @@ def extract_pdf(pdf: Path) -> list[str]:
             out, g = [], None
             for t, b in zip(pages, boxes):
                 tab, g = reflow_table(b, g)
-                dm = None if tab else reflow_defect_map(b)
+                dm = None if tab else (reflow_defect_map(b) or reflow_numbered_index(b))
                 out.append(_pick(t, tab) if tab else _pick(t, dm) if dm else _pick(t, reflow_side_captions(b)))
             pages = out
         return pages

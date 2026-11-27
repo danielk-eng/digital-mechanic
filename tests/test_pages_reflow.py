@@ -161,3 +161,25 @@ def test_defect_map_rows_keep_sizes_and_conclusion_with_the_defect():
 def test_defect_map_not_detected_on_ordinary_page():
     from digital_mechanic.ingest.pages import reflow_defect_map
     assert reflow_defect_map(_line(100, [(68, 120, "Перед"), (124, 200, "установкой")])) is None
+
+
+def test_numbered_fault_index_titles_join_their_number():
+    """ЯМЗ-536 РЭ fault index «Раздел | Внешнее проявление»: numbers printed apart from the (multi-line) titles."""
+    from digital_mechanic.ingest.pages import reflow_numbered_index
+    page = "".join([
+        _line(125, [(64, 95, "Раздел"), (150, 190, "Внешнее"), (195, 250, "проявление")]),
+        _line(139, [(77, 82, "1"), (100, 150, "ДВИГАТЕЛЬ"), (155, 170, "НЕ"), (175, 230, "ПУСКАЕТСЯ")]),
+        _line(153, [(100, 150, "ДВИГАТЕЛЬ"), (155, 200, "ПУСКАЕТСЯ"), (205, 230, "С"), (235, 270, "ТРУДОМ")]),
+        _line(158, [(77, 82, "2")]),
+        _line(163, [(100, 120, "ИЛИ"), (125, 230, "ОСТАНАВЛИВАЕТСЯ")]),
+        _line(176, [(77, 82, "3"), (100, 140, "АМПЕРМЕТР"), (145, 180, "НОМИ-")]),
+        _line(190, [(77, 82, "4"), (100, 140, "СТУК")]),
+        _line(204, [(77, 82, "5"), (100, 140, "ШУМ")]),
+        _line(529, [(68, 80, "185")]),
+    ])
+    t = reflow_numbered_index(page)
+    assert t is not None
+    assert "1. ДВИГАТЕЛЬ НЕ ПУСКАЕТСЯ" in t
+    assert "2. ДВИГАТЕЛЬ ПУСКАЕТСЯ С ТРУДОМ ИЛИ ОСТАНАВЛИВАЕТСЯ" in t
+    assert t.endswith("185")
+    assert reflow_numbered_index(_line(100, [(68, 120, "Перед"), (124, 200, "установкой")])) is None
