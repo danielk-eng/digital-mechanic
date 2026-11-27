@@ -235,6 +235,20 @@ def table_headings(text: str) -> list[tuple[str, int]]:
     return [(h.rstrip("*").strip(), n) for h, n in out if n]
 
 
+_LEADIN_RE = re.compile(r"^\s*(?:(?:На|Согласно)\s+(?:стр(?:анице|\.)?\s*\d+|(?:этой\s+)?странице|таблице|разделу?|руководству)"
+                        r"(?:\s+(?:руководства|указано|сказано|говорится|приведено|описано))?\s*[,:]?\s*(?:что\s+)?)", re.I)
+
+
+def _drop_leadin(text: str) -> str:
+    """«На стр. 268 указано, что не являются браковочными…» -> «Не являются браковочными…» (the chip already names the page;
+    the prompt forbids the lead-in, the free model sometimes writes it anyway — Vercel 27.11 02:20, desktop)."""
+    m = _LEADIN_RE.match(text or "")
+    if not m or len(text) - m.end() < 20:
+        return text
+    rest = text[m.end():]
+    return rest[:1].upper() + rest[1:]
+
+
 def _drop_absence_claims(text: str) -> str:
     """The extract must not say what the section lacks («код F08 не упоминается»): drop such sentences, keep the rest
     (a bullet list keeps its lines)."""
@@ -353,7 +367,7 @@ class Agent:
         if bad:  # drop sentences carrying numbers not found in the section
             parts = re.split(r"(?<=[.!?])\s+|\n", text)
             text = " ".join(x for x in parts if not any(b in x or b.replace(".", ",") in x for b in bad)).strip()
-        text = _drop_absence_claims(text)
+        text = _drop_leadin(_drop_absence_claims(text))
         out = {"text": text, "ok": bool(text), "dropped_numbers": bad}
         self._extracts[key] = out
         if text:

@@ -52,3 +52,12 @@ def test_llm_extract_survives_restart(make_agent, index):
 def msg_(content):
     from types import SimpleNamespace
     return SimpleNamespace(content=content, tool_calls=None)
+
+
+def test_extract_leadin_dropped():
+    from digital_mechanic.agent.core import _drop_leadin
+    assert _drop_leadin("На стр. 268 указано, что не являются браковочными признаками потение в соединениях.") == "Не являются браковочными признаками потение в соединениях."
+    assert _drop_leadin("Согласно таблице, зазор регулируют на холодном двигателе.") == "Зазор регулируют на холодном двигателе."
+    assert _drop_leadin("На странице: зазор 0,25–0,30 мм на холодном двигателе.") == "Зазор 0,25–0,30 мм на холодном двигателе."
+    t = "Натяжение ремней контролировать регулярно."
+    assert _drop_leadin(t) == t
