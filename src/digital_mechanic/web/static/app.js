@@ -550,11 +550,15 @@ async function chatStream(payload, onLine) {
 // Ticket draft (10–20 s on the free model): the same stream, timed stages say what is going on instead of one «думаю».
 const TICKET_STAGES = [[0, "📖 Подбираю работы по руководству для этой неисправности"], [4, "📝 Составляю черновик заявки с цитатами"], [9, "🔎 Сверяю каждую цитату со страницей"], [15, "⚖️ Считаю приоритет по результату проверки"]];
 const TICKET_ASK = /заявк|дефектовк/i;
+// A typed question / explanation streams too (16–28 s on the free model at night, Vercel): the first verified lines show
+// while the rest is written, the stage says what is going on; past ~30 s it says so honestly (the server stops at 60 s
+// and answers from the manual pages).
+const ASK_STAGES = [[0, "🔎 Ищу ответ в руководстве этого двигателя"], [4, "🧩 Выбираю нужные страницы"], [8, "✍️ Пишу ответ со ссылками на страницы"], [16, "🔢 Сверяю цифры с руководством"], [30, "⏳ Модель сейчас медленная — ещё немного"]];
 async function ask(text, event = null, sources = null) {
   if (BUSY) return null; BUSY = true;
   const ticketIt = !event && TICKET_ASK.test(text || "") && !/подтвер/i.test(text) && !(LAST_DRAFT && LAST_DRAFT.vid === VID);
-  const stages = ticketIt ? TICKET_STAGES : EXPAND_STAGES;
-  const streamIt = (event === "expand" || ticketIt) && window.ReadableStream && window.TextDecoder;
+  const stages = ticketIt ? TICKET_STAGES : event === "expand" ? EXPAND_STAGES : ASK_STAGES;
+  const streamIt = (event === "expand" || ticketIt || (!event && text) || event === "explain_diagnosis") && window.ReadableStream && window.TextDecoder;
   const th = skeleton(streamIt ? trStep(stages[0][1]) : ""), t0 = Date.now();
   let live = false;  // the stream delivered steps/lines: no /api/progress poll
   const showDraft = draft => {
@@ -569,7 +573,7 @@ async function ask(text, event = null, sources = null) {
     if (!live) { try { const p = await api(`/api/progress?vehicle_id=${encodeURIComponent(VID || "")}`); steps = p.steps || []; draft = p.draft || ""; } catch (_) {} }
     if (!th.isConnected) return;
     const el = th.querySelector(".ptext");
-    if (el && streamIt && !steps.length && !th.dataset.sstep) { const st = stages.filter(x => sec >= x[0]).pop(); el.dataset.step = trStep(st[1]); }  // stage text when nothing arrives
+    if (el && streamIt && !steps.length && (!th.dataset.sstep || (stages === ASK_STAGES && sec >= 30))) { const st = stages.filter(x => sec >= x[0]).pop(); el.dataset.step = trStep(st[1]); }  // stage text when nothing arrives
     if (el) { if (steps.length) el.dataset.step = trStep(steps[steps.length - 1]); el.textContent = `${th.dataset.draft ? t("writing") : (el.dataset.step || t("thinking"))} · ${sec} ${t("sec")}`; }
     showDraft(draft);
     if (VOICE.on && steps.length) $("#vHint").textContent = steps[steps.length - 1];

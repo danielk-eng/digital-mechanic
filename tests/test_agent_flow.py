@@ -411,3 +411,64 @@ def test_ticket_draft_token_roundtrip_and_tamper():
     assert draft_from_token("u1", "A464EP47", tok) is None  # another vehicle
     b, sig = tok.rsplit(".", 1)
     assert draft_from_token("u1", "M333YK47", b[:-2] + "xx." + sig) is None  # edited draft
+
+
+def test_llm_stalled_stream_is_dropped_and_retried():
+    """Vercel at night: the free model started streaming, then went silent (one answer took 107 s).
+    A winner silent for `llm_stall_s` is cancelled and the request is sent again."""
+    import time
+    from types import SimpleNamespace as NS
+    from digital_mechanic.agent.llm import Llm
+    from digital_mechanic.config import Settings
+    calls = []
+
+    def chunk(content):
+        return NS(usage=None, choices=[NS(delta=NS(content=content, tool_calls=None, reasoning_content=None))])
+
+    def create(**kw):
+        calls.append(kw)
+        n = len(calls)
+
+        def gen():
+            yield chunk("нача")
+            if n == 1:
+                time.sleep(5)  # stalls after the first token
+            yield chunk("ло")
+        return gen()
+    llm = Llm(Settings(llm_api_key="x", llm_hedge_ttft_s=3, llm_stall_s=0.6, llm_stream=True))
+    llm._client = NS(chat=NS(completions=NS(create=create)))
+    t = time.time()
+    m, _ = llm.chat("s", [{"role": "user", "content": "q"}])
+    assert m.content == "начало" and len(calls) == 2 and time.time() - t < 4
+
+
+def test_llm_turn_budget_stops_calls():
+    """A turn never waits past `llm_turn_budget_s`: no model call starts after the deadline (the agent then shows pages)."""
+    import time
+    from types import SimpleNamespace as NS
+    import pytest
+    from digital_mechanic.agent.llm import Llm, LlmUnavailable, REQUEST_DEADLINE
+    from digital_mechanic.config import Settings
+    llm = Llm(Settings(llm_api_key="x", llm_stream=True, llm_hedge_ttft_s=10))
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+
+        def gen():
+            time.sleep(8)
+            yield None
+        return gen()
+    llm._client = NS(chat=NS(completions=NS(create=create)))
+    tok = REQUEST_DEADLINE.set(time.time() + 4.5)
+    try:
+        t = time.time()
+        with pytest.raises(LlmUnavailable):
+            llm.chat("s", [{"role": "user", "content": "q"}])
+        assert time.time() - t < 5.5  # no second attempt after the budget (was up to 2 × 90 s)
+        with pytest.raises(LlmUnavailable):
+            llm.chat("s2", [{"role": "user", "content": "q"}])  # budget spent: no call at all
+        assert len(calls) == 1
+    finally:
+        REQUEST_DEADLINE.reset(tok)
+    assert REQUEST_DEADLINE.get() is None

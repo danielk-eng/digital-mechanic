@@ -28,6 +28,9 @@ from ..store import Store
 from ..history import msk_time, summary_for_agent as hist_summary, timeline as build_timeline
 from .grounding import cited_labels, quote_in_text, unverified_numbers
 from .llm import Llm, LlmUnavailable
+
+# No model answer in time (free model queue at night, turn budget spent): the manual pages themselves, never invented text.
+FALLBACK_HEAD = "Ассистент сейчас не успел ответить — вот что сказано в руководстве по вопросу:"
 from .prompts import DETAIL, EXPAND_PROMPT, EXPAND_SYSTEM, EXPERIENCE, MANAGER_SYSTEM, MECHANIC_SYSTEM
 
 URG_RU = {"high": "высокий", "medium": "средний", "low": "низкий"}
@@ -812,6 +815,18 @@ class Agent:
     # ------------------------------------------------------------------ chat turn
     def handle(self, c: Conv, user: dict, text: str, image_note: str | None = None, event: str | None = None,
                sources: list[dict] | None = None, session_id: str | None = None) -> Turn:
+        from .llm import REQUEST_DEADLINE
+
+        budget = getattr(getattr(self.llm, "s", None), "llm_turn_budget_s", 0) or 0
+        tok = REQUEST_DEADLINE.set(time.time() + budget) if budget > 0 and REQUEST_DEADLINE.get() is None else None
+        try:
+            return self._handle_locked(c, user, text, image_note, event, sources, session_id)
+        finally:
+            if tok is not None:
+                REQUEST_DEADLINE.reset(tok)
+
+    def _handle_locked(self, c: Conv, user: dict, text: str, image_note: str | None, event: str | None,
+                       sources: list[dict] | None, session_id: str | None) -> Turn:
         with c.lock:
             c.lang = answer_lang(user)  # translated manual index (if imported) is searched in this language too
             if c.check is None and (session_id or event == "explain_diagnosis"):
@@ -828,7 +843,7 @@ class Agent:
                 turn.sources = [s for s in turn.sources if s["label"] in labels]
                 if c.vehicle:
                     turn.actions = self.answer_actions(c, turn, intents)
-            if turn.text and turn.sources and not turn.text.startswith("LLM временно недоступна"):
+            if turn.text and turn.sources and not turn.text.startswith(FALLBACK_HEAD):
                 from .facts import key_facts
 
                 frags = [{"label": l, **c.frags[l]} for l in cited_labels(turn.text) if l in c.frags and not c.frags[l].get("extra")]
@@ -1227,7 +1242,7 @@ class Agent:
         if not res["fragments"]:
             turn.text = "В руководстве для этого двигателя данных не нашёл. Рекомендую дефектовку у специалиста."
             return turn
-        lines = ["LLM временно недоступна — показываю найденные страницы руководства:"]
+        lines = [FALLBACK_HEAD]
         for f in res["fragments"][:3]:
             lines.append(f"[{f['label']}] {f['document']}, стр. {f['pdf_page']}: {f['text'][:400].strip()}…")
         turn.text = "\n\n".join(lines)

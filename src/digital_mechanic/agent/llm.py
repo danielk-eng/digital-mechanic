@@ -26,6 +26,7 @@ class _Attempt:
         self.first = threading.Event()
         self.done = threading.Event()
         self.cancel = False
+        self.last = time.time()  # last chunk (content, tool call or reasoning): a silent winner is a stalled stream
         self.result: Any = None
         self.error: BaseException | None = None
 
@@ -48,6 +49,9 @@ class Usage:
 # Country of the person behind the current request (set by the web layer): picks the primary provider.
 REQUEST_COUNTRY: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_country", default=None)
 REQUEST_PRIMARY: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_primary", default=None)  # per-company switch
+# Absolute time (time.time()) by which the current user turn must have its LLM answers (Agent.handle sets it): no call
+# starts or waits past it, the agent then answers from the manual pages without the model -- never a hung chat.
+REQUEST_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar("request_deadline", default=None)
 
 
 class Llm:
@@ -136,6 +140,7 @@ class Llm:
             calls: dict[int, dict] = {}
             usage = None
             for ch in stream:
+                att.last = time.time()
                 if att.cancel:
                     try:
                         stream.close()
@@ -177,7 +182,7 @@ class Llm:
             att.first.set()
             att.done.set()
 
-    def _race(self, kw: dict, on_text=None, prov: str = "tokenrouter") -> Any:
+    def _race(self, kw: dict, on_text=None, prov: str = "tokenrouter", limit: float | None = None) -> Any:
         """Streamed request with a time-to-first-token hedge: if no token arrived in `llm_hedge_ttft_s`
         (the free model sometimes sits in a queue), a second identical request is sent; the first one that
         starts streaming wins and the other is cancelled. Output length no longer triggers useless duplicates."""
@@ -186,6 +191,8 @@ class Llm:
         if self._pool is None:
             self._pool = cf.ThreadPoolExecutor(max_workers=16, thread_name_prefix="llm")
         hedge = max(0.5, self.s.llm_hedge_ttft_s)
+        limit = self.s.llm_timeout_s if limit is None else limit
+        stall = self.s.llm_stall_s
         atts: list[_Attempt] = []
         win: list[_Attempt | None] = [None]
 
@@ -203,9 +210,13 @@ class Llm:
                 for a in atts:
                     if a is not w:
                         a.cancel = True
-                if not w.done.wait(self.s.llm_timeout_s):
-                    w.cancel = True
-                    raise TimeoutError("llm stream timeout")
+                while not w.done.wait(0.1):
+                    if time.time() - t0 > limit:
+                        w.cancel = True
+                        raise TimeoutError("llm stream timeout")
+                    if stall > 0 and time.time() - w.last > stall:  # started, then went silent (seen: 107 s answers at night)
+                        w.cancel = True
+                        raise TimeoutError("llm stream stalled")
                 if w.error is None and w.result is not None:
                     if on_text and w.result.choices[0].message.content:
                         try:  # chunks that arrived before the winner was picked
@@ -226,7 +237,7 @@ class Llm:
                 start()
             elif len(atts) < 3 and el > hedge * (1 if len(atts) == 1 else 2.5):
                 start()
-            if el > self.s.llm_timeout_s:
+            if el > limit:
                 for a in atts:
                     a.cancel = True
                 raise TimeoutError("llm first token timeout")
@@ -252,6 +263,10 @@ class Llm:
             raise LlmUnavailable("no api key")
         if model and model != self.s.cloudru_model:  # explicit model (e.g. vision) lives at TokenRouter
             order = [p for p in order if p == "tokenrouter"] or order
+        dl = REQUEST_DEADLINE.get()
+        left = (lambda: dl - time.time()) if dl else (lambda: self.s.llm_timeout_s)
+        if left() < 3:
+            raise LlmUnavailable("turn budget")
         last: Exception | None = None
         for prov in order:
             kw: dict[str, Any] = dict(model=(model if prov == "tokenrouter" and model else self._provider(prov)[2]),
@@ -261,8 +276,12 @@ class Llm:
             if prov == "tokenrouter" and self.s.llm_thinking.lower() in ("off", "0", "false", "disabled"):
                 kw["extra_body"] = {"thinking": {"type": "disabled"}}
             for attempt in range(2):
+                lim = min(self.s.llm_timeout_s, left())
+                if lim < 3 or (attempt and lim < 8):  # no time for a useful retry: the caller answers without the model
+                    raise LlmUnavailable(type(last).__name__ if last else "turn budget") from None
                 try:
-                    r = self._race(kw, on_text, prov) if self.s.llm_stream else self._create(kw, prov)
+                    r = (self._race(kw, on_text, prov, lim) if self.s.llm_stream
+                         else self._create({**kw, "timeout": lim}, prov))
                     tok = self._account(step, r, time.time() - t, prov)
                     msg = r.choices[0].message
                     if getattr(msg, "content", None):
@@ -270,9 +289,9 @@ class Llm:
                     return msg, tok
                 except LlmUnavailable:
                     break
-                except Exception as e:  # network, rate limit, 5xx: never leak the key
+                except Exception as e:  # network, rate limit, 5xx, stall: never leak the key
                     last = e
-                    time.sleep(1.5 * (attempt + 1))
+                    time.sleep(min(1.5 * (attempt + 1), max(0.0, left() - 3)))
         raise LlmUnavailable(type(last).__name__ if last else "no provider") from None
 
     def json(self, step: str, system: str, user: str, max_tokens: int = 2000) -> dict:

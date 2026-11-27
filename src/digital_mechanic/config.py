@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     llm_max_tool_rounds: int = 5
     llm_hedge_s: float = 12.0  # non-streaming mode: resend the same request if no answer after N s, take the first; 0 = off
     llm_stream: bool = True  # stream answers: time-to-first-token hedge + live verified lines in the UI
+    llm_stall_s: float = 20.0  # streaming: the winning stream sent nothing for N s -> drop it and retry; 0 = off
+    llm_turn_budget_s: float = 60.0  # one chat turn: model calls stop after N s, the answer falls back to manual pages; 0 = off
     llm_hedge_ttft_s: float = 5.0  # streaming: no first token after N s -> second identical request, first to start streaming wins
     # "off" sends thinking={"type":"disabled"} (DeepSeek-style); ~4x faster answers. "on" keeps model default.
     llm_thinking: str = "off"
