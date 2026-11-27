@@ -35,3 +35,10 @@ def test_language_picker_offers_every_language():
     names = dict(re.findall(r'(\w+): "([^"]+)"', re.search(r"const LANG_NAMES = \{([^}]*)\}", js).group(1)))
     assert names == {k: v["name"] for k, v in LANGS.items()}  # bn/ky/be were imported but not selectable
     assert set(I18N) == set(LANGS)
+
+
+def test_chief_bar_qr_button_translated_and_icon_on_phone():
+    html = (ROOT / "src/digital_mechanic/web/static/manager.html").read_text(encoding="utf-8")
+    assert 'id="myqr" data-t-aria="qr_login"' in html and 'data-icon="qr-code"' in html and 'data-t="qr_login"' in html
+    assert '"qr-code"' in (ROOT / "src/digital_mechanic/web/static/icons.js").read_text(encoding="utf-8")
+    assert all(I18N[l].get("qr_login") for l in I18N)
