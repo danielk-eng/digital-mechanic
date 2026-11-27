@@ -34,6 +34,16 @@ def test_fleets_indexing_complex_repair():
     assert big["models_primary_paid"] > f50["models_primary_paid"]
 
 
+def test_cloudru_salutespeech_voice_addon_pricing():
+    v = calc.voice_scenario()
+    assert abs(v["stt_rub"] - 20.0 * 0.00819569) < 1e-9
+    assert abs(v["tts_rub"] - 3.0 * 0.34) < 1e-9
+    assert v["total_rub"] == v["stt_rub"] + v["tts_rub"]
+    r = calc.report(M)
+    assert r["voice"]["total_rub"] > 0
+    assert abs(r["fleets"][1]["voice_month"] - v["total_rub"] * r["fleets"][1]["checks_month"]) < 0.05
+
+
 def test_calculator_public_without_login(tmp_path, monkeypatch):
     monkeypatch.setenv("DB_PATH", str(tmp_path / "c.db"))
     from digital_mechanic.web import app as m

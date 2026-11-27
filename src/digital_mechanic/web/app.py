@@ -304,9 +304,9 @@ def calculator_page() -> HTMLResponse:
     rows += (f"<tr class='tot'><td>Итого на 1 запрос (сценарий)</td><td>{rub(t['calls'])}</td><td>{int(t['in']):,}</td><td>{int(t['out']):,}</td>".replace(",", " ")
              + f"<td>{rub(t['primary_free'])}</td><td>{rub(t['primary_paid'], 3)}</td><td>{rub(t['fallback_free'])}</td><td>{rub(t['fallback_paid'])}</td></tr>")
     fl = "".join(f"<tr><td>{f['vehicles']}</td><td>{rub(f['checks_month'], 1)}</td><td>{rub(f['models_primary_free'], 0)}</td><td>{rub(f['models_primary_paid'], 0)}</td>"
-                 f"<td>{rub(f['models_fallback_paid'], 0)}</td><td>{rub(f['server'], 0)}</td><td>{rub(f['support'], 0)} ({f['support_hours']} ч)</td>"
+                 f"<td>{rub(f['models_fallback_paid'], 0)}</td><td>{rub(f['voice_month'], 0)}</td><td>{rub(f['server'], 0)}</td><td>{rub(f['support'], 0)} ({f['support_hours']} ч)</td>"
                  f"<td><b>{rub(f['total_primary_free'], 0)}</b></td><td>{rub(f['total_primary_paid'], 0)}</td><td>{rub(f['total_fallback_paid'], 0)}</td></tr>" for f in r["fleets"])
-    a, cx, ix, m = r["assumptions"], r["complex_repair"], r["indexing"], r["measured"]
+    a, cx, ix, m, v = r["assumptions"], r["complex_repair"], r["indexing"], r["measured"], r["voice"]
     body = f"""<h1>Цифровой механик — калькулятор экономики</h1>
 <p class="muted">Все суммы в рублях без НДС. Курс ЦБ РФ на 26.11.2026: {rub(r['usd_rub'], 4)} ₽ за 1 $. Токены — замер на стенде {e(m['measured_at'])} CST,
 модель {e(m['model'])}, {m['runs']} прогона сценария, медиана {m['tokens_per_scenario_median']:,} токенов. <a href="/static/calculator.xlsx" download>Скачать заполненный шаблон (xlsx)</a> · Код: <a href="https://github.com/danielk-eng/digital-mechanic">github.com/danielk-eng/digital-mechanic</a></p>
@@ -316,9 +316,16 @@ def calculator_page() -> HTMLResponse:
 <p class="small muted">Основная: {e(calc.PRICES['primary_free']['name'])}; платный аналог — {e(calc.PRICES['primary_paid']['name'])}. Резерв: {e(calc.PRICES['fallback_free']['name'])}; платный аналог — {e(calc.PRICES['fallback_paid']['name'])}.</p>
 <h2>Сложный ремонт</h2><p>До ~50 обменов в одной процедуре (брифинг 27.11): ≈ {int(cx['in'] + cx['out']):,} токенов, основная бесплатно 0 ₽, платный аналог ≈ {rub(cx['primary_paid'])} ₽, резерв платно ≈ {rub(cx['fallback_paid'])} ₽.</p>
 <h2>Разовая индексация руководств (отдельная строка)</h2><p>6 руководств на 4 типа двигателей, 1 743 страницы, ≈ {ix['tokens']:,} токенов. Наш поиск — BM25 на сервере: 0 ₽. Если заменить на эмбеддинги bge-m3 (Cloud.ru, 0,50 ₽ за 1 млн): ≈ {rub(ix['bge_m3_rub'])} ₽ один раз.</p>
+<h2>Голосовой сценарий — Cloud.ru SaluteSpeech (опция)</h2>
+<p>Если механик проходит сценарий полностью голосом, добавляется распознавание речи и озвучка ответов. Допущение: {rub(v['stt_seconds_per_scenario'], 0)} секунд входной речи и {int(v['tts_chars_per_scenario']):,} знаков озвучиваемого текста на сценарий. По тарифу Cloud.ru Foundation Models 261126 без НДС: распознавание {rub(v['stt_rub_second'], 8)} ₽/сек, синтез {rub(v['tts_rub_per_1000_chars'], 2)} ₽ за 1 000 входных знаков.</p>
+<div class="scroll"><table><tr><th>Голосовая часть</th><th>Объём на сценарий</th><th>Тариф</th><th>Стоимость</th></tr>
+<tr><td>Распознавание речи SaluteSpeech</td><td>{rub(v['stt_seconds_per_scenario'], 0)} сек</td><td>{rub(v['stt_rub_second'], 8)} ₽/сек</td><td>{rub(v['stt_rub'], 2)} ₽</td></tr>
+<tr><td>Синтез речи SaluteSpeech</td><td>{int(v['tts_chars_per_scenario']):,} знаков</td><td>{rub(v['tts_rub_per_1000_chars'], 2)} ₽/1 000 знаков</td><td>{rub(v['tts_rub'], 2)} ₽</td></tr>
+<tr class="tot"><td>Итого голосовой сценарий</td><td></td><td></td><td><b>{rub(v['total_rub'], 2)} ₽</b></td></tr></table></div>
+<p class="small muted">Это отдельная опция: текстовый сценарий не требует speech-API. В таблице парка ниже показан верхний предел, как если бы каждая проверка проходила голосом; реальная доля голосовых проверок масштабирует строку линейно.</p>
 <h2>Пересчёт на парк, в месяц</h2>
 <p>Допущения: проверка каждой машины раз в {a['check_every_days']} дней; {rub(a['questions_per_check'], 1)} вопроса механика на проверку (2–3); черновик заявки — в {int(a['ticket_share'] * 100)} % проверок (доля отклонений в данных хакатона: 69 из 195); сервер Cloud.ru 2 vCPU / 4 ГБ ({rub(a['server_rub_month'], 0)} ₽, для 800 машин — два); сопровождение {rub(a['support_rate_rub_h'], 0)} ₽/ч: обновление руководств, мониторинг, разбор «пробелов в базе». Круглосуточная нагрузка не считается: сессии с перерывами.</p>
-<div class="scroll"><table><tr><th>Машин</th><th>Проверок</th><th>Модели, бесплатно</th><th>Модели, платный аналог основной</th><th>Модели, платный аналог резерва</th><th>Сервер</th><th>Сопровождение</th><th>Итого (бесплатная модель)</th><th>Итого (платный аналог)</th><th>Итого (резерв платно)</th></tr>{fl}</table></div>
+<div class="scroll"><table><tr><th>Машин</th><th>Проверок</th><th>Модели, бесплатно</th><th>Модели, платный аналог основной</th><th>Модели, платный аналог резерва</th><th>Голос, если все проверки голосом</th><th>Сервер</th><th>Сопровождение</th><th>Итого (бесплатная модель)</th><th>Итого (платный аналог)</th><th>Итого (резерв платно)</th></tr>{fl}</table></div>
 <p class="small muted">Разработка — разовая; сопровождение — регулярное. Методика и исходники: docs/ЭКОНОМИКА.md, src/digital_mechanic/cost/calc.py, замер — scripts/cost_measure.py.</p>"""
     css = ("body{font:16px/1.5 system-ui,sans-serif;margin:0;padding:24px;max-width:1100px;margin:auto;color:#111;background:#fff}h1{font-size:24px}h2{font-size:19px;margin-top:28px}"
            "table{border-collapse:collapse;width:100%;font-size:14px}td,th{border:1px solid #d3d8df;padding:6px 8px;text-align:right;vertical-align:top}td:first-child,th:first-child{text-align:left}"

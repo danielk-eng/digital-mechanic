@@ -14,10 +14,11 @@ import json
 from pathlib import Path
 
 USD_RUB = 82.3130  # CBR, 26.11.2026
+SCX_URL = "https://scx.ai/pricing"
 PRICES = {  # per 1M tokens, RUB without VAT
     "primary_free": {"name": "deepseek-v4.1-flash (free, TokenRouter) — основная на стенде", "in": 0.0, "out": 0.0},
     "primary_paid": {"name": "DeepSeek V4.1 Flash по прайсу DeepSeek API ($0,30 / $1,20 за 1 млн, пик)", "in": 0.30 * USD_RUB, "out": 1.20 * USD_RUB,
-                     "usd": (0.30, 1.20)},
+                     "usd": (0.30, 1.20), "usd_cached": 0.03},
     "fallback_free": {"name": "GigaChat-4-708B-A41 (Cloud.ru, без тарифа) — резерв и РФ-регион", "in": 0.0, "out": 0.0},
     "fallback_paid": {"name": "GigaChat Ultra на Cloud.ru (78,87 / 236,56 ₽ за 1 млн без НДС) — платный аналог резерва", "in": 78.87, "out": 236.56},
 }
@@ -42,6 +43,16 @@ ASSUMPTIONS = {
 }
 SUPPORT_HOURS = {35: 6, 50: 8, 370: 24, 800: 40}  # обновление руководств, мониторинг, ответы на «пробелы в базе»
 FLEETS = [35, 50, 370, 800]
+
+# Cloud.ru Foundation Models tariff, version 261126 (without VAT): SaluteSpeech synthesis is billed
+# per thousand input characters, recognition per audio second. Voice is an optional add-on to the text
+# scenario: the mechanic can type/read everything at zero speech cost.
+VOICE_ASSUMPTIONS = {
+    "stt_seconds_per_scenario": 20.0,   # 2–3 short dictated questions in a fully voice scenario
+    "tts_chars_per_scenario": 3000.0,   # explanation + answers read aloud; citations are stripped before synthesis
+    "stt_rub_second": 0.00819569,
+    "tts_rub_per_1000_chars": 0.34,
+}
 
 
 def load(path: str | Path | None = None) -> dict:
@@ -68,7 +79,8 @@ def scenario(measured: dict, questions: float = 2.5, ticket: bool = True) -> lis
     for k in ORDER:
         d = L.get(k, ans if k == "answer" else {})
         tin, tout = int(d.get("in_per_call", 0)), int(d.get("out_per_call", 0))
-        row = {"step": k, "name": STEP_RU[k], "calls": calls[k], "in": tin, "out": tout}
+        row = {"step": k, "name": STEP_RU[k], "calls": calls[k], "in": tin, "out": tout,
+               "cached_share": d.get("cached_share_provider", 0.0)}
         for pk, p in PRICES.items():
             row[pk] = calls[k] * (tin * p["in"] + tout * p["out"]) / 1e6
         rows.append(row)
@@ -82,6 +94,14 @@ def totals(rows: list[dict]) -> dict:
     return t
 
 
+def voice_scenario(a: dict | None = None) -> dict:
+    """Optional fully-voice scenario add-on at the Cloud.ru SaluteSpeech tariff."""
+    a = {**VOICE_ASSUMPTIONS, **(a or {})}
+    stt = a["stt_seconds_per_scenario"] * a["stt_rub_second"]
+    tts = a["tts_chars_per_scenario"] / 1000 * a["tts_rub_per_1000_chars"]
+    return {**a, "stt_rub": stt, "tts_rub": tts, "total_rub": stt + tts}
+
+
 def fleet(measured: dict, vehicles: int, a: dict | None = None) -> dict:
     a = {**ASSUMPTIONS, **(a or {})}
     checks = vehicles * 365 / a["check_every_days"] / 12
@@ -89,8 +109,10 @@ def fleet(measured: dict, vehicles: int, a: dict | None = None) -> dict:
     per_check = {pk: a["ticket_share"] * with_t[pk] + (1 - a["ticket_share"]) * no_t[pk] for pk in PRICES}
     support = SUPPORT_HOURS.get(vehicles, max(6, round(vehicles / 20))) * a["support_rate_rub_h"]
     server = a["server_rub_month"] * (1 if vehicles <= 370 else 2)
+    voice = voice_scenario()
     out = {"vehicles": vehicles, "checks_month": round(checks, 1), "server": server, "support": support,
-           "support_hours": SUPPORT_HOURS.get(vehicles, max(6, round(vehicles / 20)))}
+           "support_hours": SUPPORT_HOURS.get(vehicles, max(6, round(vehicles / 20))),
+           "voice_per_check": voice["total_rub"], "voice_month": voice["total_rub"] * checks}
     for pk in PRICES:
         out[f"models_{pk}"] = per_check[pk] * checks
         out[f"total_{pk}"] = per_check[pk] * checks + server + support
@@ -109,6 +131,9 @@ def indexing() -> dict:
 def report(measured: dict | None = None) -> dict:
     m = measured or load()
     rows = scenario(m)
-    return {"measured": {k: m[k] for k in ("measured_at", "model", "runs", "scenario", "tokens_per_scenario_median")},
+    measured = {k: m[k] for k in ("measured_at", "model", "runs", "scenario", "tokens_per_scenario_median")}
+    measured["cache"] = m.get("cache", {"input_tokens": 0, "provider_cached": 0, "prefix_cached": 0, "share_provider": 0.0, "share_prefix": 0.0})
+    return {"measured": measured,
             "prices": PRICES, "usd_rub": USD_RUB, "rows": rows, "total": totals(rows), "assumptions": ASSUMPTIONS,
-            "fleets": [fleet(m, n) for n in FLEETS], "complex_repair": complex_repair(m), "indexing": indexing()}
+            "fleets": [fleet(m, n) for n in FLEETS], "complex_repair": complex_repair(m), "indexing": indexing(),
+            "voice": voice_scenario()}
