@@ -168,6 +168,7 @@ def test_mechanic_shell_routes(client):
     css = (Path(__file__).resolve().parents[1] / "src/digital_mechanic/web/static/app.css").read_text(encoding="utf-8")
     assert 'html[data-shell=desktop] .desktop-nav' in css and 'html[data-shell=desktop] .viewer' in css
     assert '.login{' in css and 'env(safe-area-inset-bottom)' in css.split('.login{', 1)[1].split('}', 1)[0]
+    assert 'var(--line)' not in css  # no such design-token; use --border
 
 
 def test_chat_stream_ndjson(client):

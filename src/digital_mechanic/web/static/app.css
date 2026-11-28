@@ -393,7 +393,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .pv-head{display:flex;align-items:center;gap:8px}
 .tr-wait{opacity:.55}
 .demo-acc{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.demo-acc .acc{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:8px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface-2);color:var(--text);cursor:pointer;font:inherit}
+.demo-acc .acc{display:flex;flex-direction:column;align-items:flex-start;gap:2px;text-align:left;padding:8px 12px;border-radius:12px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);cursor:pointer;font:inherit}
 .demo-acc .acc span{font-size:.75rem;color:var(--text-3)}
 .demo-acc .acc .pin{font-family:var(--mono,monospace);color:var(--text-2)}
 .demo-acc .acc.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
@@ -404,7 +404,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:.88rem}
 .or{text-align:center;margin:8px 0}
 .ob-q{margin:16px 0 8px}
 .ob-opts{display:grid;gap:8px;margin-bottom:16px}
-.ob-opt{display:flex;flex-direction:column;gap:8px;text-align:left;padding:16px;border-radius:16px;border:1px solid var(--line);background:var(--surface-2);color:var(--text);font:inherit;cursor:pointer;line-height:1.45}
+.ob-opt{display:flex;flex-direction:column;gap:8px;text-align:left;padding:16px;border-radius:16px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font:inherit;cursor:pointer;line-height:1.45}
 .ob-opt.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
 .assign-bar{display:flex;gap:8px;align-items:flex-start;width:100%;text-align:left;margin:8px 0;padding:12px 16px;border-radius:16px;border:1px solid var(--accent);background:var(--surface-2);color:var(--text);font:inherit;cursor:pointer}
 .assign-bar>span{display:flex;flex-direction:column;gap:4px}
