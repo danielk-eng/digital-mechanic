@@ -132,22 +132,31 @@ def size_window(cdp, w: int, h: int, x: int, y: int) -> None:
     cdp.send("Browser.setWindowBounds", {"windowId": win["windowId"], "bounds": {"left": x, "top": y, "width": w, "height": h}})
 
 
-def run_scenario(base: str, out: Path, voice: Path, wavs: dict, player: Player, event, smoke: bool) -> None:
+def run_scenario(base: str, out: Path, voice: Path, wavs: dict, player: Player, event, smoke: bool, rec=None, t0box=None) -> None:
     with sync_playwright() as pw:
         # Playwright's own chromium, not the system snap: the snap's private /tmp cannot reach the Xvfb socket.
         browser = pw.chromium.launch(
             headless=False,
             env={**os.environ, "DISPLAY": DISPLAY, "WAYLAND_DISPLAY": "", "XDG_SESSION_TYPE": "x11"},
-            args=["--no-sandbox", "--ozone-platform=x11", "--window-size=450,780", "--window-position=415,8",
+            args=["--no-sandbox", "--ozone-platform=x11", "--start-maximized",
                   "--force-device-scale-factor=1", "--disable-session-crashed-bubble", "--no-first-run",
                   "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream",
                   f"--use-file-for-fake-audio-capture={voice.resolve()}"])
         ctx = browser.new_context(no_viewport=True, accept_downloads=False)
         pg = ctx.new_page()
         try:
-            time.sleep(2.5)  # let the window appear on the virtual screen
+            time.sleep(2.0)  # let the window appear on the virtual screen
             cdp = ctx.new_cdp_session(pg)
-            size_window(cdp, 500, 780, 390, 8)
+            size_window(cdp, 1280, 800, 0, 0)
+            pg.goto(base + "/m", wait_until="domcontentloaded")
+            pg.wait_for_selector("#l_go", timeout=20000)
+            pg.wait_for_timeout(1200)
+            # the browser is fullscreen on the login page: only NOW the continuous capture begins
+            if rec is not None:
+                rec.start()
+            if t0box is not None:
+                t0box[0] = time.monotonic()
+            pg.wait_for_timeout(1.5)
 
             # --- mechanic, mobile shell ---
             player.say(wavs["intro"])
@@ -209,11 +218,7 @@ def run_scenario(base: str, out: Path, voice: Path, wavs: dict, player: Player, 
                 pg.wait_for_timeout(1500)
             player.wait()
 
-            # --- resize wide: desktop part, same continuous take ---
-            size_window(cdp, 1268, 790, 6, 4)
-            pg.wait_for_timeout(1200)
-            event("window wide")
-
+            # --- desktop part in the same fullscreen window: no resizing anywhere in the take ---
             pg.evaluate("fetch('/api/logout',{method:'POST'})")
             pg.wait_for_timeout(800)
             player.say(wavs["manager"])
@@ -300,23 +305,21 @@ def main() -> int:
     raw = out / "single_take.mp4"
     rec = Recorder(raw)
     marks = {"events": []}
-    t0 = time.monotonic()
+    t0box = [time.monotonic()]
 
     def event(name: str) -> None:
-        marks["events"].append({"t": round(time.monotonic() - t0, 1), "event": name})
-        print(f"  [{round(time.monotonic() - t0, 1):6.1f}s] {name}", flush=True)
+        marks["events"].append({"t": round(time.monotonic() - t0box[0], 1), "event": name})
+        print(f"  [{round(time.monotonic() - t0box[0], 1):6.1f}s] {name}", flush=True)
 
-    rec.start()
-    t0 = time.monotonic()
     try:
-        run_scenario(base, out, voice, wavs, player, event, a.smoke)
+        run_scenario(base, out, voice, wavs, player, event, a.smoke, rec=rec, t0box=t0box)
     except Exception as e:
         print(f"scenario error: {e}", file=sys.stderr)
     player.wait()
     time.sleep(1.0)
     rec.stop()
     dur = ffprobe_duration(raw) if raw.exists() else 0
-    marks["wall_sec"] = round(time.monotonic() - t0, 1)
+    marks["wall_sec"] = round(time.monotonic() - t0box[0], 1)
     marks["video_sec"] = round(dur, 1)
     (out / "markers.json").write_text(json.dumps(marks, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"single take: {raw} ({dur:.1f}s)")
