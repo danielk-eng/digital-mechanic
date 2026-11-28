@@ -4,8 +4,8 @@
   python scripts/record_demo.py --url http://127.0.0.1:18610 --smoke
 
 The mobile mechanic part is recorded at 430x860, manager/engineer at 1280x720. The script writes raw WebM files,
-accelerated parts, a concatenated silent draft MP4, screenshots and markers.json. It types the voice question: use a
-real microphone pass for the final narrated competition video.
+accelerated parts, a concatenated silent draft MP4, screenshots and markers.json. The voice question is dictated
+through the real microphone/STT pipeline using Chromium's fake audio capture file.
 """
 import argparse
 import json
@@ -13,10 +13,12 @@ import os
 import shutil
 import subprocess
 import time
+import wave
 from pathlib import Path
 
 from playwright.sync_api import TimeoutError as PWTimeout
 from playwright.sync_api import sync_playwright
+import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
 MAIN = ("B418HK98", "S-0009")
@@ -26,6 +28,26 @@ RESUME = "E549YT198"
 Q_VOICE = "Какой зазор в клапанах и когда его регулировать?"
 Q_NODATA = "Какой момент затяжки гаек крепления турбокомпрессора?"
 TICKET = "Создай заявку на ремонт"
+
+
+def voice_loop_wav(base: str, out: Path) -> Path:
+    """Question as a looping 16 kHz mono PCM file for Chromium fake mic. Snap Chromium cannot read /tmp."""
+    src = out / "voice_q16.wav"; loop = out / "voice_loop.wav"
+    if loop.exists():
+        return loop
+    c = httpx.Client(base_url=base.rstrip("/"), timeout=90, follow_redirects=True)
+    c.post("/api/login/demo", json={"account": "selftaught", "pin": "3002", "consent": True}).raise_for_status()
+    r = c.post("/api/tts", json={"text": Q_VOICE, "lang": "ru"}); r.raise_for_status()
+    raw = out / "voice_q_orig.wav"; raw.write_bytes(r.content)
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(raw), "-ar", "16000", "-ac", "1", "-sample_fmt", "s16", str(src)], check=True)
+    with wave.open(str(src), "rb") as w:
+        sr, frames = w.getframerate(), w.readframes(w.getnframes())
+    sil = lambda sec: b"\0" * int(sr * sec) * 2
+    unit = sil(0.5) + frames + sil(0.8)
+    data = (unit * 8)[:sr * 30 * 2]
+    with wave.open(str(loop), "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr); w.writeframes(data)
+    return loop
 
 
 def browser_executable() -> str | None:
@@ -115,6 +137,19 @@ def ask_typed(pg, text: str) -> float:
     return start
 
 
+def ask_dictated(pg) -> float:
+    """Use the visible dictation UI, then send the recognised text. 4.3 s covers one looped TTS question."""
+    start = time.monotonic()
+    pg.click("#dictate")
+    pg.wait_for_selector(".inputbox.recording", timeout=10000)
+    pg.wait_for_timeout(4300)
+    pg.click("#dictDone")
+    pg.wait_for_function("document.querySelector('#txt').value.includes('зазор')", timeout=25000)
+    pg.wait_for_timeout(500)
+    pg.keyboard.press("Enter")
+    return start
+
+
 def wait_after_llm(pg, marks: Marks, name: str, started_mono: float, timeout=130000) -> None:
     start = started_mono - marks.t0
     wait_chat_idle(pg, timeout)
@@ -140,7 +175,8 @@ def mechanic_part(pw, base: str, out: Path, smoke: bool) -> tuple[Path, dict]:
     rawdir = out / "mobile_raw"
     rawdir.mkdir(parents=True, exist_ok=True)
     marks = Marks()
-    browser = pw.chromium.launch(headless=True, executable_path=browser_executable(), args=["--no-sandbox"])
+    voice_wav = voice_loop_wav(base, out)
+    browser = pw.chromium.launch(headless=True, executable_path=browser_executable(), args=["--no-sandbox", "--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", f"--use-file-for-fake-audio-capture={voice_wav.resolve()}"])
     ctx = browser.new_context(viewport={"width": 430, "height": 860}, record_video_dir=str(rawdir),
                               record_video_size={"width": 430, "height": 860}, device_scale_factor=1)
     pg = ctx.new_page()
@@ -163,8 +199,8 @@ def mechanic_part(pw, base: str, out: Path, smoke: bool) -> tuple[Path, dict]:
         open_first_citation(pg, out, "04_manual_page")
 
         if not smoke:
-            started = ask_typed(pg, Q_VOICE)
-            wait_after_llm(pg, marks, "ответ на вопрос", started, 130000)
+            started = ask_dictated(pg)
+            wait_after_llm(pg, marks, "ответ на голосовой вопрос", started, 130000)
             marks.event("voice-question answer done")
             shot(pg, out, "05_answer_contradiction")
             open_first_citation(pg, out, "06_citation_page")
