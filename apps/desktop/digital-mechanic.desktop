@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Цифровой механик
+Name[en]=Digital Mechanic
+Comment=Голосовой помощник механика АТП
+Exec=/home/anone/Applications/DigitalMechanic.AppImage %U
+Icon=digital-mechanic
+Terminal=false
+Categories=Office;Utility;
+StartupWMClass=digital-mechanic
