@@ -5,9 +5,11 @@ import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.KeyEvent;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
@@ -16,6 +18,9 @@ import android.webkit.WebView;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
 import com.getcapacitor.BridgeWebViewClient;
@@ -31,7 +36,8 @@ public class MainActivity extends BridgeActivity {
   public static final String DEFAULT_URL = "https://digital-mechanic-iikuznitsa.vercel.app/m";
   public static final String ACTION_EDIT_SERVER = "ru.iikuznitsa.mechanic.EDIT_SERVER";
   private static final int REQ_MEDIA = 42;
-  private static final String OFFLINE = "file:///android_asset/public/index.html?offline=1";
+  private static final String LOCAL = "file:///android_asset/public/index.html";
+  private static final String OFFLINE = LOCAL + "?offline=1";
 
   private PermissionRequest pendingRequest;
 
@@ -39,6 +45,10 @@ public class MainActivity extends BridgeActivity {
   public void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
     WebView webView = getBridge().getWebView();
+    if (webView.getParent() instanceof android.view.View) {
+      ((android.view.View) webView.getParent()).setBackgroundColor(Color.rgb(14, 16, 19));
+    }
+    applySystemBarInsets(webView);
     CookieManager cookies = CookieManager.getInstance();
     cookies.setAcceptCookie(true);
     cookies.setAcceptThirdPartyCookies(webView, true);
@@ -116,7 +126,30 @@ public class MainActivity extends BridgeActivity {
   }
 
   private void loadConfiguredUrl() {
-    getBridge().getWebView().loadUrl(currentServerUrl());
+    // The bundled page performs the reachability probe inside WebView itself,
+    // so DNS/proxy behaviour matches the real navigation.
+    getBridge().getWebView().loadUrl(LOCAL);
+  }
+
+  private static void applySystemBarInsets(WebView webView) {
+    ViewCompat.setOnApplyWindowInsetsListener(webView, (v, windowInsets) -> {
+      Insets bars = windowInsets.getInsets(
+          WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+      ViewGroup.LayoutParams lp = v.getLayoutParams();
+      if (lp instanceof ViewGroup.MarginLayoutParams) {
+        ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
+        if (mlp.leftMargin != bars.left || mlp.topMargin != bars.top
+            || mlp.rightMargin != bars.right || mlp.bottomMargin != bars.bottom) {
+          mlp.leftMargin = bars.left;
+          mlp.topMargin = bars.top;
+          mlp.rightMargin = bars.right;
+          mlp.bottomMargin = bars.bottom;
+          v.setLayoutParams(mlp);
+        }
+      }
+      return windowInsets;
+    });
+    ViewCompat.requestApplyInsets(webView);
   }
 
   private String currentServerUrl() {
@@ -238,6 +271,12 @@ public class MainActivity extends BridgeActivity {
     @JavascriptInterface
     public void setServerUrl(String url) {
       saveUrl(url);
+    }
+
+    @JavascriptInterface
+    public void connect(String url) {
+      saveUrl(url);
+      runOnUiThread(() -> getBridge().getWebView().loadUrl(currentServerUrl()));
     }
 
     @JavascriptInterface
