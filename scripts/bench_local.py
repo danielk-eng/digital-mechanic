@@ -85,7 +85,7 @@ def cmd_llm(a) -> None:
 
 REFUSE = re.compile(r"нет данных|данных[^.]{0,40} нет|сведений[^.]{0,40} нет|данных нет|не указан|не приведен|нет сведений|не найден|"
                     r"не нашёл|не нашел|отсутству|нет информации|не содерж|в руководстве нет|нет в руководстве|не описан|не могу|"
-                    r"не относится|вне|не по теме|только по|ничего нет|не знаю|не моя тема", re.I)
+                    r"не относится|вне|не по теме|не по двигателю|только по|ничего нет|не знаю|не моя тема", re.I)
 
 
 def _pages(data_root: Path) -> dict:
@@ -101,10 +101,52 @@ def _pages(data_root: Path) -> dict:
     return by
 
 
+def _extra_eval(data_root: Path, qs: list[dict]) -> list[dict]:
+    """kind=extra is a retrieval check, not an LLM-answer check: the vehicle manual hit must be in the agent's top 3."""
+    if not qs:
+        return []
+    sys.path.insert(0, str(ROOT / "src"))
+    from digital_mechanic.retrieval.bm25 import ExtraIndex, load_extra
+
+    ex = ExtraIndex(load_extra(str(data_root / "data/index/extra_pages.jsonl.gz")))
+    fleet = {v["vehicle_id"]: v for v in json.load(open(data_root / "data/official/vehicles.json", encoding="utf-8"))["vehicles"]}
+
+    def extra_hits(vehicle, query: str, k: int = 3):
+        # Same model-first rule as Agent.extra_hits, kept import-light so the benchmark runs outside the app venv.
+        make = (vehicle["make"] or "").upper()
+        if make not in ex.makes():
+            return []
+        model = (vehicle["model"] or "").lower()
+        own = lambda p: bool(model) and any(model == m.lower() or model.startswith(m.lower() + "-") for m in p.models)  # noqa: E731
+        hits = ex.search(make, query, k=24)
+        if any(own(p) for p in ex.pages if p.make == make):
+            hits = [h for h in hits if own(h[0])]
+        return sorted(hits, key=lambda h: -h[1] * (1.6 if own(h[0]) else 1.0))[:k]
+
+    rows = []
+    for q in qs:
+        v = fleet[q["vehicle"]]
+        hits = extra_hits(v, q["q"], k=3)
+        rx = re.compile(q["must"], re.I)
+        top = []
+        ok = False
+        for p, score in hits:
+            key = f"{p.doc_id}:{p.page}"
+            match = key == q["page"] and bool(rx.search(re.sub(r"\s+", " ", p.text)))
+            ok = ok or match
+            top.append({"page": key, "score": round(score, 3), "match": match})
+        rows.append({"id": q["id"], "kind": "extra", "status": 200, "sec": 0.0, "ok": ok, "prec": None, "sources": [x["page"] for x in top]})
+    return rows
+
+
 def cmd_app(a) -> None:
-    by = _pages(Path(a.data_root))  # needs the OEM page index on disk (stand only, not in git)
-    qs = [q for q in json.load(open(a.qset, encoding="utf-8"))["questions"] if q["kind"] in ("answer", "nodata")]
-    qs = qs[: a.limit] if a.limit else qs
+    data_root = Path(a.data_root)
+    by = _pages(data_root)  # needs the OEM page index on disk (stand only, not in git)
+    all_qs = json.load(open(a.qset, encoding="utf-8"))["questions"]
+    qs = [q for q in all_qs if q["kind"] in ("answer", "nodata")]
+    extra_qs = [q for q in all_qs if q["kind"] == "extra"]
+    if a.limit:
+        qs, extra_qs = qs[:a.limit], []  # a smoke limit is for the slow LLM part; do not silently relabel it as the full set
 
     def run(q):
         c = httpx.Client(base_url=a.app, timeout=240, follow_redirects=True)
@@ -122,15 +164,19 @@ def cmd_app(a) -> None:
 
     with cf.ThreadPoolExecutor(a.parallel) as ex:
         res = list(ex.map(run, qs))
+    extra_res = _extra_eval(data_root, extra_qs)
+    all_res = res + extra_res
     ans = [r for r in res if r["kind"] == "answer"]; nod = [r for r in res if r["kind"] == "nodata"]
     lat = sorted(r["sec"] for r in res)
-    summ = {"app": a.app, "n": len(res), "cite_acc": round(sum(r["ok"] for r in ans) / len(ans), 3),
+    summ = {"app": a.app, "n": len(all_res), "llm_questions": len(res), "extra_questions": len(extra_res),
+            "cite_acc": round(sum(r["ok"] for r in ans) / len(ans), 3),
             "cite_prec": round(statistics.mean(r["prec"] for r in ans), 2),
             "refuse_acc": round(sum(r["ok"] for r in nod) / len(nod), 3) if nod else None,
+            "extra_hit3": round(sum(r["ok"] for r in extra_res) / len(extra_res), 3) if extra_res else None,
             "lat_median": statistics.median(lat), "lat_p90": lat[int(0.9 * (len(lat) - 1) + 0.5)],
             "errors": sum(r["status"] != 200 for r in res), "baseline": {"cite_acc": 0.944, "cite_prec": 0.89, "refuse_acc": 0.75, "lat_median": 11.4}}
     print(json.dumps(summ, ensure_ascii=False))
-    _out("app", {"summary": summ, "results": res}, a.label)
+    _out("app", {"summary": summ, "results": all_res}, a.label)
 
 
 def _wer(ref: str, hyp: str) -> float:

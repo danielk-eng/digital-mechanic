@@ -1,6 +1,6 @@
 {
- "version": 4,
- "note": "Fixed question set for METRICS.md. kind=answer: correct if >=1 cited page matches `must` (regex, page text). kind=nodata: correct if answer refuses (no data in manual) and cites no page with a number claimed as norm. kind=extra: vehicle manual retrieval (agent.extra_hits, own model's manual first), hit@3 = a top-3 page matches `must` and the expected `page`.",
+ "version": 5,
+ "note": "Fixed question set for METRICS.md. kind=answer: correct if >=1 cited page matches `must` (regex, page text). kind=nodata: correct if answer refuses (no data in manual) and cites no page with a number claimed as norm. kind=extra: vehicle manual retrieval (agent.extra_hits, own model manual first), hit@3 = a top-3 page matches `must` and the expected `page`. v5: q15 moved from nodata to extra because the official UAZ Patriot manual is now indexed; q24 accepts page 174, where the lift angle norm is stated.",
  "questions": [
   {
    "id": "q01",
@@ -157,9 +157,10 @@
   {
    "id": "q15",
    "vehicle": "Y815BM178",
-   "session": "S-0153",
-   "kind": "nodata",
-   "q": "Какое давление в шинах УАЗ Патриот?"
+   "kind": "extra",
+   "q": "Какое давление в шинах УАЗ Патриот?",
+   "must": "Давление воздуха в шинах",
+   "page": "EXTRA-UAZPATRIOT-RE:14"
   },
   {
    "id": "q16",
@@ -188,8 +189,8 @@
    "vehicle": "E549YT198",
    "kind": "extra",
    "q": "На какой угол поднимается платформа самосвала?",
-   "must": "угол\\s*\\(?(47|50)",
-   "page": "EXTRA-MAZ555100-RE:175"
+   "must": "(?:\\(50\\s*[—-]\\s*3\\)|угол\\s*50)",
+   "page": "EXTRA-MAZ555100-RE:174"
   },
   {
    "id": "q25",
