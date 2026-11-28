@@ -2,14 +2,15 @@
 
 Репозиторий: https://github.com/danielk-eng/digital-mechanic (публичный, вся история разработки). Стенд: https://digital-mechanic-iikuznitsa.vercel.app, калькулятор: https://digital-mechanic-iikuznitsa.vercel.app/calculator
 
-Веб-чат для механика на посту ТО (работает с телефона). Механик выбирает машину и проверку, агент берёт
+Веб-чат для механика на посту ТО (адаптирован под телефон и desktop: маршруты `/m` и `/desktop`, `/` выбирает shell по ширине экрана). Механик выбирает машину и проверку, агент берёт
 результат из ML-сервиса, объясняет его простыми словами, отвечает на вопросы **только по руководствам на
 двигатель этой машины** со ссылкой на страницу PDF, составляет заявку на дефектовку и отправляет её в ТОиР
 после подтверждения механика. Есть режим главного механика (сводка по парку), голосовой ввод и диалог, фото, 5 языков интерфейса и ответов.
 
-**Стенды:** основной — deb (docker compose + Cloudflare tunnel, адрес в `stand/PUBLIC_URL.txt`, с картинками страниц
-и локальным распознаванием речи); резерв — https://digital-mechanic-iikuznitsa.vercel.app (те же код и индекс,
-встроенные заглушки ML/ТОиР, без PDF-картинок и локального Whisper; серверные STT/TTS — через Cloud.ru/NVIDIA при наличии ключей).
+**Стенды:** production для жюри — https://digital-mechanic-iikuznitsa.vercel.app (те же код и индекс,
+встроенные заглушки ML/ТОиР, серверные STT/TTS через Cloud.ru/NVIDIA при наличии ключей). Стенд deb
+(docker compose + Cloudflare tunnel, актуальный адрес в `../stand/PUBLIC_URL.txt`, когда tunnel запущен) остаётся полным
+локальным вариантом с картинками страниц PDF и локальным распознаванием речи.
 
 ### Что умеет (кратко)
 - **Ответ по шаблону** «Жалоба → Вероятная причина → Что проверить → Как исправить → Источник», кратко/подробно,
@@ -109,7 +110,7 @@ FastAPI (web/app.py) ── журнал, согласие, маскирован
 | `ML_SERVICE_URL`, `TOIR_SERVICE_URL` | Адреса ML-сервиса и ТОиР (F6). Подставить рабочие — больше ничего менять не нужно |
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_API_KEY` | Любой OpenAI-совместимый API. По умолчанию TokenRouter, `deepseek/deepseek-v4.1-flash-1017-free` |
 | `LLM_THINKING` | `off` (по умолчанию) — без «размышлений», ответ в 3–4 раза быстрее (10–20 с) |
-| `CLOUDRU_API_KEY`, `CLOUDRU_TTS` | Резервная LLM GigaChat-4, серверный STT и основная русская озвучка SaluteSpeech |
+| `CLOUDRU_API_KEY`, `CLOUDRU_TTS` | Резервная LLM GigaChat-4, серверный STT и основная серверная озвучка SaluteSpeech для ru/kk/uz/ky |
 | `NVIDIA_API_KEY` | NVIDIA Build: пакетный перевод, резервный TTS Chatterbox (ru) и русский Parakeet STT |
 | `DEEPGRAM_API_KEY` | Дополнительный резерв распознавания речи |
 | `SILERO_ENABLED` | Локальный синтез речи (нужен torch); иначе — Cloud.ru/NVIDIA или синтез браузера |
@@ -131,6 +132,15 @@ NVIDIA Chatterbox gRPC (ru), затем локальный Silero CIS (ru/kk/uz/
 Язык интерфейса выбирается при входе, язык ответов можно задать отдельно в настройках; руководства русские, поэтому
 исходные цитаты и названия документов остаются доступны на русском.
 
+## Desktop/mobile shells и приложения
+`/m` — mobile shell: одна колонка, крупные кнопки, голосовой сценарий в центре. `/desktop` — desktop shell: слева список
+машин с поиском и статусами, в центре чат, справа карточка машины/диагностика; просмотр руководства открывается боковой панелью.
+`/` выбирает shell автоматически по ширине экрана.
+
+Собраны обёртки версии 1.1.0: Android release/debug APK (по умолчанию `/m`), Windows zip и Linux AppImage (по умолчанию `/desktop`).
+Готовые файлы в рабочей копии лежат в `../приложения/`; в пакет сдачи их нужно положить как дополнительные материалы.
+Инструкция, SHA-256 и ограничения — `apps/ПРИЛОЖЕНИЯ.md`. Отдельных сборок iOS и macOS нет: iPhone/iPad используют PWA.
+
 ## База знаний
 Шесть PDF Заказчика (ЯМЗ-236М2 РЭ и РК, ЯМЗ-536 РЭ и РК, ЗМЗ-5234.10 РК, ЗМЗ-40904/40905.10), 1743 страницы, номера страниц — по PDF.
 Соответствие «двигатель → документы» и обозначения документов как в ТЗ — `data/engine_docs.yaml`.
@@ -147,17 +157,17 @@ SQLite `var/app.db` (WAL) и `var/app.log.jsonl`: кто, когда, по ка�
 
 ## Тесты
 ```bash
-PYTHONPATH=src python -m pytest -q     # 397 тестов: контракт с заглушками, политика, поиск и разделы, проверка цифр, агент, голос, веб
+PYTHONPATH=src python -m pytest -q     # 400 тестов: контракт с заглушками, политика, поиск и разделы, проверка цифр, агент, голос, веб, shells
 python scripts/smoke.py <URL>           # вход → машины → диагностика → чат → подсказки → история на любом стенде
 ```
 
 ## Документы
-`docs/REQUIREMENTS_CHECKLIST.md` — соответствие ТЗ, `docs/ОПИСАНИЕ_ПРОДУКТА.md` — описание (1 стр.),
-`docs/ЭКОНОМИКА.md` — стоимость эксплуатации, `docs/152-ФЗ.md` — персональные данные, `docs/ВИДЕО_ПЛАН.md` — сценарий видео.
+`docs/REQUIREMENTS_CHECKLIST.md` — соответствие ТЗ, `docs/ОПИСАНИЕ_ПРОДУКТА.md` — описание для формы сдачи,
+`docs/ЭКОНОМИКА.md` — стоимость эксплуатации, `docs/152-ФЗ.md` — персональные данные, `docs/ВИДЕО_СЦЕНАРИЙ.md` — актуальный сценарий видео, `apps/ПРИЛОЖЕНИЯ.md` — сборки приложений.
 
 ## Сторонние компоненты
 FastAPI, Uvicorn, Pydantic, httpx, openai-python, pypdf, PyYAML, snowballstemmer, nvidia-riva-client (BSD/MIT/Apache-2.0); poppler-utils
 (GPL, вызывается как внешняя программа для текста и картинок страниц); опционально faster-whisper (MIT), Silero TTS
-(лицензия CC BY-NC-SA — только для некоммерческого демо), Opik (Apache-2.0). Внешние API: TokenRouter и Cloud.ru (LLM), Cloud.ru (STT/TTS), NVIDIA Build (перевод/STT/TTS), Deepgram (резервный STT).
+`v5_cis_base_nostress` (MIT; более ранний `v4_ru` CC BY-NC-SA в продукте не используется), Opik (Apache-2.0). Внешние API: TokenRouter и Cloud.ru (LLM), Cloud.ru (STT/TTS), NVIDIA Build (перевод/STT/TTS), Deepgram (резервный STT).
 Интерфейс: шрифт Inter (SIL OFL 1.1, локально в `web/static/fonts/`), иконки Lucide (ISC, подмножество в `web/static/icons.js`).
 Заглушки ML/ТОиР в `vendor/neurodvs_mock/` — материалы Заказчика, в git их нет: `scripts/fetch_task_materials.py` скачивает архив по `TASK_MATERIALS_URL` без изменений кода; в git только наш Dockerfile и `data/vehicle_overlay.json` (модель МАЗ-5340С2 там, где в карточке model=null).

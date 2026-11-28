@@ -75,7 +75,7 @@ tok/s ≈ η · BW / (P_active · bpw/8 + KV_bytes_per_token · L_ctx)
 | Эмбеддинги (опц.) | bge-m3 | MIT | 568M, ~1,1 ГБ | — | гибрид BM25+dense не дал прироста на 18 вопросах (bake-off) |
 | Реранкер (опц.) | bge-reranker-v2-m3 | Apache-2.0 | 568M | — | ухудшил hit@1 (0,94 → 0,83) — не включаем |
 
-**Важно про лицензии.** Silero `v4_ru`/`v5_*_ru` (сейчас в `services/speech`) — **CC BY-NC-SA, коммерция запрещена** [13]. Для продукта нужно перейти на `v5_cis_base_nostress` (MIT) — сделано в `services/speech_gpu`. XTTS-v2 (Coqui Public Model License) и F5-TTS (веса CC-BY-NC) **не подходят** для коммерции.
+**Важно про лицензии.** В продуктовых сервисах `services/speech` и `services/speech_gpu` уже используется Silero `v5_cis_base_nostress` (MIT) [13]. Более ранние Silero `v4_ru`/`v5_*_ru` — **CC BY-NC-SA, коммерция запрещена** — в продукте не применяются. XTTS-v2 (Coqui Public Model License) и F5-TTS (веса CC-BY-NC) **не подходят** для коммерции.
 
 ## 5. Сводная таблица: GPU → модели → скорость → влезает ли
 
